@@ -1,0 +1,21 @@
+# Obrazy dysków i duże binaria
+*.img
+FD14-FloppyEdition/
+FD14-FloppyEdition.zip
+
+# Pliki kompilacji (możliwe do odtworzenia przez make)
+*.o
+*.obj
+*.com
+*.bin
+*.lst
+*.err
+*.log
+
+# Binaria wynikowe (odtwarzalne przez make), ale zachowaj .exe DLL-y i apki testowe
+STEP[0-9]/loader.exe
+STEP1[0-9]/loader.exe
+
+# Python cache
+__pycache__/
+*.pyc
