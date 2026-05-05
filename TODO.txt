@@ -1,0 +1,85 @@
+Win16 / Windows 3.1 clone - plan budowy
+========================================
+
+ETAP 1 - Srodowisko (FreeDOS + Bochs)
+--------------------------------------
+[ ] Stworzyc obraz dysku z FreeDOS
+[ ] Skonfigurowac bochsrc (CPU 386, VGA, dysk FAT16)
+[ ] Dodac AUTOEXEC.BAT ktory uruchamia WIN16.COM
+
+ETAP 1a - Hello World pod DOS (weryfikacja srodowiska)
+-------------------------------------------------------
+[ ] Napisac hello.c - prosty program DOS wypisujacy "Hello, DOS!"
+      (Open Watcom: wcl -l=dos hello.c  -> hello.exe)
+[ ] Skopiowac hello.exe na obraz dysku FreeDOS
+[ ] Uruchomic pod Bochs i sprawdzic wynik
+[ ] Alternatywa: hello.asm w NASM jako .COM (brak zaleznosci od Watcom)
+      nasm -f bin hello.asm -o hello.com
+
+ETAP 2 - WIN16.COM (przełącznik do protected mode)
+----------------------------------------------------
+[ ] Napisac WIN16.COM w NASM
+[ ] Przelaczenie CPU w 386 Protected Mode (GDT, CR0)
+[ ] Proof-of-concept: wydrukuj "Win16 starting..." na VGA text mode
+[ ] Powrot do real mode lub przejscie do ladowania KERNEL
+[ ] Zaladowanie KERNEL.EXE z dysku FAT (podobnie jak stage2.asm w projekcie 13)
+
+ETAP 3 - Minimalny NE Loader
+------------------------------
+[ ] Zrozumiec format NE (New Executable):
+      MZ header -> NE header -> Segment Table -> Resource Table -> Module Table
+[ ] Wczytac naglowek NE i tablice segmentow
+[ ] Zaalokowac pamiec i zaladowac segmenty (code/data)
+[ ] Ustawic selektory w LDT dla kazdego segmentu
+[ ] Wykonac relokacje wewnatrz segmentow
+[ ] Wywolac entry point aplikacji
+
+ETAP 4 - KERNEL (odpowiednik KRNL386.EXE)
+-------------------------------------------
+[ ] GlobalAlloc / GlobalFree / GlobalLock (heap 16-bit)
+[ ] LoadModule - ladowanie NE EXE i DLL
+[ ] GetProcAddress - wyszukiwanie eksportow po nazwie/numerze
+[ ] Kooperatywne przełączanie zadan (Yield, WaitMessage)
+[ ] Tablica zaladowanych modulow (handle -> selector mapping)
+
+ETAP 5 - USER (odpowiednik USER.EXE)
+--------------------------------------
+[ ] RegisterClass - rejestracja klas okien
+[ ] CreateWindow / DestroyWindow
+[ ] ShowWindow / UpdateWindow
+[ ] GetMessage / PeekMessage / TranslateMessage / DispatchMessage
+[ ] DefWindowProc - domyslna obsluga wiadomosci
+[ ] WM_CREATE, WM_PAINT, WM_DESTROY, WM_CLOSE
+[ ] Kolejka wiadomosci (message queue) per task
+[ ] PostMessage / SendMessage
+
+ETAP 6 - GDI (odpowiednik GDI.EXE)
+-------------------------------------
+[ ] Device context (HDC) - GetDC / ReleaseDC / BeginPaint / EndPaint
+[ ] TextOut - wyswietlanie tekstu (VGA font lub VESA)
+[ ] Rectangle / FillRect / FrameRect
+[ ] SetPixel / LineTo / MoveTo
+[ ] Wybor: VGA 80x25 text mode (prostszy) lub VESA 640x480 (pelny)
+
+ETAP 7 - Pierwsza aplikacja testowa
+--------------------------------------
+[ ] Napisac prosta aplikacje Win16 w C (Open Watcom, format NE)
+[ ] WinMain z petla komunikatow
+[ ] Jedno okno z tekstem "Hello, Win16!"
+[ ] Skompilowac przez: wcl -ml -l=windows hello.c
+[ ] Uruchomic pod naszym Win16 na Bochs
+
+NARZEDZIA
+---------
+- Open Watcom (wcl, wlink)  - kompilacja i linkowanie Win16 / NE
+- NASM                      - WIN16.COM, niskopoziomowy PM setup
+- Bochs                     - emulacja z debuggerem (bpint, bpreg)
+- FreeDOS                   - baza DOS
+- wdump / objdump           - inspekcja NE naglowkow
+
+PRZYDATNE REFERENCJE
+---------------------
+- NE format spec: "Microsoft New Executable Format" (EXEFMT.TXT z Win SDK)
+- Open Watcom docs: watcom.org
+- Bochs debugger: bochs.sourceforge.io
+- Istniejacy projekt 13ring3/ - podobny protected mode setup (do podejrzenia)
