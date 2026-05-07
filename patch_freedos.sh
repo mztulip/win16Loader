@@ -1,14 +1,23 @@
 #!/bin/bash
-# patch_freedos.sh - patche x86BOOT.img po swiezym pobraniu/rozpakowaniu
+# patch_freedos.sh - rozpakuj FreeDOS i spatchuj FDCONFIG.SYS
 #
-# Uruchom raz po rozpakowaniu FD14-FloppyEdition.zip:
+# Uruchom raz po sklonowaniu repo:
 #   bash patch_freedos.sh
 
+set -e
+cd "$(dirname "$0")"
+
+ZIP="FD14-FloppyEdition.zip"
 IMG="FD14-FloppyEdition/144m/x86BOOT.img"
 
+# Rozpakuj zip jesli katalog jeszcze nie istnieje
 if [ ! -f "$IMG" ]; then
-    echo "ERROR: $IMG nie istnieje. Rozpakuj najpierw FD14-FloppyEdition.zip"
-    exit 1
+    if [ ! -f "$ZIP" ]; then
+        echo "ERROR: $ZIP nie istnieje"
+        exit 1
+    fi
+    echo "Rozpakowywanie $ZIP..."
+    unzip -q "$ZIP"
 fi
 
 echo "Patchowanie $IMG..."
