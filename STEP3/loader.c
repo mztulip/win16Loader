@@ -210,22 +210,34 @@ int main(void)
 {
     printf("=== NE Loader STEP3 ===\n");
 
-    /* Zaladuj aplikacje NE */
+    /* --- Aplikacja 1: NE w asm --- */
     if (load_ne("NE_APP.EXE") != 0)
         return 1;
 
-    /* Wypelnij zmienne wspoldzielone z asm */
     g_orig_cs = get_cs();
     g_orig_ss = get_ss();
     g_orig_sp = get_sp();
     g_cs_phys = (unsigned long)g_orig_cs << 4;
 
-    printf("CS=0x%04X cs_phys=0x%05lX\n", g_orig_cs, g_cs_phys);
-    printf("Entering PM and calling NE app...\n");
-
-    /* Wejdz w PM i wywolaj aplikacje */
+    printf("Calling ASM NE app...\n");
     pm_call_app();
+    printf("ASM app returned!\n");
 
-    printf("App returned! STEP3 done.\n");
+    /* --- Pauza: czekaj na Enter --- */
+    printf("Press Enter to run C NE app...\n");
+    getchar();
+
+    /* --- Aplikacja 2: NE w C --- */
+    if (load_ne("NE_C_APP.EXE") != 0)
+        return 1;
+
+    g_orig_cs = get_cs();
+    g_orig_ss = get_ss();
+    g_orig_sp = get_sp();
+    g_cs_phys = (unsigned long)g_orig_cs << 4;
+
+    printf("Calling C NE app...\n");
+    pm_call_app();
+    printf("C app returned! STEP3 done.\n");
     return 0;
 }
