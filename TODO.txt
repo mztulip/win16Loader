@@ -36,15 +36,22 @@ ETAP 3 - Minimalny NE Loader jednosegmentowy (STEP3)               [DONE]
     przywrocic DS=SEL_DATA16 po retf zanim uzyje rm_jmp
     Ograniczenie: tylko 1 segment (ne_cs); brak importow; brak relokacji
 
-ETAP 4 - NE Loader wielosegmentowy (STEP4)                         [TODO - NASTEPNY]
+ETAP 4 - NE Loader wielosegmentowy (STEP4)                         [DONE]
 ------------------------------------------
-[ ] Zaladowac wszystkie ne_cseg segmentow (nie tylko CS)
-[ ] Dodac do GDT slot per segment apki (0x40, 0x48, ...)
-[ ] Ustawic DS = selektor segmentu ne_autodata przed wywolaniem
-[ ] Apka testowa: Watcom -ms -zl -l=windows z globalna tablica znakow
-[ ] Weryfikacja: zmienne globalne w apce dzialaja poprawnie
+[x] Zaladowac wszystkie ne_cseg segmentow (petla, _dos_allocmem per seg)
+[x] Dodac SEL_APP_DATA (0x40) do GDT, patchowac z g_app_data_phys
+[x] Ustawic DS=SEL_APP_DATA przed wywolaniem (CS: override dla call_ptr)
+[x] Wyzerowac BSS (bajty za ns_cbseg do ns_minalloc)
+[x] Apka testowa: wlink system windows, 2 segmenty (_TEXT + DGROUP)
+[x] Weryfikacja: zmienne globalne (g_msg, g_attr) w DGROUP dzialaja
+[x] Serial debug: serial.c (outp/inp Watcom), kprintf -> DOS + COM1
+[x] make run-qemu: -serial stdio -> output loggera w terminalu
+    Klucze techniczne:
+    - wlink system windows generuje ne_autodata=2, ne_cs=1, ne_ip=0
+    - alignment=1 (sektory 2-bajtowe) w odroznieniu od STEP3 (alignment=9)
+    - call far [cs:call_ptr] - CS: override konieczny gdy DS=SEL_APP_DATA
 
-ETAP 5 - Import table + minimalne KERNEL.EXE                       [TODO]
+ETAP 5 - Import table + minimalne KERNEL.EXE                       [TODO - NASTEPNY]
 ---------------------------------------------------------
 [ ] Sparsowac tablice importow NE (Module Reference Table + Import Name Table)
 [ ] Zaimplementowac stub KERNEL.EXE jako NE DLL ladowany przed apka
