@@ -3,13 +3,15 @@ PATH   := $(WATCOM)/binl64:$(PATH)
 INCLUDE = $(WATCOM)/h
 NASM    = nasm
 WCL     = wcl
+WCC     = wcc
+WLINK   = wlink
 FDBOOT  = ../FD14-FloppyEdition/144m/x86BOOT.img
 
 export WATCOM INCLUDE PATH
 
 .PHONY: all run run-qemu debug-img clean
 
-all: ne_app.exe loader.exe boot.img
+all: ne_app.exe ne_c_app.exe loader.exe boot.img
 
 # NE app: reczny binarny plik NE (16-bit kod)
 ne_app.exe: ne_app.asm
@@ -27,12 +29,26 @@ pm_call_debug.obj: pm_call.asm
 loader.exe: loader.c pm_call.obj
 	$(WCL) -ml -l=dos -q loader.c pm_call.obj -fe=loader.exe
 
-boot.img: ne_app.exe loader.exe fdauto.bat $(FDBOOT)
+# -------------------------------------------------------
+# NE app w C: C -> obj -> flat binary (COM) -> NE wrapper
+# -------------------------------------------------------
+ne_c_app_code.obj: ne_c_app.c
+	$(WCC) -ms -q -zl -s $< -fo=$@
+
+ne_c_code.com: ne_c_app_code.obj
+	$(WLINK) format dos com name $@ file $< option nodefaultlibs option start=app_entry_ option quiet
+
+ne_c_app.exe: ne_c_wrap.asm ne_c_code.com
+	$(NASM) -f bin ne_c_wrap.asm -o ne_c_app.exe
+
+# -------------------------------------------------------
+boot.img: ne_app.exe ne_c_app.exe loader.exe fdauto.bat $(FDBOOT)
 	cp $(FDBOOT) boot.img
 	mdel  -i boot.img ::fdauto.bat
 	mcopy -i boot.img fdauto.bat  ::fdauto.bat
-	mcopy -i boot.img ne_app.exe  ::ne_app.exe
-	mcopy -i boot.img loader.exe  ::loader.exe
+	mcopy -i boot.img ne_app.exe   ::ne_app.exe
+	mcopy -i boot.img ne_c_app.exe ::ne_c_app.exe
+	mcopy -i boot.img loader.exe   ::loader.exe
 	@echo "[OK] boot.img gotowy"
 
 run: boot.img
@@ -54,4 +70,5 @@ debug-img: ne_app.exe pm_call_debug.obj
 	@echo "[OK] boot.img (DEBUG) gotowy"
 
 clean:
-	rm -f ne_app.exe loader.exe pm_call.obj pm_call_debug.obj boot.img bochs.log qemu.log
+	rm -f ne_app.exe ne_c_app.exe ne_c_app_code.obj ne_c_code.com ne_c_wrap.exe
+	rm -f loader.exe pm_call.obj pm_call_debug.obj boot.img bochs.log qemu.log
