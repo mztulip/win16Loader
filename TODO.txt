@@ -1,73 +1,80 @@
 Win16 / Windows 3.1 clone - plan budowy
 ========================================
 
-ETAP 1 - Srodowisko (FreeDOS + Bochs)
+ETAP 1 - Srodowisko (FreeDOS + Bochs)                              [DONE]
 --------------------------------------
-[ ] Stworzyc obraz dysku z FreeDOS
-[ ] Skonfigurowac bochsrc (CPU 386, VGA, dysk FAT16)
-[ ] Dodac AUTOEXEC.BAT ktory uruchamia WIN16.COM
+[x] Stworzyc obraz dysku z FreeDOS
+[x] Skonfigurowac bochsrc (CPU 386, VGA, dysk FAT16)
+[x] Dodac AUTOEXEC.BAT ktory uruchamia loader
 
-ETAP 1a - Hello World pod DOS (weryfikacja srodowiska)
+ETAP 1a - Hello World pod DOS (weryfikacja srodowiska)             [DONE]
 -------------------------------------------------------
-[ ] Napisac hello.c - prosty program DOS wypisujacy "Hello, DOS!"
-      (Open Watcom: wcl -l=dos hello.c  -> hello.exe)
-[ ] Skopiowac hello.exe na obraz dysku FreeDOS
-[ ] Uruchomic pod Bochs i sprawdzic wynik
-[ ] Alternatywa: hello.asm w NASM jako .COM (brak zaleznosci od Watcom)
-      nasm -f bin hello.asm -o hello.com
+[x] Hello World w NASM jako .COM pod FreeDOS
+[x] Uruchomic pod Bochs i sprawdzic wynik
 
-ETAP 2 - WIN16.COM (przełącznik do protected mode)
+ETAP 2 - Protected mode switcher (STEP2)                           [DONE]
 ----------------------------------------------------
-[ ] Napisac WIN16.COM w NASM
-[ ] Przelaczenie CPU w 386 Protected Mode (GDT, CR0)
-[ ] Proof-of-concept: wydrukuj "Win16 starting..." na VGA text mode
-[ ] Powrot do real mode lub przejscie do ladowania KERNEL
-[ ] Zaladowanie KERNEL.EXE z dysku FAT (podobnie jak stage2.asm w projekcie 13)
+[x] Napisac win16.asm w NASM (.COM)
+[x] Przelaczenie CPU w 386 Protected Mode (GDT, CR0)
+[x] Wydruk "Win16 starting..." na VGA text mode w PM (flat 32-bit)
+[x] Powrot do real mode
+    Kluczowy bug: far jump 16-bit->PM wymaga db 0x66,0xEA (operand-size prefix)
+    Dostep do zmiennych w PM: DS=DATASEG (base=cs_phys) -> [var] = cs_phys+offset
 
-ETAP 3 - Minimalny NE Loader
+ETAP 3 - Minimalny NE Loader jednosegmentowy (STEP3)               [DONE]
 ------------------------------
-[ ] Zrozumiec format NE (New Executable):
-      MZ header -> NE header -> Segment Table -> Resource Table -> Module Table
-[ ] Wczytac naglowek NE i tablice segmentow
-[ ] Zaalokowac pamiec i zaladowac segmenty (code/data)
-[ ] Ustawic selektory w LDT dla kazdego segmentu
-[ ] Wykonac relokacje wewnatrz segmentow
-[ ] Wywolac entry point aplikacji
+[x] Zrozumiec format NE: MZ header -> NE header -> Segment Table -> kod
+[x] Wczytac naglowek NE i tablice segmentow (loader.c w C, Watcom large model)
+[x] Zaalokowac pamiec DOS (_dos_allocmem) i zaladowac segment kodu
+[x] Ustawic selektor GDT dla segmentu kodu apki (SEL_APP_CODE)
+[x] Wywolac entry point przez 16-bit far call (SEL_APP_CODE:ne_ip)
+[x] Powrot do real mode i z powrotem do DOS
+[x] Apka testowa w asm (ne_app.asm) - bezposredni zapis do VGA przez ES=SEL_VGA
+[x] Apka testowa w C (ne_c_app.c) - Watcom small model, #pragma aux vga_putw
+[x] Sekwencyjne uruchamianie obu apek (asm -> Enter -> C)
+    Kluczowy bug: apka moze zniszczyc DS (push cs/pop ds); loader musi
+    przywrocic DS=SEL_DATA16 po retf zanim uzyje rm_jmp
+    Ograniczenie: tylko 1 segment (ne_cs); brak importow; brak relokacji
 
-ETAP 4 - KERNEL (odpowiednik KRNL386.EXE)
--------------------------------------------
-[ ] GlobalAlloc / GlobalFree / GlobalLock (heap 16-bit)
-[ ] LoadModule - ladowanie NE EXE i DLL
-[ ] GetProcAddress - wyszukiwanie eksportow po nazwie/numerze
-[ ] Kooperatywne przełączanie zadan (Yield, WaitMessage)
+ETAP 4 - NE Loader wielosegmentowy (STEP4)                         [TODO - NASTEPNY]
+------------------------------------------
+[ ] Zaladowac wszystkie ne_cseg segmentow (nie tylko CS)
+[ ] Dodac do GDT slot per segment apki (0x40, 0x48, ...)
+[ ] Ustawic DS = selektor segmentu ne_autodata przed wywolaniem
+[ ] Apka testowa: Watcom -ms -zl -l=windows z globalna tablica znakow
+[ ] Weryfikacja: zmienne globalne w apce dzialaja poprawnie
+
+ETAP 5 - Import table + minimalne KERNEL.EXE                       [TODO]
+---------------------------------------------------------
+[ ] Sparsowac tablice importow NE (Module Reference Table + Import Name Table)
+[ ] Zaimplementowac stub KERNEL.EXE jako NE DLL ladowany przed apka
+[ ] GlobalAlloc / GlobalFree / GlobalLock (prosty heap 16-bit)
+[ ] GetModuleHandle / GetProcAddress
 [ ] Tablica zaladowanych modulow (handle -> selector mapping)
+[ ] Apka testowa: wcl -ms -l=windows z importem z KERNEL
 
-ETAP 5 - USER (odpowiednik USER.EXE)
+ETAP 6 - USER.EXE (okna i komunikaty)                              [TODO]
 --------------------------------------
-[ ] RegisterClass - rejestracja klas okien
-[ ] CreateWindow / DestroyWindow
-[ ] ShowWindow / UpdateWindow
+[ ] RegisterClass / UnregisterClass
+[ ] CreateWindow / DestroyWindow / ShowWindow
 [ ] GetMessage / PeekMessage / TranslateMessage / DispatchMessage
-[ ] DefWindowProc - domyslna obsluga wiadomosci
-[ ] WM_CREATE, WM_PAINT, WM_DESTROY, WM_CLOSE
-[ ] Kolejka wiadomosci (message queue) per task
 [ ] PostMessage / SendMessage
+[ ] DefWindowProc (WM_CREATE, WM_PAINT, WM_DESTROY, WM_CLOSE)
+[ ] Kolejka komunikatow per task
 
-ETAP 6 - GDI (odpowiednik GDI.EXE)
+ETAP 7 - GDI.EXE (rysowanie)                                       [TODO]
 -------------------------------------
 [ ] Device context (HDC) - GetDC / ReleaseDC / BeginPaint / EndPaint
-[ ] TextOut - wyswietlanie tekstu (VGA font lub VESA)
-[ ] Rectangle / FillRect / FrameRect
-[ ] SetPixel / LineTo / MoveTo
+[ ] TextOut - wyswietlanie tekstu (VGA 80x25 text mode)
+[ ] Rectangle / FillRect
 [ ] Wybor: VGA 80x25 text mode (prostszy) lub VESA 640x480 (pelny)
 
-ETAP 7 - Pierwsza aplikacja testowa
+ETAP 8 - Pierwsza pelna aplikacja Win16                             [TODO]
 --------------------------------------
-[ ] Napisac prosta aplikacje Win16 w C (Open Watcom, format NE)
-[ ] WinMain z petla komunikatow
-[ ] Jedno okno z tekstem "Hello, Win16!"
-[ ] Skompilowac przez: wcl -ml -l=windows hello.c
-[ ] Uruchomic pod naszym Win16 na Bochs
+[ ] Napisac hello_win.c: WinMain + RegisterClass + CreateWindow + petla GetMessage
+[ ] WM_PAINT: BeginPaint -> TextOut("Hello, Win16!") -> EndPaint
+[ ] Skompilowac przez: wcl -ms -l=windows hello_win.c
+[ ] Uruchomic pod naszym Win16 i pod prawdziwym Windows 3.1
 
 NARZEDZIA
 ---------

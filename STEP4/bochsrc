@@ -1,0 +1,9 @@
+cpu: model=p3_katmai, count=1, ips=10000000
+megs: 16
+romimage:    file=/usr/share/bochs/BIOS-bochs-latest
+vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest.bin
+floppya: 1_44=boot.img, status=inserted
+boot: a
+display_library: x
+log: bochs.log
+logprefix: %t%e%d
