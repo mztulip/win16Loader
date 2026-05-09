@@ -112,7 +112,7 @@ typedef struct {
 #define RELOC_IMPORTORDINAL 1
 
 /* ns_flags bits */
-#define NSRELOC  0x0001   /* segment ma tablice relokacji */
+#define NSRELOC  0x0100   /* segment ma tablice relokacji (bit 8) */
 
 /* ============================================================
  * Tabela exportow zaladowanych DLL
