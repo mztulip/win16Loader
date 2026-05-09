@@ -51,14 +51,25 @@ ETAP 4 - NE Loader wielosegmentowy (STEP4)                         [DONE]
     - alignment=1 (sektory 2-bajtowe) w odroznieniu od STEP3 (alignment=9)
     - call far [cs:call_ptr] - CS: override konieczny gdy DS=SEL_APP_DATA
 
-ETAP 5 - Import table + minimalne KERNEL.EXE                       [TODO - NASTEPNY]
+ETAP 5 - Import table + minimalne KERNEL.EXE                       [DONE]
 ---------------------------------------------------------
-[ ] Sparsowac tablice importow NE (Module Reference Table + Import Name Table)
-[ ] Zaimplementowac stub KERNEL.EXE jako NE DLL ladowany przed apka
-[ ] GlobalAlloc / GlobalFree / GlobalLock (prosty heap 16-bit)
-[ ] GetModuleHandle / GetProcAddress
-[ ] Tablica zaladowanych modulow (handle -> selector mapping)
-[ ] Apka testowa: wcl -ms -l=windows z importem z KERNEL
+[x] Sparsowac tablice relokacji NE (NSRELOC flag, 8-bajtowe rekordy)
+[x] Zaimplementowac KERNEL.EXE jako NE DLL (NASM wrapper + wlink COM)
+[x] parse_entry_table: ordinal -> offset w segmencie kodu DLL
+[x] apply_fixups: IMPORTORDINAL -> patchu 4 bajty (offset:selector) w segmencie
+[x] SEL_KERNEL_CODE (0x48) w GDT patchowany z g_kernel_phys
+[x] kernel.c: OutputDebugString (ordinal 1) - port I/O via #pragma aux
+[x] Apka testowa: wlink import OutputDebugString_ KERNEL.1
+[x] Weryfikacja: dwa wywolania OutputDebugString widoczne na COM1
+    Klucze techniczne:
+    - Rekord relokacji: addr_type(1B) reloc_type(1B) offset(2B) mod(2B) ord(2B)
+    - FAR_PTR (typ 3): patch 4 bajty: off_lo off_hi sel_lo sel_hi
+    - IMPORTORDINAL (typ 1): mod = 1-based index do Module Reference Table
+    - Tablica relokacji: tuz po danych segmentu (fileoff + ns_cbseg)
+    - kernel.c: #pragma aux io_inb/io_outb zamiast conio.h (dziala z -zl)
+    - wlink: "import OutputDebugString_ KERNEL.1" = import by ordinal
+
+ETAP 6 - USER.EXE (okna i komunikaty)                              [TODO - NASTEPNY]
 
 ETAP 6 - USER.EXE (okna i komunikaty)                              [TODO]
 --------------------------------------
