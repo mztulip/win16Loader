@@ -69,36 +69,83 @@ ETAP 5 - Import table + minimalne KERNEL.EXE                       [DONE]
     - kernel.c: #pragma aux io_inb/io_outb zamiast conio.h (dziala z -zl)
     - wlink: "import OutputDebugString_ KERNEL.1" = import by ordinal
 
-ETAP 6 - Segmenty danych DLL + fixupy INTERNALREF (STEP6)         [TODO - NASTEPNY]
+ETAP 6 - Segmenty danych DLL + fixupy INTERNALREF (STEP6)         [DONE]
 ---------------------------------------------------------------------------
 Cel: DLL moga byc pisane w C z wlasnymi zmiennymi globalnymi (DGROUP).
-     Prolog Watcom ustawia DS=wlasny DGROUP DLL przez patchowany selektor.
-[ ] load_ne_dll: laduj WSZYSTKIE segmenty DLL w petli (jak load_ne dla apki)
-    - Identyfikuj ns_flags & 0x0002 (DATA) -> segment danych
-    - Zarezerwuj selektor GDT dla kodu I osobny dla danych DLL
-[ ] Dynamiczne przydzielanie selektorow GDT per DLL
-    - Nie hardkodowane 0x48/0x50; tablica: gdt_dll_code[i], gdt_dll_data[i]
-    - Dodac pola selector_code + selector_data do DLL_MODULE
-[ ] apply_fixups: dwa typy relokacji NE
-    - INTERNALREF (reloc_type=0) + SEG16 (addr_type=2):
-      patch 2 bajty na offset = selektor segmentu DLL (target1=nr segmentu)
-      Uzywane przez prolog Watcom: "mov ax, DGROUP_sel" -> wpisuje wlasciwy selektor
-    - IMPORTORDINAL (reloc_type=1) + FAR_PTR (addr_type=3):
-      jak dotychczas - patch 4 bajty: off_lo off_hi sel_lo sel_hi
-[ ] pm_call.asm: gdt_dll_code/data entries dla MAX_MODULES*2 selektorow
-    - patch_gdt uzupelnia baze i limit dla kazdego zaladowanego DLL
-[ ] Weryfikacja: KERNEL.EXE jako DLL z DGROUP (wlink system windows_dll),
-    OutputDebugString uzywa zmiennych globalnych w C, dziala poprawnie
+[x] load_ne_dll: laduje WSZYSTKIE segmenty DLL w petli (kod + dane)
+    - ne_autodata identyfikuje segment danych DLL
+    - Dwa przebiegi: 1) laduj segmenty + przydziel selektory, 2) aplikuj fixupy
+[x] Dynamiczne przydzielanie selektorow GDT per DLL
+    - SEL_DLL_CODE(i) = 0x48 + i*0x10, SEL_DLL_DATA(i) = 0x50 + i*0x10
+    - Pola selector_code + selector_data w DLL_MODULE
+[x] apply_fixups: dwa typy relokacji NE
+    - INTERNALREF (reloc_type=0) + SEG16 (addr_type=2): patch 2 bajty selektora
+    - IMPORTORDINAL (reloc_type=1) + FAR_PTR (addr_type=3): patch 4 bajty
+[x] pm_call.asm: dynamiczna petla patch_gdt przez g_ndll DLL (code+data per DLL)
+    - Globalne tablice: g_dll_code_phys[], g_dll_data_phys[], g_dll_has_data[]
+[x] parse_entry_table: obslugiuje moveable entries (typ 0xFF) poprawnie
+    - format: flags(1B) + CD3F(2B) + seg(1B) + offset(2B) = 6B per entry
+    - poprzednio moveable entries byly pomijane (blad -> Eksporty: 0)
+[x] wlink system windows_dll: brakujace symbole runtime dostarczone przez libstubs.asm
+    - NASM OMF z dokladnymi nazwami: ___win_alloc_flags, __InitRtns, __FiniRtns
+[x] Weryfikacja: KERNEL.EXE (NE DLL, 2 segmenty) + NE_TEST.EXE (3x OutputDebugString)
+    - Wszystkie 3 wywolania OutputDebugString widoczne na COM1
     Klucze techniczne:
-    - INTERNALREF: target1=nr segmentu (1-based), target2=offset (zwykle 0)
-    - SEG16 (addr_type=2): patch 2 bajty selektora pod adresem offset w seg
-    - Prolog Watcom DLL: "push ds; mov ax, 0; mov ds, ax; ..." (0=placeholder)
-    - Watcom wcc -ms -zl -> wlink system windows_dll -> generuje INTERNALREF fixupy
-    - Kazda funkcja eksportowana ma prolog ustawiajacy DS i epilog przywracajacy
+    - wlink export: "export SYMBOL.N" (nie "ordinal=N")
+    - __pascal convention: nazwa symbolu uppercase bez trailing underscore (OUTPUTDEBUGSTRING)
+    - "import OUTPUTDEBUGSTRING KERNEL.1" (nie OutputDebugString_ KERNEL.1)
+    - Watcom -ms DLL nie generuje INTERNALREF fixupow (zaklada DS=DGROUP stale)
+    - DS nie jest przelaczany przy wywolaniu DLL -> g_call_count trafia do zlego segmentu
+    Znane ograniczenie: brak thunku DS (INT 3F) -> DLL zaklada DS=DGROUP, ale
+    podczas wywolania DS wskazuje na segment danych apki; fixup INTERNALREF
+    zaimplementowany w loaderze, ale nie testowany (Watcom -ms nie generuje)
 
-ETAP 7 - USER.EXE w C (okna i kolejka komunikatow)                 [TODO]
+ETAP 7 - INT 3F DLL thunk: przelaczanie DS przy wywolaniach DLL   [DONE]
 --------------------------------------------------------------------------
-Cel: USER.EXE napisany w C dzieki obsludze DLL data segment z ETAP 6.
+Cel: poprawne przelaczanie DS=DGROUP przy kazym wywolaniu funkcji DLL,
+     tak jak w oryginalnym Windows 3.x KERNEL (przez INT 3F).
+Mechanizm:
+  - Kazdy eksport DLL ma 5-bajtowy thunk: CD 3F, dll_idx, off_lo, off_hi
+  - Thunki siedza w osobnym bloku DOS memory z wlasnym selektorem GDT (SEL_THUNK=0x88)
+  - IMPORTORDINAL patchuje far call do SEL_THUNK:thunk_off (zamiast surowego offsetu)
+  - INT 3F handler w PM (SEL_CODE16, wektor 0x3F w IDT):
+      1. Czyta dll_idx i func_off z thunku (przez ES = CS thunku)
+      2. Zapisuje do int3f_stack[depth]: DS callera, orig_ret_ip, orig_ret_cs
+      3. Patchuje IRET frame: CS=SEL_DLL_CODE(dll_idx), IP=func_off
+      4. Patchuje adres powrotu w ramce callera -> int3f_trampoline:SEL_CODE16
+      5. Ustawia DS = SEL_DLL_DATA(dll_idx)
+      6. IRET -> laduje do funkcji DLL z DS=DGROUP
+  - int3f_trampoline (wywolany przez RETF n z funkcji DLL):
+      1. Dekrementuje depth, czyta int3f_stack[depth]
+      2. Przywraca DS callera
+      3. JMP FAR do orig_ret_ip:orig_ret_cs -> powrot do callera
+[x] loader.c: alokacja bloku thunkow (_dos_allocmem), emit_thunk(dll_idx, func_off)
+    - g_thunk_phys, g_thunk_size jako globale dla pm_call.asm
+    - apply_fixups IMPORTORDINAL: patch z SEL_THUNK:thunk_off (nie SEL_DLL_CODE:func_off)
+[x] loader.c: alokacja IDT (64 wpisy * 8 B = 512 B), g_idt_phys
+    - Wpisy 0x00-0x3E: null descriptor (P=0)
+    - Wpis 0x3F: 16-bit interrupt gate -> int3f_handler w SEL_CODE16
+[x] pm_call.asm: nowy selektor GDT SEL_THUNK (0x88), patchowany z g_thunk_phys
+[x] pm_call.asm: LIDT przed LGDT, idtr_int3f patchowany z g_idt_phys
+[x] pm_call.asm: int3f_handler (16-bit PM, w _TEXT):
+    - push bp/ax/bx/cx/si/es; czyta thunk przez ES; patchuje IRET frame i ret addr
+[x] pm_call.asm: int3f_trampoline + int3f_stack[8] (8 poziomow zagniezdzen)
+[x] Weryfikacja: OutputDebugString 3x z poprawnym DS (KERNEL's DGROUP)
+    - DS przelaczany przez int3f_handler na SEL_DLL_DATA przed wejsciem do DLL
+    - Trampolina przywraca DS callera po powrocie z DLL (znak 'T' na COM1)
+    - Wszystkie 3 wywolania OutputDebugString widoczne na COM1
+    Klucze techniczne:
+    - Przy RETF n CPU: pop IP, pop CS, SP+=n -> thunk czysci argi za nas, nic extra
+    - int3f_stack musi byc LIFO (glebokosc 8 = wystarczy dla zagniezdzen DLL->DLL)
+    - FLAGS z INT 3F maja IF=0 (CPU wylacza przerwania); IRET przywroci IF
+    - IDT base = g_idt_phys (DOS _dos_allocmem, osobny blok od kodu)
+    - SS:SEL_DATA16 ma ten sam base co CS:SEL_CODE16 -> SS: override do zapisu w handlerze
+    - KERNEL.EXE sam ma 3 IMPORTORDINAL fixupy (ordinals 3,4,113) od wlink windows_dll
+      runtime -> ignorujemy (nie sa wywolywane w naszym tescie)
+
+ETAP 8 - USER.EXE w C (okna i kolejka komunikatow)                 [TODO]
+--------------------------------------------------------------------------
+Cel: USER.EXE napisany w C dzieki obsludze DLL data segment z ETAP 6+7.
 [ ] user.c: wcc -ms -zl + wlink system windows_dll
 [ ] RegisterClass(WNDCLASS *wc): zapisz WndProc far ptr w globals
 [ ] CreateWindow(cls, title, x, y, w, h): allokuj okno, inicjuj kolejke
@@ -113,7 +160,7 @@ Cel: USER.EXE napisany w C dzieki obsludze DLL data segment z ETAP 6.
 [ ] Apka testowa: importuje USER + KERNEL; WndProc obsluguje WM_PAINT/WM_DESTROY
 [ ] Kolejka komunikatow: WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT
 
-ETAP 8 - GDI.EXE (rysowanie na VGA)                                [TODO]
+ETAP 9 - GDI.EXE (rysowanie na VGA)                                [TODO]
 --------------------------------------------------------------------------
 [ ] gdi.c: wcc -ms -zl + wlink system windows_dll
 [ ] TextOut(hdc, x, y, str_far, count): VGA text mode 80x25 (ES=SEL_VGA)
@@ -121,7 +168,7 @@ ETAP 8 - GDI.EXE (rysowanie na VGA)                                [TODO]
 [ ] Device context (HDC): minimalna struktura (wskaznik na VGA)
 [ ] GetDC(hwnd) / ReleaseDC(hwnd, hdc)
 
-ETAP 9 - Pierwsza pelna aplikacja Win16                             [TODO]
+ETAP 10 - Pierwsza pelna aplikacja Win16                            [TODO]
 --------------------------------------------------------------------------
 [ ] Napisac hello_win.c: WinMain + RegisterClass + CreateWindow + petla GetMessage
 [ ] WM_PAINT: BeginPaint -> TextOut("Hello, Win16!") -> EndPaint
