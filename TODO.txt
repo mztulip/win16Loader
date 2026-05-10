@@ -69,30 +69,65 @@ ETAP 5 - Import table + minimalne KERNEL.EXE                       [DONE]
     - kernel.c: #pragma aux io_inb/io_outb zamiast conio.h (dziala z -zl)
     - wlink: "import OutputDebugString_ KERNEL.1" = import by ordinal
 
-ETAP 6 - USER.EXE (okna i komunikaty)                              [TODO - NASTEPNY]
+ETAP 6 - Segmenty danych DLL + fixupy INTERNALREF (STEP6)         [TODO - NASTEPNY]
+---------------------------------------------------------------------------
+Cel: DLL moga byc pisane w C z wlasnymi zmiennymi globalnymi (DGROUP).
+     Prolog Watcom ustawia DS=wlasny DGROUP DLL przez patchowany selektor.
+[ ] load_ne_dll: laduj WSZYSTKIE segmenty DLL w petli (jak load_ne dla apki)
+    - Identyfikuj ns_flags & 0x0002 (DATA) -> segment danych
+    - Zarezerwuj selektor GDT dla kodu I osobny dla danych DLL
+[ ] Dynamiczne przydzielanie selektorow GDT per DLL
+    - Nie hardkodowane 0x48/0x50; tablica: gdt_dll_code[i], gdt_dll_data[i]
+    - Dodac pola selector_code + selector_data do DLL_MODULE
+[ ] apply_fixups: dwa typy relokacji NE
+    - INTERNALREF (reloc_type=0) + SEG16 (addr_type=2):
+      patch 2 bajty na offset = selektor segmentu DLL (target1=nr segmentu)
+      Uzywane przez prolog Watcom: "mov ax, DGROUP_sel" -> wpisuje wlasciwy selektor
+    - IMPORTORDINAL (reloc_type=1) + FAR_PTR (addr_type=3):
+      jak dotychczas - patch 4 bajty: off_lo off_hi sel_lo sel_hi
+[ ] pm_call.asm: gdt_dll_code/data entries dla MAX_MODULES*2 selektorow
+    - patch_gdt uzupelnia baze i limit dla kazdego zaladowanego DLL
+[ ] Weryfikacja: KERNEL.EXE jako DLL z DGROUP (wlink system windows_dll),
+    OutputDebugString uzywa zmiennych globalnych w C, dziala poprawnie
+    Klucze techniczne:
+    - INTERNALREF: target1=nr segmentu (1-based), target2=offset (zwykle 0)
+    - SEG16 (addr_type=2): patch 2 bajty selektora pod adresem offset w seg
+    - Prolog Watcom DLL: "push ds; mov ax, 0; mov ds, ax; ..." (0=placeholder)
+    - Watcom wcc -ms -zl -> wlink system windows_dll -> generuje INTERNALREF fixupy
+    - Kazda funkcja eksportowana ma prolog ustawiajacy DS i epilog przywracajacy
 
-ETAP 6 - USER.EXE (okna i komunikaty)                              [TODO]
---------------------------------------
-[ ] RegisterClass / UnregisterClass
-[ ] CreateWindow / DestroyWindow / ShowWindow
-[ ] GetMessage / PeekMessage / TranslateMessage / DispatchMessage
-[ ] PostMessage / SendMessage
-[ ] DefWindowProc (WM_CREATE, WM_PAINT, WM_DESTROY, WM_CLOSE)
-[ ] Kolejka komunikatow per task
+ETAP 7 - USER.EXE w C (okna i kolejka komunikatow)                 [TODO]
+--------------------------------------------------------------------------
+Cel: USER.EXE napisany w C dzieki obsludze DLL data segment z ETAP 6.
+[ ] user.c: wcc -ms -zl + wlink system windows_dll
+[ ] RegisterClass(WNDCLASS *wc): zapisz WndProc far ptr w globals
+[ ] CreateWindow(cls, title, x, y, w, h): allokuj okno, inicjuj kolejke
+[ ] ShowWindow(hwnd, nCmdShow): placeholder
+[ ] GetMessage(MSG *msg, hwnd, min, max): pobierz z kolejki / WM_QUIT
+[ ] TranslateMessage(MSG *msg): placeholder (zwraca TRUE)
+[ ] DispatchMessage(MSG *msg): wywolaj WndProc przez far call
+[ ] DefWindowProc(hwnd, msg, wp, lp): obsluga domyslna (zwraca 0)
+[ ] PostQuitMessage(int code): ustaw flage quit
+[ ] BeginPaint(hwnd, PAINTSTRUCT *ps): zwraca HDC=1
+[ ] EndPaint(hwnd, PAINTSTRUCT *ps): zwraca TRUE
+[ ] Apka testowa: importuje USER + KERNEL; WndProc obsluguje WM_PAINT/WM_DESTROY
+[ ] Kolejka komunikatow: WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT
 
-ETAP 7 - GDI.EXE (rysowanie)                                       [TODO]
--------------------------------------
-[ ] Device context (HDC) - GetDC / ReleaseDC / BeginPaint / EndPaint
-[ ] TextOut - wyswietlanie tekstu (VGA 80x25 text mode)
-[ ] Rectangle / FillRect
-[ ] Wybor: VGA 80x25 text mode (prostszy) lub VESA 640x480 (pelny)
+ETAP 8 - GDI.EXE (rysowanie na VGA)                                [TODO]
+--------------------------------------------------------------------------
+[ ] gdi.c: wcc -ms -zl + wlink system windows_dll
+[ ] TextOut(hdc, x, y, str_far, count): VGA text mode 80x25 (ES=SEL_VGA)
+[ ] BeginPaint / EndPaint: mozliwe ze przeniesienie z USER do GDI
+[ ] Device context (HDC): minimalna struktura (wskaznik na VGA)
+[ ] GetDC(hwnd) / ReleaseDC(hwnd, hdc)
 
-ETAP 8 - Pierwsza pelna aplikacja Win16                             [TODO]
---------------------------------------
+ETAP 9 - Pierwsza pelna aplikacja Win16                             [TODO]
+--------------------------------------------------------------------------
 [ ] Napisac hello_win.c: WinMain + RegisterClass + CreateWindow + petla GetMessage
 [ ] WM_PAINT: BeginPaint -> TextOut("Hello, Win16!") -> EndPaint
-[ ] Skompilowac przez: wcl -ms -l=windows hello_win.c
-[ ] Uruchomic pod naszym Win16 i pod prawdziwym Windows 3.1
+[ ] WM_DESTROY: PostQuitMessage(0)
+[ ] Skompilowac: wcl -ms -l=windows hello_win.c (import USER + GDI)
+[ ] Uruchomic pod naszym Win16 i sprawdzic zgodnosc z Win 3.1
 
 NARZEDZIA
 ---------
