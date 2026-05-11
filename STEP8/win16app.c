@@ -1,5 +1,5 @@
 /*
- * win16app.c - STEP8b: GetMessage + DispatchMessage + PostQuitMessage
+ * win16app.c - STEP8c: pelny flow WM_CREATE->WM_PAINT->WM_DESTROY->WM_QUIT
  *
  * Importuje:
  *   OUTPUTDEBUGSTRING z KERNEL (ordinal 1)
@@ -9,18 +9,11 @@
  *   GETMESSAGE        z USER   (ordinal 7)
  *   TRANSLATEMESSAGE  z USER   (ordinal 8)
  *   DISPATCHMESSAGE   z USER   (ordinal 9)
- *
- * Kompilacja:
- *   wcc -ms -q -zl -s win16app.c -fo=win16app.obj
- *   wlink system windows name win16app.exe file win16app.obj
- *         import OUTPUTDEBUGSTRING KERNEL.1
- *         import REGISTERCLASS    USER.1
- *         import CREATEWINDOW     USER.2
- *         import POSTQUITMESSAGE  USER.6
- *         import GETMESSAGE       USER.7
- *         import TRANSLATEMESSAGE USER.8
- *         import DISPATCHMESSAGE  USER.9
- *         option nodefaultlibs option start=app_entry_ option quiet
+ *   SHOWWINDOW        z USER   (ordinal 10)
+ *   UPDATEWINDOW      z USER   (ordinal 11)
+ *   BEGINPAINT        z USER   (ordinal 12)
+ *   ENDPAINT          z USER   (ordinal 13)
+ *   DEFWINDOWPROC     z USER   (ordinal 14)
  */
 
 /* ============================================================
@@ -59,20 +52,36 @@ typedef struct {
     LPARAM lParam;
 } MSG;
 
+typedef struct {
+    unsigned hdc;
+    unsigned fErase;
+    unsigned rcPaint[4];
+    unsigned fRestore;
+    unsigned fIncUpdate;
+} PAINTSTRUCT;
+
 /* ============================================================
  * Importy
  * ============================================================ */
-extern void    __far __pascal OutputDebugString(const char __far *s);
-extern BOOL    __far __pascal RegisterClass(const WNDCLASS __far *wc);
-extern HWND    __far __pascal CreateWindow(
+extern void     __far __pascal OutputDebugString(const char __far *s);
+extern BOOL     __far __pascal RegisterClass(const WNDCLASS __far *wc);
+extern HWND     __far __pascal CreateWindow(
     const char __far *, const char __far *,
     unsigned long, int, int, int, int,
     HWND, unsigned, unsigned, void __far *);
-extern void    __far __pascal PostQuitMessage(int exitCode);
-extern BOOL    __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
-                                          UINT msgMin, UINT msgMax);
-extern BOOL    __far __pascal TranslateMessage(const MSG __far *pmsg);
-extern LRESULT __far __pascal DispatchMessage(const MSG __far *pmsg);
+extern BOOL     __far __pascal PostMessage(HWND hwnd, UINT msg,
+                                            WPARAM wp, LPARAM lp);
+extern void     __far __pascal PostQuitMessage(int exitCode);
+extern BOOL     __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
+                                           UINT msgMin, UINT msgMax);
+extern BOOL     __far __pascal TranslateMessage(const MSG __far *pmsg);
+extern LRESULT  __far __pascal DispatchMessage(const MSG __far *pmsg);
+extern BOOL     __far __pascal ShowWindow(HWND hwnd, int nCmdShow);
+extern BOOL     __far __pascal UpdateWindow(HWND hwnd);
+extern unsigned __far __pascal BeginPaint(HWND hwnd, PAINTSTRUCT __far *ps);
+extern BOOL     __far __pascal EndPaint(HWND hwnd, const PAINTSTRUCT __far *ps);
+extern LRESULT  __far __pascal DefWindowProc(HWND hwnd, UINT msg,
+                                              WPARAM wp, LPARAM lp);
 
 unsigned get_ds(void);
 #pragma aux get_ds = "mov ax, ds" value [ax] modify [ax];
@@ -83,20 +92,35 @@ unsigned get_ds(void);
 static char g_classname[]    = "TestClass";
 static WNDCLASS g_wc;
 
-static char msg_create[] = "STEP8b: WM_CREATE\n";
-static char msg_quit[]   = "STEP8b: PostQuitMessage(0)\n";
-static char msg_done[]   = "STEP8b: GetMessage loop done.\n";
+static char msg_create[]  = "STEP8c: WM_CREATE\n";
+static char msg_paint[]   = "STEP8c: WM_PAINT\n";
+static char msg_destroy[] = "STEP8c: WM_DESTROY\n";
+static char msg_done[]    = "STEP8c: loop done.\n";
 
 /* ============================================================
  * WndProc
+ * WM_CREATE  -> druk na COM1
+ * WM_PAINT   -> BeginPaint/druk/EndPaint, potem PostMessage(WM_DESTROY)
+ * WM_DESTROY -> druk, PostQuitMessage(0)
  * ============================================================ */
 LRESULT __far __pascal WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    PAINTSTRUCT ps;
     (void)wp; (void)lp;
+
     if (msg == WM_CREATE) {
         OutputDebugString(msg_create);
+    } else if (msg == WM_PAINT) {
+        BeginPaint(hwnd, &ps);
+        OutputDebugString(msg_paint);
+        EndPaint(hwnd, &ps);
+        /* Wyslij WM_DESTROY do kolejki - koniec cyklu zycia okna */
+        PostMessage(hwnd, WM_DESTROY, 0, 0L);
+    } else if (msg == WM_DESTROY) {
+        OutputDebugString(msg_destroy);
         PostQuitMessage(0);
-        OutputDebugString(msg_quit);
+    } else {
+        return DefWindowProc(hwnd, msg, wp, lp);
     }
     return 0;
 }
@@ -126,9 +150,10 @@ void __far app_entry(void)
         g_classname, "Test Window",
         0UL, 0, 0, 320, 200,
         0, 0, get_ds(), 0);
-    (void)hwnd;
 
-    /* Petla komunikatow - jak w WinMain */
+    ShowWindow(hwnd, 1);
+    UpdateWindow(hwnd);   /* -> WM_PAINT (synchronicznie) */
+
     while (GetMessage(&msg, 0, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
