@@ -52,6 +52,11 @@ user.exe: user.obj libstubs.obj
 	    export CREATEWINDOW.2 \
 	    export SENDMESSAGE.3 \
 	    export LIBMAIN.4 \
+	    export POSTMESSAGE.5 \
+	    export POSTQUITMESSAGE.6 \
+	    export GETMESSAGE.7 \
+	    export TRANSLATEMESSAGE.8 \
+	    export DISPATCHMESSAGE.9 \
 	    option nodefaultlibs option quiet
 
 # -------------------------------------------------------
@@ -66,8 +71,12 @@ win16app.obj: win16app.c
 win16app.exe: win16app.obj
 	$(WLINK) system windows name $@ file $< \
 	    import OUTPUTDEBUGSTRING KERNEL.1 \
-	    import REGISTERCLASS USER.1 \
-	    import CREATEWINDOW  USER.2 \
+	    import REGISTERCLASS    USER.1 \
+	    import CREATEWINDOW     USER.2 \
+	    import POSTQUITMESSAGE  USER.6 \
+	    import GETMESSAGE       USER.7 \
+	    import TRANSLATEMESSAGE USER.8 \
+	    import DISPATCHMESSAGE  USER.9 \
 	    option nodefaultlibs option start=app_entry_ option quiet
 
 # -------------------------------------------------------

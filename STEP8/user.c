@@ -65,6 +65,7 @@ typedef LRESULT (__far __pascal *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 #define WM_CREATE   0x0001
 #define WM_DESTROY  0x0002
 #define WM_PAINT    0x000F
+#define WM_QUIT     0x0012
 
 typedef struct {
     unsigned          style;
@@ -99,6 +100,82 @@ static struct {
 } g_windows[MAX_WINDOWS];
 
 static unsigned g_next_hwnd = 1;
+
+/* ============================================================
+ * Kolejka komunikatow (ring buffer, jak Windows 3.1)
+ * Jedna globalna kolejka w DGROUP USER.
+ * PostMessage: wstawia (asynchronicznie).
+ * SendMessage: omija kolejke, wywoluje WndProc bezposrednio.
+ * GetMessage:  pobiera z kolejki; FALSE gdy WM_QUIT.
+ * ============================================================ */
+typedef struct {
+    HWND   hwnd;
+    UINT   message;
+    WPARAM wParam;
+    LPARAM lParam;
+} MSG;
+
+#define MSG_QUEUE_SIZE 32
+
+static MSG     g_msg_queue[MSG_QUEUE_SIZE];
+static unsigned g_msg_head = 0;   /* indeks do odczytu */
+static unsigned g_msg_tail = 0;   /* indeks do zapisu  */
+static unsigned g_msg_count = 0;
+
+/* Forward declaration - SendMessage zdefiniowany pozniej */
+LRESULT __far __pascal SendMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+
+/* ============================================================
+ * PostMessage / PostQuitMessage / GetMessage / TranslateMessage / DispatchMessage
+ * ============================================================ */
+BOOL __far __pascal PostMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (g_msg_count >= MSG_QUEUE_SIZE) {
+        serial_puts("USER: queue full!\n");
+        return 0;
+    }
+    g_msg_queue[g_msg_tail].hwnd    = hwnd;
+    g_msg_queue[g_msg_tail].message = msg;
+    g_msg_queue[g_msg_tail].wParam  = wp;
+    g_msg_queue[g_msg_tail].lParam  = lp;
+    g_msg_tail = (g_msg_tail + 1) % MSG_QUEUE_SIZE;
+    g_msg_count++;
+    return 1;
+}
+
+void __far __pascal PostQuitMessage(int exitCode)
+{
+    serial_puts("USER: PostQuitMessage\n");
+    PostMessage(0, WM_QUIT, (WPARAM)exitCode, 0L);
+}
+
+BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
+                                UINT msgMin, UINT msgMax)
+{
+    (void)hwnd; (void)msgMin; (void)msgMax;
+
+    if (g_msg_count == 0) return 1;   /* kolejka pusta: brak WM_QUIT -> TRUE */
+
+    pmsg->hwnd    = g_msg_queue[g_msg_head].hwnd;
+    pmsg->message = g_msg_queue[g_msg_head].message;
+    pmsg->wParam  = g_msg_queue[g_msg_head].wParam;
+    pmsg->lParam  = g_msg_queue[g_msg_head].lParam;
+    g_msg_head = (g_msg_head + 1) % MSG_QUEUE_SIZE;
+    g_msg_count--;
+
+    return (pmsg->message != WM_QUIT) ? 1 : 0;
+}
+
+BOOL __far __pascal TranslateMessage(const MSG __far *pmsg)
+{
+    (void)pmsg;
+    return 1;
+}
+
+LRESULT __far __pascal DispatchMessage(const MSG __far *pmsg)
+{
+    return SendMessage(pmsg->hwnd, pmsg->message, pmsg->wParam, pmsg->lParam);
+}
 
 /* ============================================================
  * Pomocnicze funkcje na far pointerach

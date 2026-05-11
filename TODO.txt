@@ -166,22 +166,23 @@ Kolejka komunikatow (jak Windows 3.1):
   - WM_CREATE, WM_PAINT: wysylane przez SendMessage (synchronicznie, nie przez kolejke)
   - DispatchMessage: szuka WndProc dla msg.hwnd, wywoluje przez far call
 
-ETAP 8a - struktury + RegisterClass + CreateWindow               [TODO]
-  [ ] user.c: wcc -ms -zl + wlink system windows_dll, export per funkcja
-  [ ] Struktury: WNDCLASS, MSG, HWND, wewnetrzna tablica klas (max 8) i okien (max 8)
-  [ ] RegisterClass(WNDCLASS __far *wc): zapisz nazwe klasy + WndProc w tablicy
-  [ ] CreateWindow(...): alokuj HWND, znajdz klase, wywolaj WndProc(WM_CREATE) przez SendMessage
-  [ ] SendMessage: bezposrednie wywolanie WndProc przez far call
-  [ ] Test: apka rejestruje klase, tworzy okno -> WM_CREATE widoczne na COM1
+ETAP 8a - struktury + RegisterClass + CreateWindow               [DONE]
+  [x] user.c: wcc -ms -zl + wlink system windows_dll, export per funkcja
+  [x] Struktury: WNDCLASS, MSG, HWND, wewnetrzna tablica klas (max 8) i okien (max 8)
+  [x] RegisterClass(WNDCLASS __far *wc): zapisz nazwe klasy + WndProc w tablicy
+  [x] CreateWindow(...): alokuj HWND, znajdz klase, wywolaj WndProc(WM_CREATE) przez SendMessage
+  [x] SendMessage: bezposrednie wywolanie WndProc przez far call (DS switch inst_ds)
+  [x] load_ne: 2-przebieg z poprawnymi selektorami (INTERNALREF dla lpfnWndProc)
+  [x] Test: apka rejestruje klase, tworzy okno -> WM_CREATE widoczne na COM1
 
-ETAP 8b - GetMessage + PostMessage + DispatchMessage + PostQuitMessage  [TODO]
-  [ ] Ring buffer MSG w DGROUP USER (head/tail, max 32 wpisy)
-  [ ] PostMessage(hwnd, msg, wp, lp): wstaw do kolejki
-  [ ] PostQuitMessage(int code): PostMessage(NULL, WM_QUIT, code, 0)
-  [ ] GetMessage(&msg, NULL, 0, 0): pobierz z kolejki; zwraca FALSE na WM_QUIT
-  [ ] TranslateMessage: placeholder (zwraca TRUE)
-  [ ] DispatchMessage(&msg): wywolaj WndProc przez far call (SendMessage)
-  [ ] Test: WndProc na WM_CREATE wywoluje PostQuitMessage -> petla GetMessage konczy sie
+ETAP 8b - GetMessage + PostMessage + DispatchMessage + PostQuitMessage  [DONE]
+  [x] Ring buffer MSG w DGROUP USER (head/tail, max 32 wpisy)
+  [x] PostMessage(hwnd, msg, wp, lp): wstaw do kolejki
+  [x] PostQuitMessage(int code): PostMessage(NULL, WM_QUIT, code, 0)
+  [x] GetMessage(&msg, NULL, 0, 0): pobierz z kolejki; zwraca FALSE na WM_QUIT
+  [x] TranslateMessage: placeholder (zwraca TRUE)
+  [x] DispatchMessage(&msg): wywolaj WndProc przez SendMessage
+  [x] Test: WM_CREATE -> PostQuitMessage -> GetMessage zwraca FALSE -> petla konczy sie
 
 ETAP 8c - WM_PAINT + BeginPaint/EndPaint + UpdateWindow          [TODO]
   [ ] UpdateWindow(hwnd): SendMessage(hwnd, WM_PAINT, 0, 0) synchronicznie
