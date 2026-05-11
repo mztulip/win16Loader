@@ -192,21 +192,58 @@ ETAP 8c - WM_PAINT + BeginPaint/EndPaint + UpdateWindow          [DONE]
   [x] ShowWindow(hwnd, nCmdShow): placeholder (zwraca TRUE)
   [x] Test: WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT widoczne na COM1
 
-ETAP 9 - GDI.EXE (rysowanie na VGA)                                [TODO]
+ETAP 9 - VESA framebuffer + czcionka bitmapowa                      [TODO]
 --------------------------------------------------------------------------
-[ ] gdi.c: wcc -ms -zl + wlink system windows_dll
-[ ] TextOut(hdc, x, y, str_far, count): VGA text mode 80x25 (ES=SEL_VGA)
-[ ] BeginPaint / EndPaint: mozliwe ze przeniesienie z USER do GDI
-[ ] Device context (HDC): minimalna struktura (wskaznik na VGA)
-[ ] GetDC(hwnd) / ReleaseDC(hwnd, hdc)
+Cel: wejscie w tryb graficzny VESA 640x480x32bpp przed PM, dostep przez
+     selektor GDT SEL_VESA. Czcionka 8x8 lub 8x16 (np. IBM CP437) zakodowana
+     jako tablica bitow w kodzie loadera/gdi.
+
+ETAP 9a - VESA mode set w real mode (przed PM)                      [TODO]
+  [ ] W loader.c (real mode, przed wejsciem w PM): INT 10h AX=4F02h BX=0x0101
+      (640x480x8bpp) lub BX=0x0111 (640x480x16bpp) lub BX=0x0112 (640x480x24bpp)
+      Preferowany: tryb liniowy (BX |= 0x4000), VESA 2.0
+  [ ] Pobrac LFB (Linear Frame Buffer) adres fizyczny z VESA mode info block
+      (INT 10h AX=4F01h CX=mode_nr -> blok 256B pod es:di, offset 0x28 = phys_base)
+  [ ] Zapisac adres LFB w g_lfb_phys (unsigned long, eksport do pm_call.asm)
+  [ ] pm_call.asm: SEL_VESA (0x90) - 32-bit descriptor (base=g_lfb_phys,
+      limit=640*480*4-1), dostepny w PM16 przez ES=SEL_VESA
+  [ ] Test: po wejsciu w PM narysowac kolorowy prostokat przez ES:offset
+      (weryfikacja ze VESA dziala)
+
+ETAP 9b - czcionka bitmapowa 8x16                                   [TODO]
+  Czcionka: 256 znakow * 16 bajtow = 4096 bajtow (standard VGA ROM font)
+  Kazdy bajt = 1 rzad pikseli (bit 7 = lewy piksel, bit 0 = prawy)
+  [ ] Wyekstrahowac czcionke z BIOS ROM (INT 10h AH=11h AL=30h BH=6 ->
+      ES:BP wskazuje na tablice czcionek 8x16 w BIOS)
+      lub zakodowac statycznie minimalny zestaw ASCII 0x20-0x7E
+  [ ] Zapisac wskaznik/dane czcionki w g_font_ptr (dostepny przez loader)
+  [ ] gdi.c: draw_char(x, y, ch, color) - rysuje 8x16 pikseli przez ES=SEL_VESA
+      petla 16 rzedow: row = font[ch*16+r]; petla 8 bitow: if(row & (0x80>>b)) put_pixel
+
+ETAP 9c - GDI.EXE: TextOut + GetDC/ReleaseDC                       [TODO]
+  [ ] gdi.c: wcc -ms -zl + wlink system windows_dll (dll_idx=2)
+  [ ] Struktura DC w DGROUP GDI:
+        typedef struct { unsigned x, y; unsigned color_fg, color_bg; } DC;
+        tablica DC g_dcs[8]; HDC = indeks+1
+  [ ] GetDC(hwnd): alokuj DC, ustaw x=0 y=0 color=0xFFFFFF, zwroc HDC
+  [ ] ReleaseDC(hwnd, hdc): zwolnij DC
+  [ ] TextOut(hdc, x, y, str __far *, len): dla kazdego znaku wywolaj draw_char
+      x += 8 po kazdym znaku (kursor w pikselach)
+  [ ] BeginPaint/EndPaint: przeniesienie z USER do GDI (GetDC wewnetrznie)
+  [ ] Loader laduje GDI.EXE jako trzeci DLL (dll_idx=2)
+  Klucze techniczne:
+  - SEL_VESA (0x90): 32-bit data descriptor (D/B=1), limit = szerokosc*wysokosc*bpp
+  - W 16-bit PM dostep do SEL_VESA przez ES (lub FS), offset = y*pitch + x*bpp
+  - pitch = szerokosc_ekranu * bytes_per_pixel (np. 640*4 = 2560 dla 32bpp)
+  - draw_char uzywa ES:offset (ES=SEL_VESA), offset = (y+r)*pitch + x*bpp + b_byte
 
 ETAP 10 - Pierwsza pelna aplikacja Win16                            [TODO]
 --------------------------------------------------------------------------
 [ ] Napisac hello_win.c: WinMain + RegisterClass + CreateWindow + petla GetMessage
 [ ] WM_PAINT: BeginPaint -> TextOut("Hello, Win16!") -> EndPaint
 [ ] WM_DESTROY: PostQuitMessage(0)
-[ ] Skompilowac: wcl -ms -l=windows hello_win.c (import USER + GDI)
-[ ] Uruchomic pod naszym Win16 i sprawdzic zgodnosc z Win 3.1
+[ ] Skompilowac: wcc -ms + wlink system windows (import USER + GDI)
+[ ] Uruchomic pod naszym Win16: "Hello, Win16!" widoczne na ekranie graficznym
 
 NARZEDZIA
 ---------
