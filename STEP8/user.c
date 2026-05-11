@@ -297,6 +297,66 @@ HWND __far __pascal CreateWindow(
 }
 
 /* ============================================================
+ * ShowWindow - placeholder
+ * ============================================================ */
+BOOL __far __pascal ShowWindow(HWND hwnd, int nCmdShow)
+{
+    (void)hwnd; (void)nCmdShow;
+    serial_puts("USER: ShowWindow\n");
+    return 1;
+}
+
+/* ============================================================
+ * UpdateWindow - wysyla WM_PAINT synchronicznie (SendMessage)
+ * ============================================================ */
+BOOL __far __pascal UpdateWindow(HWND hwnd)
+{
+    serial_puts("USER: UpdateWindow -> WM_PAINT\n");
+    SendMessage(hwnd, WM_PAINT, 0, 0L);
+    return 1;
+}
+
+/* ============================================================
+ * PAINTSTRUCT - minimalna definicja (hdc + padding)
+ * ============================================================ */
+typedef struct {
+    unsigned hdc;
+    unsigned fErase;
+    unsigned rcPaint[4];   /* left, top, right, bottom */
+    unsigned fRestore;
+    unsigned fIncUpdate;
+} PAINTSTRUCT;
+
+/* ============================================================
+ * BeginPaint - zwraca HDC=1 (placeholder)
+ * ============================================================ */
+unsigned __far __pascal BeginPaint(HWND hwnd, PAINTSTRUCT __far *ps)
+{
+    (void)hwnd;
+    ps->hdc     = 1;
+    ps->fErase  = 0;
+    return 1;   /* HDC = 1 */
+}
+
+/* ============================================================
+ * EndPaint - placeholder
+ * ============================================================ */
+BOOL __far __pascal EndPaint(HWND hwnd, const PAINTSTRUCT __far *ps)
+{
+    (void)hwnd; (void)ps;
+    return 1;
+}
+
+/* ============================================================
+ * DefWindowProc - domyslna obsluga (zwraca 0)
+ * ============================================================ */
+LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    (void)hwnd; (void)msg; (void)wp; (void)lp;
+    return 0;
+}
+
+/* ============================================================
  * LibMain - wymagany przez wlink system windows_dll
  * ============================================================ */
 int __far __pascal LibMain(unsigned hInst, unsigned wData,

@@ -184,13 +184,13 @@ ETAP 8b - GetMessage + PostMessage + DispatchMessage + PostQuitMessage  [DONE]
   [x] DispatchMessage(&msg): wywolaj WndProc przez SendMessage
   [x] Test: WM_CREATE -> PostQuitMessage -> GetMessage zwraca FALSE -> petla konczy sie
 
-ETAP 8c - WM_PAINT + BeginPaint/EndPaint + UpdateWindow          [TODO]
-  [ ] UpdateWindow(hwnd): SendMessage(hwnd, WM_PAINT, 0, 0) synchronicznie
-  [ ] BeginPaint(hwnd, PAINTSTRUCT *ps): zwraca HDC=1 (placeholder)
-  [ ] EndPaint(hwnd, PAINTSTRUCT *ps): zwraca TRUE (placeholder)
-  [ ] DefWindowProc(hwnd, msg, wp, lp): obsluga domyslna (zwraca 0)
-  [ ] ShowWindow(hwnd, nCmdShow): placeholder (zwraca TRUE)
-  [ ] Test: pelny flow WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT na COM1
+ETAP 8c - WM_PAINT + BeginPaint/EndPaint + UpdateWindow          [DONE]
+  [x] UpdateWindow(hwnd): SendMessage(hwnd, WM_PAINT, 0, 0) synchronicznie
+  [x] BeginPaint(hwnd, PAINTSTRUCT *ps): zwraca HDC=1 (placeholder)
+  [x] EndPaint(hwnd, PAINTSTRUCT *ps): zwraca TRUE (placeholder)
+  [x] DefWindowProc(hwnd, msg, wp, lp): obsluga domyslna (zwraca 0)
+  [x] ShowWindow(hwnd, nCmdShow): placeholder (zwraca TRUE)
+  [x] Test: WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT widoczne na COM1
 
 ETAP 9 - GDI.EXE (rysowanie na VGA)                                [TODO]
 --------------------------------------------------------------------------

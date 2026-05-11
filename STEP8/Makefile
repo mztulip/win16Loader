@@ -57,6 +57,11 @@ user.exe: user.obj libstubs.obj
 	    export GETMESSAGE.7 \
 	    export TRANSLATEMESSAGE.8 \
 	    export DISPATCHMESSAGE.9 \
+	    export SHOWWINDOW.10 \
+	    export UPDATEWINDOW.11 \
+	    export BEGINPAINT.12 \
+	    export ENDPAINT.13 \
+	    export DEFWINDOWPROC.14 \
 	    option nodefaultlibs option quiet
 
 # -------------------------------------------------------
@@ -73,10 +78,16 @@ win16app.exe: win16app.obj
 	    import OUTPUTDEBUGSTRING KERNEL.1 \
 	    import REGISTERCLASS    USER.1 \
 	    import CREATEWINDOW     USER.2 \
+	    import POSTMESSAGE      USER.5 \
 	    import POSTQUITMESSAGE  USER.6 \
 	    import GETMESSAGE       USER.7 \
 	    import TRANSLATEMESSAGE USER.8 \
 	    import DISPATCHMESSAGE  USER.9 \
+	    import SHOWWINDOW       USER.10 \
+	    import UPDATEWINDOW     USER.11 \
+	    import BEGINPAINT       USER.12 \
+	    import ENDPAINT         USER.13 \
+	    import DEFWINDOWPROC    USER.14 \
 	    option nodefaultlibs option start=app_entry_ option quiet
 
 # -------------------------------------------------------
