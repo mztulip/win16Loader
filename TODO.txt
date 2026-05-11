@@ -146,19 +146,50 @@ Mechanizm:
 ETAP 8 - USER.EXE w C (okna i kolejka komunikatow)                 [TODO]
 --------------------------------------------------------------------------
 Cel: USER.EXE napisany w C dzieki obsludze DLL data segment z ETAP 6+7.
-[ ] user.c: wcc -ms -zl + wlink system windows_dll
-[ ] RegisterClass(WNDCLASS *wc): zapisz WndProc far ptr w globals
-[ ] CreateWindow(cls, title, x, y, w, h): allokuj okno, inicjuj kolejke
-[ ] ShowWindow(hwnd, nCmdShow): placeholder
-[ ] GetMessage(MSG *msg, hwnd, min, max): pobierz z kolejki / WM_QUIT
-[ ] TranslateMessage(MSG *msg): placeholder (zwraca TRUE)
-[ ] DispatchMessage(MSG *msg): wywolaj WndProc przez far call
-[ ] DefWindowProc(hwnd, msg, wp, lp): obsluga domyslna (zwraca 0)
-[ ] PostQuitMessage(int code): ustaw flage quit
-[ ] BeginPaint(hwnd, PAINTSTRUCT *ps): zwraca HDC=1
-[ ] EndPaint(hwnd, PAINTSTRUCT *ps): zwraca TRUE
-[ ] Apka testowa: importuje USER + KERNEL; WndProc obsluguje WM_PAINT/WM_DESTROY
-[ ] Kolejka komunikatow: WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT
+Loader laduje USER.EXE jako drugi DLL (po KERNEL) przez INT 3F thunk.
+Apka importuje funkcje USER tak samo jak KERNEL:
+  import REGISTERCLASS USER.1
+  import CREATEWINDOW  USER.2
+  ...
+
+Struktury (zgodne z Win 3.1):
+  typedef unsigned short HWND, UINT, WPARAM;
+  typedef unsigned long  LPARAM;
+  typedef struct { HWND hwnd; UINT message; WPARAM wParam; LPARAM lParam; } MSG;
+  typedef struct { WNDPROC lpfnWndProc; const char __far *lpszClassName; ... } WNDCLASS;
+
+Kolejka komunikatow (jak Windows 3.1):
+  - jedna globalna kolejka w DGROUP USER (ring buffer, max 32 wpisy MSG)
+  - PostMessage(hwnd, msg, wp, lp): wstawia do kolejki, wraca natychmiast
+  - SendMessage(hwnd, msg, wp, lp): wywoluje WndProc bezposrednio, czeka na wynik
+  - GetMessage: jesli kolejka pusta -> zwraca FALSE gdy WM_QUIT, inaczej czeka
+  - WM_CREATE, WM_PAINT: wysylane przez SendMessage (synchronicznie, nie przez kolejke)
+  - DispatchMessage: szuka WndProc dla msg.hwnd, wywoluje przez far call
+
+ETAP 8a - struktury + RegisterClass + CreateWindow               [TODO]
+  [ ] user.c: wcc -ms -zl + wlink system windows_dll, export per funkcja
+  [ ] Struktury: WNDCLASS, MSG, HWND, wewnetrzna tablica klas (max 8) i okien (max 8)
+  [ ] RegisterClass(WNDCLASS __far *wc): zapisz nazwe klasy + WndProc w tablicy
+  [ ] CreateWindow(...): alokuj HWND, znajdz klase, wywolaj WndProc(WM_CREATE) przez SendMessage
+  [ ] SendMessage: bezposrednie wywolanie WndProc przez far call
+  [ ] Test: apka rejestruje klase, tworzy okno -> WM_CREATE widoczne na COM1
+
+ETAP 8b - GetMessage + PostMessage + DispatchMessage + PostQuitMessage  [TODO]
+  [ ] Ring buffer MSG w DGROUP USER (head/tail, max 32 wpisy)
+  [ ] PostMessage(hwnd, msg, wp, lp): wstaw do kolejki
+  [ ] PostQuitMessage(int code): PostMessage(NULL, WM_QUIT, code, 0)
+  [ ] GetMessage(&msg, NULL, 0, 0): pobierz z kolejki; zwraca FALSE na WM_QUIT
+  [ ] TranslateMessage: placeholder (zwraca TRUE)
+  [ ] DispatchMessage(&msg): wywolaj WndProc przez far call (SendMessage)
+  [ ] Test: WndProc na WM_CREATE wywoluje PostQuitMessage -> petla GetMessage konczy sie
+
+ETAP 8c - WM_PAINT + BeginPaint/EndPaint + UpdateWindow          [TODO]
+  [ ] UpdateWindow(hwnd): SendMessage(hwnd, WM_PAINT, 0, 0) synchronicznie
+  [ ] BeginPaint(hwnd, PAINTSTRUCT *ps): zwraca HDC=1 (placeholder)
+  [ ] EndPaint(hwnd, PAINTSTRUCT *ps): zwraca TRUE (placeholder)
+  [ ] DefWindowProc(hwnd, msg, wp, lp): obsluga domyslna (zwraca 0)
+  [ ] ShowWindow(hwnd, nCmdShow): placeholder (zwraca TRUE)
+  [ ] Test: pelny flow WM_CREATE -> WM_PAINT -> WM_DESTROY -> WM_QUIT na COM1
 
 ETAP 9 - GDI.EXE (rysowanie na VGA)                                [TODO]
 --------------------------------------------------------------------------
