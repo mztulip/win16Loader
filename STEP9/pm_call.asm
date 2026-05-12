@@ -1,14 +1,17 @@
-; pm_call.asm - PM glue (STEP9a)
+; pm_call.asm - PM glue (STEP9b)
 ;
-; Rozszerzenie STEP8:
-;   - SEL_VESA (0x90): 32-bit descriptor z base=g_lfb_phys (VESA LFB)
-;   - pm32_entry: wypelnia framebuffer zamiast VGA text
-;   - patch_gdt: patchuje gdt_vesa base z _g_lfb_phys
+; Rozszerzenia vs STEP9a:
+;   - extern _g_font_phys: adres fizyczny tablicy fontow 8x16 (z loader.c)
+;   - draw_char_32: rysuje znak 8x16 na LFB (bits 32)
+;   - draw_str_32:  rysuje ciag znakow (bits 32)
+;   - pm32_entry: bialy pasek + granatowy pasek + tekst diagnostyczny
 ;
-; GDT selektory DLL:
-;   DLL i (0-based): code = 0x48 + i*0x10, data = 0x50 + i*0x10
-;   SEL_THUNK = 0x88 (16-bit code, base=g_thunk_phys)
-;   SEL_VESA  = 0x90 (32-bit data, base=g_lfb_phys, limit=1MB)
+; Selektory GDT:
+;   SEL_CODE32=0x08, SEL_DATA32=0x10, SEL_DATASEG=0x18
+;   SEL_CODE16=0x20, SEL_DATA16=0x28
+;   SEL_APP_CODE=0x30, SEL_VGA=0x38, SEL_APP_DATA=0x40
+;   0x48..0x80: DLL code/data (4 DLL max)
+;   SEL_THUNK=0x88, SEL_VESA=0x90
 ;
 ; Kompilacja: nasm -f obj pm_call.asm -o pm_call.obj
 
@@ -22,23 +25,26 @@ SEL_DATA16      equ 0x28
 SEL_APP_CODE    equ 0x30
 SEL_VGA         equ 0x38
 SEL_APP_DATA    equ 0x40
-; 0x48..0x80: DLL code/data (dynamiczne, 4 DLL max)
-SEL_THUNK       equ 0x88   ; segment thunkow INT 3F
-SEL_VESA        equ 0x90   ; VESA LFB (32-bit data, base=g_lfb_phys)
+SEL_THUNK       equ 0x88
+SEL_VESA        equ 0x90
 
-INT3F_MAX_DEPTH equ 8      ; maks. zagniezdzen wywolan DLL
+INT3F_MAX_DEPTH equ 8
 
-; rozmiar framebuffera: 640*480*3 = 921600 = 0xE1000 bajtow
-; zaokraglamy do 1MB (0xFFFFF) - miesci sie w granicy 0xFFFFF (G=0, D/B=1)
-VESA_FB_ROWS    equ 480
-VESA_FB_COLS    equ 640
-VESA_FB_BPP     equ 3       ; bajty na piksel (24bpp RGB)
-VESA_FB_SIZE    equ VESA_FB_ROWS * VESA_FB_COLS * VESA_FB_BPP  ; 921600
+; Parametry ekranu (640x480x24bpp)
+VESA_COLS       equ 640
+VESA_ROWS       equ 480
+VESA_BPP        equ 3          ; bajty na piksel (24bpp)
+VESA_PITCH      equ VESA_COLS * VESA_BPP   ; = 1920
+VESA_FB_SIZE    equ VESA_COLS * VESA_ROWS * VESA_BPP   ; = 921600
+
+; Czcionka: 8x16 (8 pikseli szerokosci, 16 wierszy na znak)
+FONT_W          equ 8
+FONT_H          equ 16
 
 segment _TEXT public class=CODE use16
 
 global pm_call_app_
-global get_int3f_off_         ; unsigned short get_int3f_off(void) - zwraca offset handlera
+global get_int3f_off_
 
 extern _g_app_phys
 extern _g_code_size
@@ -51,24 +57,20 @@ extern _g_app_data_phys
 extern _g_data_size
 extern _g_has_data
 
-; Tablice dla DLL (z loader.c)
-extern _g_dll_code_phys     ; unsigned long[4]
-extern _g_dll_code_size     ; unsigned short[4]
-extern _g_dll_data_phys     ; unsigned long[4]
-extern _g_dll_data_size     ; unsigned short[4]
-extern _g_dll_has_data      ; unsigned short[4]
-extern _g_ndll              ; unsigned short
+extern _g_dll_code_phys
+extern _g_dll_code_size
+extern _g_dll_data_phys
+extern _g_dll_data_size
+extern _g_dll_has_data
+extern _g_ndll
 
-; Thunk / IDT (z loader.c)
-extern _g_thunk_phys        ; unsigned long
-extern _g_thunk_size        ; unsigned short
-extern _g_idt_phys          ; unsigned long
+extern _g_thunk_phys
+extern _g_thunk_size
+extern _g_idt_phys
 
-; VESA (z loader.c)
-extern _g_lfb_phys          ; unsigned long - adres fizyczny LFB
+extern _g_lfb_phys          ; unsigned long - adres LFB VESA
+extern _g_font_phys         ; unsigned long - adres tablicy fontow 8x16
 
-; =====================================================================
-; get_int3f_off_(): zwraca offset int3f_handler w segmencie (dla IDT)
 ; =====================================================================
 get_int3f_off_:
     mov  ax, int3f_handler
@@ -95,7 +97,6 @@ pm_call_app_:
     add  eax, gdt
     mov  [cs:gdtr + 2], eax
 
-    ; Patchuj IDTR: base = g_idt_phys
     mov  eax, [_g_idt_phys]
     mov  [cs:idtr + 2], eax
 
@@ -118,7 +119,6 @@ jmp32_off: dd 0
 
 ; =====================================================================
 patch_gdt:
-    ; --- Stale selektory (loader, PM glue) ---
     mov  eax, [_g_cs_phys]
     mov  [cs:gdt_dataseg + 2], ax
     shr  eax, 16
@@ -137,7 +137,7 @@ patch_gdt:
     mov  [cs:gdt_data16 + 4], al
     mov  [cs:gdt_data16 + 7], ah
 
-    ; --- SEL_APP_CODE ---
+    ; SEL_APP_CODE
     mov  eax, [_g_app_phys]
     mov  [cs:gdt_app_code + 2], ax
     shr  eax, 16
@@ -147,17 +147,17 @@ patch_gdt:
     dec  ax
     mov  [cs:gdt_app_code + 0], ax
 
-    ; --- SEL_VGA ---
+    ; SEL_VGA (patchuj base dla 0xB8000)
     mov  word [cs:gdt_vga + 0], 0x0F9F
     mov  word [cs:gdt_vga + 2], 0x8000
     mov  byte [cs:gdt_vga + 4], 0x0B
     mov  byte [cs:gdt_vga + 7], 0x00
 
-    ; --- rm_jmp segment ---
+    ; rm_jmp segment
     mov  ax, [_g_orig_cs]
     mov  [cs:rm_jmp + 2], ax
 
-    ; --- SEL_APP_DATA ---
+    ; SEL_APP_DATA
     mov  ax, [_g_has_data]
     mov  [cs:local_has_data], ax
     test ax, ax
@@ -170,7 +170,7 @@ patch_gdt:
     mov  word [cs:gdt_app_data + 0], 0xFFFF
 .no_app_data:
 
-    ; --- SEL_THUNK (0x88): segment thunkow ---
+    ; SEL_THUNK
     mov  eax, [_g_thunk_phys]
     mov  [cs:gdt_thunk + 2], ax
     shr  eax, 16
@@ -180,15 +180,14 @@ patch_gdt:
     dec  ax
     mov  [cs:gdt_thunk + 0], ax
 
-    ; --- SEL_VESA (0x90): VESA LFB (32-bit data) ---
-    ; limit juz ustawiony na 0xFFFFF w gdt_vesa (1MB, byte granularity)
+    ; SEL_VESA: base = g_lfb_phys, limit 1MB (0xFFFFF)
     mov  eax, [_g_lfb_phys]
     mov  [cs:gdt_vesa + 2], ax
     shr  eax, 16
     mov  [cs:gdt_vesa + 4], al
     mov  [cs:gdt_vesa + 7], ah
 
-    ; --- DLL GDT entries (petla przez g_ndll DLL) ---
+    ; DLL entries
     xor  si, si
 .dll_patch_loop:
     cmp  si, [_g_ndll]
@@ -245,65 +244,83 @@ patch_gdt:
     inc  si
     jmp  .dll_patch_loop
 .dll_patch_done:
-
     ret
 
+; =====================================================================
+; 32-bit protected mode entry
+; DS = SEL_DATASEG  (loader code/data, dostep do globalnych)
+; FS = SEL_DATA32   (flat 4GB, odczyt fontu z dowoln. adresu fiz.)
+; ES = SEL_VESA     (LFB - zapis pikseli)
+; SS = SEL_DATA32   (stos na 0x9FC00)
 ; =====================================================================
 bits 32
 pm32_entry:
     mov  ax, SEL_DATASEG
     mov  ds, ax
     mov  ax, SEL_DATA32
-    mov  es, ax
     mov  fs, ax
     mov  gs, ax
     mov  ss, ax
     mov  esp, 0x0009FC00
 
-    ; -------------------------------------------------------
-    ; Wypelnij VESA framebuffer (jesli LFB zostal ustawiony)
-    ; SEL_VESA = 32-bit segment z base=g_lfb_phys, limit=1MB
-    ; -------------------------------------------------------
+    ; --- Wypelnij framebuffer (jesli VESA dostepna) ---
     mov  eax, [_g_lfb_phys]
     test eax, eax
-    jz   .skip_vesa
+    jz   .skip_draw
 
     mov  ax, SEL_VESA
-    mov  es, ax                 ; ES:0 = poczatek LFB
+    mov  es, ax                     ; ES:0 = start LFB
 
-    ; Wypelnij caly ekran (640*480*3 = 921600 B) ciemnym granatem
-    ; BGR: B=0x33 G=0x11 R=0x00 -> powtarzajacy sie wzor bajtow: 33 11 00
-    ; Uzywamy rep stosd: wzor 4B dla zachowania ciaglosci BGR
-    ; 4B = 33 11 00 33 (piksel1-B, piksel1-G, piksel1-R, piksel2-B)
-    ; Nastepne 4B: 11 00 33 11 itd.
-    ; To skomplikowane - zamiast tego uzyjmy rep stosb z jednym bajtem
-    ; dla prostoty STEP9a: wypelnij zerem (czarny) + pasek bialy u gory
+    ; 1. Caly ekran: czarny (0x000000)
     xor  edi, edi
     xor  eax, eax
     mov  ecx, VESA_FB_SIZE / 4
     rep  stosd
-    ; ostatnie bajty (VESA_FB_SIZE mod 4 = 921600 mod 4 = 0, brak)
 
-    ; Bialy pasek: pierwsze 20 wierszy (20 * 640 * 3 = 38400 B = 9600 dwords)
+    ; 2. Bialy pasek: wiersze 0..19 (top)
+    ;    24bpp: fill 0xFFFFFFFF (nadpisuje 4 bajty naraz, 3 z nich to RGB piksele)
+    ;    20 wierszy * 640 pikseli * 3 B = 38400 B = 9600 dwordow
     xor  edi, edi
     mov  eax, 0xFFFFFFFF
-    mov  ecx, (VESA_FB_COLS * 20 * VESA_FB_BPP) / 4
+    mov  ecx, (VESA_PITCH * 20) / 4
     rep  stosd
 
-    ; Granatowy pasek: wiersze 21..40 (oddolny gradient wizualny)
-    ; BGR = 33 00 00 (ciemny niebieski)
-    ; Bajty: 33 00 00 33 -> dword little-endian: 0x33000033
-    mov  edi, VESA_FB_COLS * 20 * VESA_FB_BPP
-    mov  eax, 0x33000033
-    mov  ecx, (VESA_FB_COLS * 20 * VESA_FB_BPP) / 4
+    ; 3. Granatowy pasek: wiersze 20..39
+    ;    BGR: B=0x66 G=0x22 R=0x00 -> wzor dword 0x66220066 (4B: 66 22 00 66)
+    ;    (nieidealne wyrownanie 24bpp do 32-bit, ale wizualnie wystarczajace)
+    mov  edi, VESA_PITCH * 20
+    mov  eax, 0x00226600
+    mov  ecx, (VESA_PITCH * 20) / 4
     rep  stosd
 
-    ; Przywroc ES = SEL_DATA32
-    mov  ax, SEL_DATA32
-    mov  es, ax
+    ; --- Rysuj tekst (jesli font dostepny) ---
+    mov  eax, [_g_font_phys]
+    test eax, eax
+    jz   .skip_draw
 
-.skip_vesa:
-    ; Przelacz stos na SEL_DATA16 przed skokiem do 16-bit
+    ; Linia 1: czarny tekst na bialym pasku (y=2, x=10)
+    lea  esi, [str_title]           ; "STEP9b: VESA font OK!"
+    mov  ebx, 10                    ; x = 10 px
+    mov  ecx, 2                     ; y = 2 px (na bialym pasku)
+    mov  edx, 0x00000000            ; kolor: czarny (BGR: B=0 G=0 R=0)
+    call draw_str_32
+
+    ; Linia 2: bialy tekst na granatowym pasku (y=22, x=10)
+    lea  esi, [str_mode]            ; "640x480 24bpp"
+    mov  ebx, 10
+    mov  ecx, 22                    ; y = 22 px (na granatowym pasku)
+    mov  edx, 0x00FFFFFF            ; kolor: bialy
+    call draw_str_32
+
+    ; Linia 3: bialy tekst na czarnym tle (y=50, x=10)
+    lea  esi, [str_font]            ; "8x16 BIOS font"
+    mov  ebx, 10
+    mov  ecx, 50
+    mov  edx, 0x00FFFFFF
+    call draw_str_32
+
+.skip_draw:
+    ; Przelacz na 16-bit
     mov  ax, SEL_DATA16
     mov  ss, ax
     mov  esp, 0x0000FFF0
@@ -311,6 +328,139 @@ pm32_entry:
     db 0xEA
     dd pm16_call_app
     dw SEL_CODE16
+
+; =====================================================================
+; draw_char_32 - rysuje jeden znak 8x16 na LFB
+;
+; Wejscie (registrowe):
+;   AL  = kod ASCII znaku
+;   EBX = x (piksel, lewy rog znaku)
+;   ECX = y (piksel, gorny rog znaku)
+;   EDX = kolor fg (0x00RRGGBB: R=bits[23:16] G=bits[15:8] B=bits[7:0])
+;
+; Uzywa:
+;   DS = SEL_DATASEG  (dostep do _g_font_phys)
+;   ES = SEL_VESA     (zapis do LFB)
+;   FS = SEL_DATA32   (odczyt fontu z fizycznego adresu g_font_phys)
+;
+; Zachowuje: ESI, EDI, EBX, ECX, EDX, EBP
+; Niszczy: EAX
+; =====================================================================
+bits 32
+draw_char_32:
+    push esi
+    push edi
+    push ebx
+    push ecx
+    push edx
+    push ebp
+
+    ; ESI = adres fontu dla znaku: g_font_phys + (char & 0xFF) * 16
+    and  eax, 0xFF
+    shl  eax, 4                     ; char * 16 (16 bajtow na znak)
+    add  eax, [_g_font_phys]        ; + baza fizyczna (dostep przez FS=flat)
+    mov  esi, eax
+
+    ; EDI = offset poczatku znaku w LFB: y * VESA_PITCH + x * 3
+    imul ecx, VESA_PITCH            ; ecx = y * 1920
+    lea  eax, [ebx + ebx*2]        ; eax = x * 3
+    add  ecx, eax
+    mov  edi, ecx                   ; edi = poczatkowy offset w SEL_VESA
+
+    ; EBP = skladowa R koloru (bits[23:16])
+    mov  ebp, edx
+    shr  ebp, 16
+    and  ebp, 0xFF
+
+    ; Petla po wierszach (0..15)
+    xor  ecx, ecx                   ; ecx = row (0..15)
+
+.dc_row:
+    cmp  ecx, FONT_H
+    jge  .dc_done
+
+    ; Bajt fontu dla wiersza 'ecx' (FS=flat -> odczyt z adresu fizycznego)
+    movzx eax, byte [fs:esi + ecx]  ; EAX[7:0] = wzor 8 pikseli
+
+    push ecx                        ; zachowaj numer wiersza
+    push edi                        ; zachowaj offset poczatku wiersza
+
+    ; Petla po kolumnach: bit 7 = lewy piksel, bit 0 = prawy
+    mov  ecx, 7                     ; bit index: 7..0
+
+.dc_col:
+    bt   eax, ecx                   ; testuj bit 'ecx' w EAX
+    jnc  .dc_bg                     ; bit = 0 -> tlo (pomijamy)
+
+    ; Rysuj piksel fg: zapis B, G, R do [ES:EDI]
+    mov  [es:edi], dl               ; B = kolor & 0xFF
+    mov  [es:edi+1], dh             ; G = (kolor >> 8) & 0xFF
+    push eax
+    mov  eax, ebp                   ; EBP = R = (kolor >> 16) & 0xFF
+    mov  [es:edi+2], al
+    pop  eax
+
+.dc_bg:
+    add  edi, VESA_BPP              ; nastepny piksel (3 bajty)
+    dec  ecx
+    jns  .dc_col                    ; powtarzaj dopoki ecx >= 0
+
+    pop  edi                        ; przywroc offset poczatku wiersza
+    pop  ecx                        ; przywroc numer wiersza
+    add  edi, VESA_PITCH            ; przejdz do nastepnego wiersza
+    inc  ecx
+    jmp  .dc_row
+
+.dc_done:
+    pop  ebp
+    pop  edx
+    pop  ecx
+    pop  ebx
+    pop  edi
+    pop  esi
+    ret
+
+; =====================================================================
+; draw_str_32 - rysuje null-terminated string
+;
+; Wejscie:
+;   ESI = wskaznik do stringa (DS = SEL_DATASEG)
+;   EBX = x startowe (piksel)
+;   ECX = y (piksel)
+;   EDX = kolor fg
+;
+; Zachowuje: ESI, EBX, ECX, EDX
+; =====================================================================
+bits 32
+draw_str_32:
+    push esi
+    push ebx
+    push ecx
+    push edx
+
+.ds_loop:
+    movzx eax, byte [esi]           ; AL = kolejny znak
+    test  al, al
+    jz    .ds_done
+
+    call  draw_char_32              ; AL=char, EBX=x, ECX=y, EDX=color
+    add   ebx, FONT_W               ; przesuniecie x o szerokosc znaku (8px)
+    inc   esi
+    jmp   .ds_loop
+
+.ds_done:
+    pop  edx
+    pop  ecx
+    pop  ebx
+    pop  esi
+    ret
+
+; =====================================================================
+; Stringi diagnostyczne (w segmencie kodu, dostepne przez DS=DATASEG)
+; =====================================================================
+str_title   db "STEP9b: VESA font OK!", 0
+str_mode    db "640x480  24bpp  BGR", 0
+str_font    db "8x16 BIOS font  char test: AaBbCc", 0
 
 ; =====================================================================
 bits 16
@@ -332,7 +482,6 @@ pm16_call_app:
 .call_app:
     call far [cs:call_ptr]
 
-    ; DEBUG: wyslij 'A' na COM1 po powrocie apki
     push ax
     push dx
 .dbg_app:
@@ -357,7 +506,6 @@ pm16_call_app:
 
 ; =====================================================================
 rm_real:
-    ; DEBUG: wyslij 'R' na COM1
     push ax
     push dx
 .dbg_rm:
@@ -377,7 +525,6 @@ rm_real:
     mov  sp, [saved_sp]
     mov  ax, [saved_ds]
     mov  ds, ax
-    ; DEBUG: wyslij 'F' (przed retf)
     push ax
     push dx
 .dbg_retf:
@@ -405,21 +552,19 @@ int3f_handler:
     push si
     push es
 
-    ; --- Czytaj dane thunku przez ES=SEL_THUNK ---
-    mov  si, [bp+2]             ; si = IP_after_CD3F
-    mov  bx, [bp+4]             ; bx = SEL_THUNK
+    mov  si, [bp+2]
+    mov  bx, [bp+4]
     mov  es, bx
-    mov  bl, byte [es:si]       ; bl = dll_idx (0-based)
+    mov  bl, byte [es:si]
     xor  bh, bh
-    mov  si, [es:si + 1]        ; si = func_off w DLL code seg
+    mov  si, [es:si + 1]
 
-    ; --- Oblicz selektory DLL ---
     mov  ax, bx
     shl  ax, 4
-    add  ax, 0x48               ; ax = SEL_DLL_CODE(dll_idx)
+    add  ax, 0x48
     mov  cx, bx
     shl  cx, 4
-    add  cx, 0x50               ; cx = SEL_DLL_DATA(dll_idx)
+    add  cx, 0x50
 
     push ax
     push cx
@@ -429,7 +574,7 @@ int3f_handler:
     shl  bx, 1
     mov  cx, bx
     shl  cx, 1
-    add  bx, cx                 ; bx = depth * 6
+    add  bx, cx
 
     mov  [ss:int3f_stack + bx + 0], ds
     mov  cx, [bp+8]
@@ -439,16 +584,16 @@ int3f_handler:
 
     inc  word [ss:int3f_depth]
 
-    pop  cx                     ; cx = DATA_SEL
-    pop  ax                     ; ax = CODE_SEL
+    pop  cx
+    pop  ax
 
-    mov  [bp+2], si             ; IP = func_off
-    mov  [bp+4], ax             ; CS = SEL_DLL_CODE
+    mov  [bp+2], si
+    mov  [bp+4], ax
 
     mov  word [bp+8],  int3f_trampoline
     mov  word [bp+10], SEL_CODE16
 
-    mov  ds, cx                 ; DS = SEL_DLL_DATA
+    mov  ds, cx
 
     pop  es
     pop  si
@@ -473,12 +618,12 @@ int3f_trampoline:
     shl  bx, 1
     mov  cx, bx
     shl  cx, 1
-    add  bx, cx             ; bx = depth * 6
+    add  bx, cx
 
-    mov  cx, [ss:int3f_stack + bx + 0]   ; cx = saved_ds
-    mov  ax, [ss:int3f_stack + bx + 2]   ; ax = orig_ret_ip
+    mov  cx, [ss:int3f_stack + bx + 0]
+    mov  ax, [ss:int3f_stack + bx + 2]
     mov  [ss:tramp_ret_ip], ax
-    mov  ax, [ss:int3f_stack + bx + 4]   ; ax = orig_ret_cs
+    mov  ax, [ss:int3f_stack + bx + 4]
     mov  [ss:tramp_ret_cs], ax
     mov  [ss:tramp_saved_ds], cx
 
@@ -486,7 +631,6 @@ int3f_trampoline:
     pop  bx
     pop  ax
 
-    ; DEBUG: wyslij 'T' na COM1 przed JMP FAR
     push ax
     push dx
 .dbg_tramp:
@@ -503,16 +647,16 @@ int3f_trampoline:
     mov  cx, [ss:tramp_saved_ds]
     mov  ds, cx
 
-    db   0x2E, 0xFF, 0x2E  ; CS: JMP FAR [disp16]
+    db   0x2E, 0xFF, 0x2E
     dw   tramp_ret_ip
 
-; Dane dla trampoline
 tramp_ret_ip:   dw 0
 tramp_ret_cs:   dw 0
 tramp_saved_ds: dw 0
 
 ; =====================================================================
-pm_msg          db "STEP9a PM: VESA LFB fill...", 0
+; Dane
+; =====================================================================
 saved_ss        dw 0
 saved_sp        dw 0
 saved_ds        dw 0
@@ -522,7 +666,6 @@ call_ptr        dw 0, 0
 rm_jmp          dw rm_real
                 dw 0
 
-; INT 3F save stack: INT3F_MAX_DEPTH wpisow po 6 bajtow (ds, ret_ip, ret_cs)
 int3f_depth     dw 0
 int3f_stack     times INT3F_MAX_DEPTH * 6  db 0
 
@@ -531,39 +674,39 @@ align 8
 gdt:
     dq 0                    ; 0x00 null
 
-gdt_code32:                 ; 0x08
+gdt_code32:                 ; 0x08 - 32-bit flat code (base=0, limit=4GB)
     dw 0xFFFF, 0x0000
     db 0x00, 10011010b, 11001111b, 0x00
 
-gdt_data32:                 ; 0x10
+gdt_data32:                 ; 0x10 - 32-bit flat data (base=0, limit=4GB)
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 11001111b, 0x00
 
-gdt_dataseg:                ; 0x18
+gdt_dataseg:                ; 0x18 - 32-bit data, base=g_cs_phys, limit=64KB
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 01000000b, 0x00
 
-gdt_code16:                 ; 0x20
+gdt_code16:                 ; 0x20 - 16-bit code, base=g_cs_phys
     dw 0xFFFF, 0x0000
     db 0x00, 10011010b, 00000000b, 0x00
 
-gdt_data16:                 ; 0x28
+gdt_data16:                 ; 0x28 - 16-bit data, base=g_cs_phys
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 00000000b, 0x00
 
-gdt_app_code:               ; 0x30
+gdt_app_code:               ; 0x30 - 16-bit code, base=g_app_phys
     dw 0xFFFF, 0x0000
     db 0x00, 10011010b, 00000000b, 0x00
 
-gdt_vga:                    ; 0x38
+gdt_vga:                    ; 0x38 - VGA text buffer (patchowany)
     dw 0x0000, 0x0000
     db 0x00, 10010010b, 00000000b, 0x00
 
-gdt_app_data:               ; 0x40
+gdt_app_data:               ; 0x40 - 16-bit data, base=g_app_data_phys
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 00000000b, 0x00
 
-; DLL sloty (4 DLL max, kazdy: code + data = 2 x 8 bajtow)
+; DLL sloty (4 DLL max)
 gdt_dll0_code:              ; 0x48
     dw 0xFFFF, 0x0000
     db 0x00, 10011010b, 00000000b, 0x00
@@ -598,10 +741,10 @@ gdt_thunk:                  ; 0x88 SEL_THUNK (16-bit code, base=g_thunk_phys)
 
 gdt_vesa:                   ; 0x90 SEL_VESA (32-bit data, base=g_lfb_phys, limit=1MB)
     dw 0xFFFF, 0x0000       ; limit[15:0] = 0xFFFF
-    db 0x00                 ; base[23:16] = 0 (patchowane w patch_gdt)
-    db 10010010b            ; P=1 DPL=0 S=1 E=0 W=1 A=0 (data r/w)
-    db 01001111b            ; G=0 D/B=1 L=0 AVL=0 limit[19:16]=F -> limit=0xFFFFF=1MB
-    db 0x00                 ; base[31:24] = 0 (patchowane w patch_gdt)
+    db 0x00                 ; base[23:16] (patchowane w patch_gdt)
+    db 10010010b            ; P=1 DPL=0 S=1 E=0 W=1 (data r/w)
+    db 01001111b            ; G=0 D/B=1 L=0 AVL=0 limit[19:16]=F => limit=0xFFFFF=1MB
+    db 0x00                 ; base[31:24] (patchowane w patch_gdt)
 
 gdt_end:
 
@@ -610,5 +753,5 @@ gdtr:
     dd 0
 
 idtr:
-    dw 64 * 8 - 1           ; limit = 511 (64 wpisow)
-    dd 0                     ; base = g_idt_phys (patchowane w pm_call_app_)
+    dw 64 * 8 - 1
+    dd 0

@@ -132,6 +132,7 @@ typedef struct {
  * ============================================================ */
 unsigned long  g_lfb_phys   = 0;   /* eksport do pm_call.asm */
 unsigned short g_vesa_pitch = 0;
+unsigned long  g_font_phys  = 0;   /* adres fizyczny tablicy fontow 8x16 (256*16 B) */
 
 static void vesa_init(void)
 {
@@ -181,6 +182,54 @@ static void vesa_init(void)
     }
     kprintf("VESA: tryb 0x%04X ustawiony, LFB=0x%08lX pitch=%u\n",
             mode, g_lfb_phys, g_vesa_pitch);
+}
+
+/* ============================================================
+ * Font BIOS 8x16
+ * Watcom WORDREGS nie ma pola 'bp' wiec uzywamy pragma aux
+ * do wywolania INT 10h i powrotu ES:BP jako DX:AX.
+ * ============================================================ */
+
+/* INT 10h AH=11h AL=30h BH=6 -> zwraca (ES << 16) | BP
+ * INT 10h modyfikuje BP i moze modyfikowac SI/DI - recznie zapisujemy/przywracamy.
+ * Nie kopiujemy fontu: SEL_DATA32 (flat) pokrywa ROM BIOS pod adresem fizycznym. */
+static unsigned long font_bios_get_ptr(void);
+#pragma aux font_bios_get_ptr = \
+    "push si"         \
+    "push di"         \
+    "push bp"         \
+    "mov ax, 0x1130"  \
+    "mov bh, 6"       \
+    "int 0x10"        \
+    "mov bx, bp"      \
+    "pop bp"          \
+    "pop di"          \
+    "pop si"          \
+    "mov dx, es"      \
+    "mov ax, bx"      \
+    value [dx ax]     \
+    modify [ax bx cx dx es];
+
+static void font_init(void)
+{
+    unsigned long  ptr;
+    unsigned short font_es, font_off;
+
+    ptr      = font_bios_get_ptr();
+    font_es  = (unsigned short)(ptr >> 16);
+    font_off = (unsigned short)(ptr & 0xFFFF);
+
+    kprintf("Font ROM: ES=0x%04X off=0x%04X\n", font_es, font_off);
+
+    if (font_es == 0 && font_off == 0) {
+        kprintf("Font: BIOS nie zwrocil wskaznika\n");
+        return;
+    }
+
+    /* Uzywamy adresu ROM bezposrednio - nie kopiujemy.
+     * W PM, FS=SEL_DATA32 (flat, 4GB) pokrywa ROM BIOS. */
+    g_font_phys = ((unsigned long)font_es << 4) + (unsigned long)font_off;
+    kprintf("Font: phys=0x%06lX (ROM BIOS, bez kopiowania)\n", g_font_phys);
 }
 
 /* ============================================================
@@ -754,11 +803,15 @@ err:
 int main(void)
 {
     serial_init();
-    kprintf("=== NE Loader STEP9a - VESA LFB fill ===\n");
+    kprintf("=== NE Loader STEP9b - VESA + font 8x16 ===\n");
 
-    /* 0. Inicjalizacja VESA (przed wejsciem w PM!) */
+    /* 0a. Inicjalizacja VESA (przed wejsciem w PM!) */
     kprintf("--- VESA init ---\n");
     vesa_init();
+
+    /* 0b. Pobierz font BIOS 8x16 */
+    kprintf("--- Font init ---\n");
+    font_init();
 
     /* 1. Inicjalizacja bufora thunkow i IDT */
     kprintf("--- Init INT 3F ---\n");
@@ -788,8 +841,9 @@ int main(void)
     g_orig_sp = get_sp();
     g_cs_phys = (unsigned long)g_orig_cs << 4;
 
-    kprintf("LFB=0x%08lX pitch=%u -> wchodze w PM\n", g_lfb_phys, g_vesa_pitch);
+    kprintf("LFB=0x%08lX pitch=%u font=0x%05lX -> wchodze w PM\n",
+            g_lfb_phys, g_vesa_pitch, g_font_phys);
     pm_call_app();
-    kprintf("STEP9a done.\n");
+    kprintf("STEP9b done.\n");
     return 0;
 }
