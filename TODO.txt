@@ -137,7 +137,7 @@ ETAP 9 - VESA + font bitmapowy + GDI.EXE (STEP9a/b/c)            [DONE]
     - Watcom DLL runtime importuje KERNEL.4/113/3 w prologu kazdej DLL
     - Rejestruj DLL w g_dll[] PRZED fixupami: KERNEL moze resolwowac wlasne self-imports
 
-ETAP 10 - Pelna aplikacja Win16 + pelnoekranowy TextOut           [TODO]
+ETAP 10 - Pelna aplikacja Win16 + pelnoekranowy TextOut           [DONE]
 --------------------------------------------------------------------------
 Cel: "Hello, Win16!" widoczne w dowolnym miejscu ekranu graficznego 640x480.
 
@@ -146,62 +146,29 @@ Problem: TextOut w GDI.EXE ograniczony do y<20 (pierwsze 64KB LFB).
 
 Rozwiazanie (historycznie wierne - jak Windows 3.1 SVGA driver):
   Mechanizm "huge selectors": 15 kolejnych selektorow GDT, kazdy 64KB fragment LFB.
-  GDI wybiera odpowiedni selektor na podstawie flat_offset / 65536.
+  GDI wybiera odpowiedni selektor na podstawie flat_offset >> 16.
 
-  Okna VESA (SEL_VESA_BASE = 0xA0, kazde +8):
-    0xA0: base=LFB+0*65536,  limit=65535  (wiersze  0..33)
-    0xA8: base=LFB+1*65536,  limit=65535  (wiersze 34..67)
-    ...
-    0xF0: base=LFB+14*65536, limit=4095   (wiersze 477..479, ostatnie)
-
-  Rysowanie piksela na flat_offset:
-    win = flat_offset >> 16;          -> numer okna (0..14)
-    off = flat_offset & 0xFFFF;       -> offset w oknie (0..65535)
-    sel = SEL_VESA_BASE + win * 8;    -> selektor GDT
-    MK_FP(sel, off)[0..2] = B, G, R
-
-  SEL_FONT przesuniety na 0xF8 (za oknami VESA).
-  SEL_VESA (0x90) zostaje jako alias okna 0 (kompatybilnosc z pm32_entry).
-
-[ ] 10a: pm_call.asm - 15 selektorow VESA w GDT (0xA0..0xF0)
-    [ ] Stale: VESA_WIN_COUNT=15, VESA_WIN_SIZE equ 65536, SEL_VESA_BASE equ 0xA0
-    [ ] gdt_vesa_wins: 15 * 8B = 120B w GDT, zerowane na starcie
-    [ ] patch_gdt: petla 0..14; base[i] = g_lfb_phys + i*65536
-        limit[0..13] = 0xFFFF, limit[14] = 4095 (921600 - 14*65536 - 1)
-    [ ] gdt_font (SEL_FONT=0xF8): base=g_font_phys, limit=0x0FFF (przesuniety z 0x98)
-    [ ] Zaktualizowac gdtr (nowy rozmiar GDT)
-
-[ ] 10b: gdi.c - pelnoekranowy draw_char_gdi (opcja A: multiple selectors)
-    [ ] Stale: SEL_VESA_BASE=0xA0, VESA_WIN_SIZE=65536U
-    [ ] draw_pixel(unsigned long flat_off, r, g, b):
-          unsigned win = (unsigned)(flat_off >> 16);
-          unsigned off = (unsigned)(flat_off & 0xFFFF);
-          unsigned sel = SEL_VESA_BASE + win * 8;
-          unsigned char __far *p = MK_FP(sel, off);
-          p[0]=b; p[1]=g; p[2]=r;
-    [ ] draw_char_gdi(ch, x, y, r, g, b): bez ograniczenia y
-          unsigned long base = (unsigned long)y * 1920 + (unsigned long)x * 3;
-          per wiersz (0..15): per bit (7..0): if set -> draw_pixel(base + col*3)
-          base += 1920;
-    [ ] Struktura DC w DGROUP GDI:
-          typedef struct { unsigned char fr,fg,fb; } DC;
-          DC g_dcs[8]; hdc = indeks+1
-    [ ] GetDC: zeruj DC, fg=white(255,255,255), zwroc HDC
-    [ ] ReleaseDC: zeruj DC
-    [ ] TextOut: per znak -> draw_char_gdi(ch, x+i*8, y, dc.fr, dc.fg, dc.fb)
-    [ ] Zaktualizowac SEL_FONT na 0xF8 w stałych gdi.c
-
-[ ] 10c: hello_win.c - nowa apka Win16 (zastepuje win16app.c)
-    [ ] RegisterClass + CreateWindow + petla GetMessage
-    [ ] WM_CREATE: OutputDebugString("Hello Win16 started!")
-    [ ] WM_PAINT: hdc=GetDC(hwnd);
-                  TextOut(hdc, 100, 200, "Hello, Win16!", 13);
-                  ReleaseDC(hwnd, hdc);
-    [ ] WM_DESTROY: PostQuitMessage(0)
-    [ ] Importy: KERNEL.1, USER.1-14, GDI.1-3
-
-[ ] 10d: pm32_entry - czysty ekran startowy
-    [ ] Czarny ekran, draw_str_32: "Win16 on i486  STEP10" u gory
+[x] 10a: pm_call.asm - 15 selektorow VESA w GDT (0xA0..0x110)
+        SEL_VESA_BASE=0xA0, VESA_WIN_COUNT=15, SEL_FONT=0x118
+        patch_gdt: petla 0..14; base[i] = g_lfb_phys + i*65536
+        limit[0..13] = 0xFFFF, limit[14] = 0x0FFF (921600 - 14*65536 - 1 = 4095)
+        gdt_font (SEL_FONT=0x118): zaraz za oknami VESA (0x110+8=0x118)
+        dq 0 w slotach 0x90 i 0x98 (stary SEL_VESA/SEL_FONT, nieuzywane)
+[x] 10b: gdi.c - pelnoekranowy draw_char_gdi bez ograniczenia y
+        draw_pixel(unsigned long flat_off, r, g, b):
+          win = flat_off >> 16; off = flat_off & 0xFFFF;
+          sel = SEL_VESA_BASE + win*8; MK_FP(sel,off)[0..2] = B,G,R
+        TextOut rysuje bialym (255,255,255) na dowolnej wspolrzednej
+[x] 10c: win16app.c - TextOut(hdc, 100, 200, "Hello, Win16!", 13)
+        Rysuje w oknie #5 LFB (flat_off~384300, win=5, sel=0xC8)
+[x] libstubs.asm: dodany __U4M (Watcom 32-bit multiply helper)
+        Wymagany gdy gdi.c uzywa unsigned long w draw_pixel (flat_off>>16 etc.)
+    Klucze techniczne:
+    - SEL_VESA_WIN(n) = 0xA0 + n*8; n=0..14; win 14: sel=0x110, limit=0x0FFF
+    - SEL_FONT=0x118 (0x110+8); 15 okien * 8B = 120B (0xA0..0x117)
+    - __U4M: DX:AX * CX:BX -> DX:AX (low 32 bits); w libstubs.asm
+    - Watcom emituje __U4M dla (unsigned long) * (unsigned long) przy -ms -zl
+    - Brak DC struct na tym etapie - TextOut hardcodes white (255,255,255)
 
 ETAP 11 - Klawiatura + kursor myszy                               [TODO]
 --------------------------------------------------------------------------
@@ -252,27 +219,28 @@ MAPA GDT (STEP10 - po huge selectors)
 0x78  SEL_DLL_CODE(3) (wolny slot)
 0x80  SEL_DLL_DATA(3) (wolny slot)
 0x88  SEL_THUNK       thunki INT 3F (base=g_thunk_phys, 16-bit code)
-0x90  SEL_VESA        alias okna 0 LFB (kompatybilnosc pm32_entry, 32-bit)
-0x98  (zarezerwowane - bylo SEL_FONT, usuniete w STEP10)
-0xA0  SEL_VESA_WIN(0) LFB okno 0: base=LFB+0*65536,  limit=65535 (wiersze  0-33)
-0xA8  SEL_VESA_WIN(1) LFB okno 1: base=LFB+1*65536,  limit=65535 (wiersze 34-67)
-0xB0  SEL_VESA_WIN(2) LFB okno 2: base=LFB+2*65536,  limit=65535
-0xB8  SEL_VESA_WIN(3) LFB okno 3: base=LFB+3*65536,  limit=65535
-0xC0  SEL_VESA_WIN(4) LFB okno 4: base=LFB+4*65536,  limit=65535
-0xC8  SEL_VESA_WIN(5) LFB okno 5: base=LFB+5*65536,  limit=65535
-0xD0  SEL_VESA_WIN(6) LFB okno 6: base=LFB+6*65536,  limit=65535
-0xD8  SEL_VESA_WIN(7) LFB okno 7: base=LFB+7*65536,  limit=65535
-0xE0  SEL_VESA_WIN(8) LFB okno 8: base=LFB+8*65536,  limit=65535
-0xE8  SEL_VESA_WIN(9) LFB okno 9: base=LFB+9*65536,  limit=65535
-0xF0  SEL_VESA_WIN(10)LFB okno 10: base=LFB+10*65536, limit=65535
-0xF8  (SEL_VESA_WIN 11-14 gdyby potrzeba; na razie 11 okien pokrywa 720896B > 921600? nie)
+0x90  (dq 0 - bylo SEL_VESA, usuniete w STEP10)
+0x98  (dq 0 - bylo SEL_FONT, usuniete w STEP10)
+0xA0  SEL_VESA_WIN(0)  LFB okno 0:  base=LFB+0*65536,   limit=65535 (wiersze  0-33)
+0xA8  SEL_VESA_WIN(1)  LFB okno 1:  base=LFB+1*65536,   limit=65535 (wiersze 34-67)
+0xB0  SEL_VESA_WIN(2)  LFB okno 2:  base=LFB+2*65536,   limit=65535
+0xB8  SEL_VESA_WIN(3)  LFB okno 3:  base=LFB+3*65536,   limit=65535
+0xC0  SEL_VESA_WIN(4)  LFB okno 4:  base=LFB+4*65536,   limit=65535
+0xC8  SEL_VESA_WIN(5)  LFB okno 5:  base=LFB+5*65536,   limit=65535  <- "Hello, Win16!" (y=200)
+0xD0  SEL_VESA_WIN(6)  LFB okno 6:  base=LFB+6*65536,   limit=65535
+0xD8  SEL_VESA_WIN(7)  LFB okno 7:  base=LFB+7*65536,   limit=65535
+0xE0  SEL_VESA_WIN(8)  LFB okno 8:  base=LFB+8*65536,   limit=65535
+0xE8  SEL_VESA_WIN(9)  LFB okno 9:  base=LFB+9*65536,   limit=65535
+0xF0  SEL_VESA_WIN(10) LFB okno 10: base=LFB+10*65536,  limit=65535
+0xF8  SEL_VESA_WIN(11) LFB okno 11: base=LFB+11*65536,  limit=65535
+0x100 SEL_VESA_WIN(12) LFB okno 12: base=LFB+12*65536,  limit=65535
+0x108 SEL_VESA_WIN(13) LFB okno 13: base=LFB+13*65536,  limit=65535
+0x110 SEL_VESA_WIN(14) LFB okno 14: base=LFB+14*65536,  limit=4095  (wiersze 478-479)
+0x118 SEL_FONT         BIOS 8x16 font ROM (base=g_font_phys, limit=0x0FFF)
 
 Uwaga: 640*480*3 = 921600 B
-  okno 0:  B[0..65535]       -> wiersze 0..33  (34 wiersze * 1920 = 65280)
-  okno 1:  B[65536..131071]  -> ...
-  okno 13: B[851968..917503] -> wiersze 443..477
-  okno 14: B[917504..921599] -> wiersze 478..479 (limit=4095)
-  Razem: 15 okien (0xA0..0xF0, co 8 = 15*8=120B)
-
-  GDT konczy sie na 0xF0+7 = 0xF7 (248B) + null = 256B total
-  SEL_FONT (0xF8): base=g_font_phys, limit=0x0FFF - zaraz za oknami VESA
+  okno 0:  B[0..65535]         -> wiersze 0..33   (34*1920=65280)
+  okno 5:  B[327680..393215]   -> wiersze 170..204 <- "Hello, Win16!" y=200 flat_off~384300
+  okno 13: B[851968..917503]   -> wiersze 443..477
+  okno 14: B[917504..921599]   -> wiersze 478..479 (limit=4095)
+  Razem: 15 okien; 0xA0 + 14*8 = 0xA0+0x70 = 0x110; SEL_FONT = 0x118
