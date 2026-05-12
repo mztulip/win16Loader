@@ -324,7 +324,7 @@ static void init_int3f(unsigned short handler_off)
 /* ============================================================
  * Tabela zaladowanych DLL
  * ============================================================ */
-#define MAX_EXPORTS  32
+#define MAX_EXPORTS  128  /* musi pomiescic ordinal 113 (Watcom DLL runtime) */
 #define MAX_MODULES  4
 #define MAX_DLL_SEGS 8
 
@@ -637,6 +637,29 @@ int load_ne_dll(const char *filename, const char *modname)
         }
     }
 
+    /* ---- Parsuj Entry Table (PRZED fixupami, by DLL widziala wlasne eksporty) ---- */
+    parse_entry_table(f, mz.e_lfanew, &ne, dll->exports, &dll->num_exports);
+    {
+        unsigned short k, printed = 0;
+        for (k = 0; k < dll->num_exports; k++) {
+            if (dll->exports[k] != 0) printed++;
+        }
+        kprintf("  Eksporty: %u (ordinals: %u)\n", printed, dll->num_exports);
+        for (k = 0; k < dll->num_exports; k++) {
+            if (dll->exports[k] != 0)
+                kprintf("    ordinal %u -> 0x%04X\n", k+1, dll->exports[k]);
+        }
+    }
+
+    /* ---- Wypelnij globalne tablice i zarejstruj DLL przed fixupami ----
+     * Dzieki temu DLL moze rozwiazac wlasne self-imports (np. KERNEL -> KERNEL.3/4/113) */
+    g_dll_code_phys[dll_idx] = dll->code_phys;
+    g_dll_code_size[dll_idx] = dll->code_size;
+    g_dll_data_phys[dll_idx] = dll->data_phys;
+    g_dll_data_size[dll_idx] = dll->data_size;
+    g_dll_has_data[dll_idx]  = dll->has_data;
+    g_ndll++;
+
     /* ---- Przejscie 2: aplikuj fixupy ---- */
     for (i = 0; i < ne.ne_cseg && i < MAX_DLL_SEGS; i++) {
         if (seg_has_reloc[i] && seg_data_ptr[i] != 0) {
@@ -647,24 +670,7 @@ int load_ne_dll(const char *filename, const char *modname)
         }
     }
 
-    /* ---- Parsuj Entry Table ---- */
-    parse_entry_table(f, mz.e_lfanew, &ne, dll->exports, &dll->num_exports);
-    kprintf("  Eksporty: %u\n", dll->num_exports);
-    {
-        unsigned short k;
-        for (k = 0; k < dll->num_exports; k++)
-            kprintf("    ordinal %u -> 0x%04X\n", k+1, dll->exports[k]);
-    }
-
-    /* ---- Wypelnij globalne tablice dla pm_call.asm ---- */
-    g_dll_code_phys[dll_idx] = dll->code_phys;
-    g_dll_code_size[dll_idx] = dll->code_size;
-    g_dll_data_phys[dll_idx] = dll->data_phys;
-    g_dll_data_size[dll_idx] = dll->data_size;
-    g_dll_has_data[dll_idx]  = dll->has_data;
-
     fclose(f);
-    g_ndll++;
     return 0;
 err:
     fclose(f);
