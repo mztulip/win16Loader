@@ -148,27 +148,69 @@ Rozwiazanie (historycznie wierne - jak Windows 3.1 SVGA driver):
   Mechanizm "huge selectors": 15 kolejnych selektorow GDT, kazdy 64KB fragment LFB.
   GDI wybiera odpowiedni selektor na podstawie flat_offset >> 16.
 
+  Okna VESA (SEL_VESA_BASE = 0xA0, kazde +8):
+    0xA0: base=LFB+0*65536,  limit=65535  (wiersze  0..33)
+    0xA8: base=LFB+1*65536,  limit=65535  (wiersze 34..67)
+    ...
+    0x110: base=LFB+14*65536, limit=4095  (wiersze 478..479, ostatnie)
+  SEL_FONT = 0x118 (zaraz za ostatnim oknem: 0x110 + 8 = 0x118)
+
+  Rysowanie piksela na flat_offset:
+    win = flat_offset >> 16;          -> numer okna (0..14)
+    off = flat_offset & 0xFFFF;       -> offset w oknie (0..65535)
+    sel = SEL_VESA_BASE + win * 8;    -> selektor GDT
+    MK_FP(sel, off)[0] = B; [1] = G; [2] = R;
+
 [x] 10a: pm_call.asm - 15 selektorow VESA w GDT (0xA0..0x110)
-        SEL_VESA_BASE=0xA0, VESA_WIN_COUNT=15, SEL_FONT=0x118
-        patch_gdt: petla 0..14; base[i] = g_lfb_phys + i*65536
-        limit[0..13] = 0xFFFF, limit[14] = 0x0FFF (921600 - 14*65536 - 1 = 4095)
-        gdt_font (SEL_FONT=0x118): zaraz za oknami VESA (0x110+8=0x118)
-        dq 0 w slotach 0x90 i 0x98 (stary SEL_VESA/SEL_FONT, nieuzywane)
+    [x] Stale: SEL_VESA_BASE equ 0xA0, VESA_WIN_COUNT equ 15, SEL_FONT equ 0x118
+    [x] gdt_vwin0..gdt_vwin14: 15 * dq 0 w GDT, zerowane na starcie
+    [x] patch_gdt: petla si=0..14
+          eax = g_lfb_phys + si*65536  (base okna)
+          limit[0..13] = 0xFFFF; limit[14] = 0x0FFF (4095 = 921600-14*65536-1)
+          patch bajty 2,3,4,7 deskryptora (base lo/mid/hi)
+    [x] gdt_font (SEL_FONT=0x118): base=g_font_phys, limit=0x0FFF (bez zmian)
+    [x] Sloty 0x90 i 0x98: dq 0 (stary SEL_VESA/SEL_FONT usuniete)
+    [x] GDTR limit zaktualizowany do nowego rozmiaru GDT (0x118+7=0x11F)
+
 [x] 10b: gdi.c - pelnoekranowy draw_char_gdi bez ograniczenia y
-        draw_pixel(unsigned long flat_off, r, g, b):
-          win = flat_off >> 16; off = flat_off & 0xFFFF;
-          sel = SEL_VESA_BASE + win*8; MK_FP(sel,off)[0..2] = B,G,R
-        TextOut rysuje bialym (255,255,255) na dowolnej wspolrzednej
-[x] 10c: win16app.c - TextOut(hdc, 100, 200, "Hello, Win16!", 13)
-        Rysuje w oknie #5 LFB (flat_off~384300, win=5, sel=0xC8)
-[x] libstubs.asm: dodany __U4M (Watcom 32-bit multiply helper)
-        Wymagany gdy gdi.c uzywa unsigned long w draw_pixel (flat_off>>16 etc.)
+    [x] Stale: SEL_VESA_BASE=0xA0, SEL_FONT=0x118
+    [x] draw_pixel(unsigned long flat_off, unsigned char r, g, b):
+          unsigned win = (unsigned)(flat_off >> 16);
+          unsigned off = (unsigned)(flat_off & 0xFFFFUL);
+          unsigned sel = SEL_VESA_BASE + win * 8;
+          unsigned char __far *p = MK_FP(sel, off);
+          p[0]=b; p[1]=g; p[2]=r;  /* BGR w pamieci LFB */
+    [x] draw_char_gdi(ch, x, y, br, bg, bb): bez ograniczenia y<20
+          unsigned long row_base = (unsigned long)y * 1920 + (unsigned long)x * 3;
+          for row 0..15: fbyte z MK_FP(SEL_FONT, ch*16+row)
+            for bit 7..0: if set -> draw_pixel(row_base + row*1920 + col*3, ...)
+    [x] TextOut: rysuje bialym (255,255,255) na dowolnej wspolrzednej ekranu
+    [x] Brak DC struct na tym etapie - kolor hardcoded (uproszczenie)
+
+[x] 10c: win16app.c - nowa apka Win16 dla STEP10
+    [x] WM_PAINT: TextOut(hdc, 100, 200, "Hello, Win16!", 13)
+          flat_off = 200*1920 + 100*3 = 384300
+          win = 384300 >> 16 = 5  ->  sel = 0xA0 + 5*8 = 0xC8
+          off = 384300 & 0xFFFF  = 56620
+    [x] WM_CREATE/DESTROY: OutputDebugString z komunikatem STEP10
+
+[x] libstubs.asm: dodany __U4M (Watcom 32-bit unsigned multiply helper)
+    [x] Wywolywany przez kompilator gdy kod uzywa (unsigned long) * (unsigned long)
+          np. (unsigned long)y * 1920UL w draw_char_gdi
+    [x] Konwencja: DX:AX = a, CX:BX = b -> DX:AX = a*b mod 2^32
+          Algorytm: t=lo_a*lo_b (32b); result_hi = t_hi + lo_a*hi_b + hi_a*lo_b
+    [x] Bez tej funkcji wlink zglosil: "E2028: __U4M is an undefined reference"
+
     Klucze techniczne:
-    - SEL_VESA_WIN(n) = 0xA0 + n*8; n=0..14; win 14: sel=0x110, limit=0x0FFF
-    - SEL_FONT=0x118 (0x110+8); 15 okien * 8B = 120B (0xA0..0x117)
-    - __U4M: DX:AX * CX:BX -> DX:AX (low 32 bits); w libstubs.asm
-    - Watcom emituje __U4M dla (unsigned long) * (unsigned long) przy -ms -zl
-    - Brak DC struct na tym etapie - TextOut hardcodes white (255,255,255)
+    - 15 okien * 8B = 120B; 0xA0 + 14*8 = 0xA0 + 0x70 = 0x110 (ostatnie okno)
+    - SEL_FONT = 0x118 = 0x110 + 8; GDT konczy sie na 0x118+7 = 0x11F (280B)
+    - W 16-bit kodzie z -ms: (unsigned long) generuje __U4M (mul 32-bit)
+      nawet gdy mnoznik jest stala; przy -zl brak WLIBC -> trzeba w libstubs
+    - MK_FP(seg,off) = (void __far *)((ulong)seg<<16 | (ushort)off)
+      ta sama definicja co STEP9 (bez dos.h, dziala z -zl)
+    - draw_pixel nie wymaga zadnego wsparcia OS - czyste zapisy do GDT sel
+    - Brak potrzeby przywracania DS w draw_pixel (GDI.EXE ma wlasny DS)
+    - Weryfikacja: serial "GDI: TextOut 'Hello, Win16!'" + "STEP10: loop done."
 
 ETAP 11 - Klawiatura + kursor myszy                               [TODO]
 --------------------------------------------------------------------------
