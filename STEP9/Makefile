@@ -11,7 +11,7 @@ export WATCOM INCLUDE PATH
 
 .PHONY: all run run-qemu clean
 
-all: kernel.exe user.exe win16app.exe loader.exe boot.img
+all: kernel.exe user.exe gdi.exe win16app.exe loader.exe boot.img
 
 # PM glue
 pm_call.obj: pm_call.asm
@@ -65,6 +65,20 @@ user.exe: user.obj libstubs.obj
 	    option nodefaultlibs option quiet
 
 # -------------------------------------------------------
+# GDI.EXE
+# -------------------------------------------------------
+gdi.obj: gdi.c
+	$(WCC) -ms -q -zl -s $< -fo=$@
+
+gdi.exe: gdi.obj libstubs.obj
+	$(WLINK) system windows_dll name $@ file gdi.obj,libstubs.obj \
+	    export GETDC.1 \
+	    export RELEASEDC.2 \
+	    export TEXTOUT.3 \
+	    export LIBMAIN.4 \
+	    option nodefaultlibs option quiet
+
+# -------------------------------------------------------
 # WIN16APP.EXE
 # -------------------------------------------------------
 win16app.obj: win16app.c
@@ -85,15 +99,17 @@ win16app.exe: win16app.obj
 	    import BEGINPAINT       USER.12 \
 	    import ENDPAINT         USER.13 \
 	    import DEFWINDOWPROC    USER.14 \
+	    import TEXTOUT          GDI.3 \
 	    option nodefaultlibs option start=app_entry_ option quiet
 
 # -------------------------------------------------------
-boot.img: kernel.exe user.exe win16app.exe loader.exe fdauto.bat $(FDBOOT)
+boot.img: kernel.exe user.exe gdi.exe win16app.exe loader.exe fdauto.bat $(FDBOOT)
 	cp $(FDBOOT) boot.img
 	mdel  -i boot.img ::fdauto.bat 2>/dev/null || true
 	mcopy -i boot.img fdauto.bat   ::fdauto.bat
 	mcopy -i boot.img kernel.exe   ::kernel.exe
 	mcopy -i boot.img user.exe     ::user.exe
+	mcopy -i boot.img gdi.exe      ::gdi.exe
 	mcopy -i boot.img win16app.exe ::win16app.exe
 	mcopy -i boot.img loader.exe   ::loader.exe
 	@echo "[OK] boot.img gotowy"
@@ -110,6 +126,7 @@ run: boot.img
 clean:
 	rm -f kernel.exe kernel.obj
 	rm -f user.exe user.obj
+	rm -f gdi.exe gdi.obj
 	rm -f win16app.exe win16app.obj
 	rm -f loader.exe loader.o
 	rm -f libstubs.obj pm_call.obj serial.obj
