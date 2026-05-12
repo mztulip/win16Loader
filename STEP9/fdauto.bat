@@ -1,6 +1,6 @@
 @ECHO OFF
 ECHO.
-ECHO === Win16 STEP9a: VESA LFB fill (640x480x24bpp) ===
+ECHO === Win16 STEP9b: VESA + czcionka bitmapowa 8x16 ===
 ECHO.
 A:\loader.exe
 ECHO.
