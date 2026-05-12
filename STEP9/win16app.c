@@ -82,6 +82,9 @@ extern unsigned __far __pascal BeginPaint(HWND hwnd, PAINTSTRUCT __far *ps);
 extern BOOL     __far __pascal EndPaint(HWND hwnd, const PAINTSTRUCT __far *ps);
 extern LRESULT  __far __pascal DefWindowProc(HWND hwnd, UINT msg,
                                               WPARAM wp, LPARAM lp);
+/* GDI.EXE */
+extern BOOL     __far __pascal TextOut(unsigned hdc, int x, int y,
+                                        const char __far *s, int len);
 
 unsigned get_ds(void);
 #pragma aux get_ds = "mov ax, ds" value [ax] modify [ax];
@@ -92,10 +95,11 @@ unsigned get_ds(void);
 static char g_classname[]    = "TestClass";
 static WNDCLASS g_wc;
 
-static char msg_create[]  = "STEP8c: WM_CREATE\n";
-static char msg_paint[]   = "STEP8c: WM_PAINT\n";
-static char msg_destroy[] = "STEP8c: WM_DESTROY\n";
-static char msg_done[]    = "STEP8c: loop done.\n";
+static char msg_create[]  = "STEP9c: WM_CREATE\n";
+static char msg_paint[]   = "STEP9c: WM_PAINT\n";
+static char msg_destroy[] = "STEP9c: WM_DESTROY\n";
+static char msg_done[]    = "STEP9c: loop done.\n";
+static char gdi_text[]    = "Hello GDI!";
 
 /* ============================================================
  * WndProc
@@ -111,8 +115,9 @@ LRESULT __far __pascal WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     if (msg == WM_CREATE) {
         OutputDebugString(msg_create);
     } else if (msg == WM_PAINT) {
-        BeginPaint(hwnd, &ps);
+        unsigned hdc = BeginPaint(hwnd, &ps);
         OutputDebugString(msg_paint);
+        TextOut(hdc, 10, 2, gdi_text, 10);
         EndPaint(hwnd, &ps);
         /* Wyslij WM_DESTROY do kolejki - koniec cyklu zycia okna */
         PostMessage(hwnd, WM_DESTROY, 0, 0L);

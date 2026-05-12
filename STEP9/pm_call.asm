@@ -27,6 +27,7 @@ SEL_VGA         equ 0x38
 SEL_APP_DATA    equ 0x40
 SEL_THUNK       equ 0x88
 SEL_VESA        equ 0x90
+SEL_FONT        equ 0x98
 
 INT3F_MAX_DEPTH equ 8
 
@@ -186,6 +187,13 @@ patch_gdt:
     shr  eax, 16
     mov  [cs:gdt_vesa + 4], al
     mov  [cs:gdt_vesa + 7], ah
+
+    ; SEL_FONT: base = g_font_phys, limit 4095 (256 znakow * 16 B)
+    mov  eax, [_g_font_phys]
+    mov  [cs:gdt_font + 2], ax
+    shr  eax, 16
+    mov  [cs:gdt_font + 4], al
+    mov  [cs:gdt_font + 7], ah
 
     ; DLL entries
     xor  si, si
@@ -458,9 +466,9 @@ draw_str_32:
 ; =====================================================================
 ; Stringi diagnostyczne (w segmencie kodu, dostepne przez DS=DATASEG)
 ; =====================================================================
-str_title   db "STEP9b: VESA font OK!", 0
+str_title   db "STEP9c: VESA + GDI.EXE", 0
 str_mode    db "640x480  24bpp  BGR", 0
-str_font    db "8x16 BIOS font  char test: AaBbCc", 0
+str_font    db "8x16 BIOS font  SEL_FONT=0x98  SEL_VESA=0x90", 0
 
 ; =====================================================================
 bits 16
@@ -744,6 +752,13 @@ gdt_vesa:                   ; 0x90 SEL_VESA (32-bit data, base=g_lfb_phys, limit
     db 0x00                 ; base[23:16] (patchowane w patch_gdt)
     db 10010010b            ; P=1 DPL=0 S=1 E=0 W=1 (data r/w)
     db 01001111b            ; G=0 D/B=1 L=0 AVL=0 limit[19:16]=F => limit=0xFFFFF=1MB
+    db 0x00                 ; base[31:24] (patchowane w patch_gdt)
+
+gdt_font:                   ; 0x98 SEL_FONT (16-bit data, base=g_font_phys, limit=4095)
+    dw 0x0FFF, 0x0000       ; limit[15:0] = 0x0FFF (256 znakow * 16 B)
+    db 0x00                 ; base[23:16] (patchowane w patch_gdt)
+    db 10010010b            ; P=1 DPL=0 S=1 E=0 W=1 (data r/w)
+    db 00000000b            ; G=0 D/B=0 (16-bit) limit[19:16]=0
     db 0x00                 ; base[31:24] (patchowane w patch_gdt)
 
 gdt_end:

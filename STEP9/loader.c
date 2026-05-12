@@ -803,7 +803,7 @@ err:
 int main(void)
 {
     serial_init();
-    kprintf("=== NE Loader STEP9b - VESA + font 8x16 ===\n");
+    kprintf("=== NE Loader STEP9c - VESA + font + GDI.EXE ===\n");
 
     /* 0a. Inicjalizacja VESA (przed wejsciem w PM!) */
     kprintf("--- VESA init ---\n");
@@ -831,7 +831,14 @@ int main(void)
     kprintf("USER zaladowany: code=0x%05lX data=0x%05lX\n",
             g_dll[1].code_phys, g_dll[1].data_phys);
 
-    /* 4. Zaladuj aplikacje NE */
+    /* 4. Zaladuj GDI.EXE jako DLL (dll_idx=2) */
+    kprintf("--- Ladowanie GDI.EXE ---\n");
+    if (load_ne_dll("GDI.EXE", "GDI") != 0)
+        return 1;
+    kprintf("GDI zaladowany: code=0x%05lX data=0x%05lX\n",
+            g_dll[2].code_phys, g_dll[2].data_phys);
+
+    /* 5. Zaladuj aplikacje NE */
     kprintf("--- Ladowanie WIN16APP.EXE ---\n");
     if (load_ne("WIN16APP.EXE") != 0)
         return 1;
@@ -841,9 +848,9 @@ int main(void)
     g_orig_sp = get_sp();
     g_cs_phys = (unsigned long)g_orig_cs << 4;
 
-    kprintf("LFB=0x%08lX pitch=%u font=0x%05lX -> wchodze w PM\n",
+    kprintf("LFB=0x%08lX pitch=%u font=0x%06lX -> wchodze w PM\n",
             g_lfb_phys, g_vesa_pitch, g_font_phys);
     pm_call_app();
-    kprintf("STEP9b done.\n");
+    kprintf("STEP9c done.\n");
     return 0;
 }
