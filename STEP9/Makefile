@@ -38,6 +38,9 @@ kernel.exe: kernel.obj libstubs.obj
 	$(WLINK) system windows_dll name $@ file kernel.obj,libstubs.obj \
 	    export OUTPUTDEBUGSTRING.1 \
 	    export LIBMAIN.2 \
+	    export GLOBALFREE.3 \
+	    export LOCALINIT.4 \
+	    export LOCALHEAP.113 \
 	    option nodefaultlibs option quiet
 
 # -------------------------------------------------------
