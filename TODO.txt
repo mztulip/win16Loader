@@ -212,18 +212,287 @@ Rozwiazanie (historycznie wierne - jak Windows 3.1 SVGA driver):
     - Brak potrzeby przywracania DS w draw_pixel (GDI.EXE ma wlasny DS)
     - Weryfikacja: serial "GDI: TextOut 'Hello, Win16!'" + "STEP10: loop done."
 
-ETAP 11 - Klawiatura + kursor myszy                               [TODO]
---------------------------------------------------------------------------
-[ ] IRQ1 handler w PM (kbd scan codes -> ASCII -> PostMessage WM_KEYDOWN)
-[ ] WM_KEYDOWN w WndProc apki
-[ ] Kursor myszy (PS/2 przez IRQ12): rysowanie kursora na LFB
-[ ] PostMessage WM_MOUSEMOVE / WM_LBUTTONDOWN
+===========================================================================
+CEL: URUCHOMIENIE SKIFREE (SKI.EXE - oryginalna gra Windows 3.1, 1992)
+===========================================================================
+SKI.EXE: 88848B, 2 segmenty (CODE 23KB + DATA 3KB), 86 relokacji
+  - 65 importow: KERNEL (17 ord), GDI (14 ord), USER (34 ord)
+  - 86 zasobow RT_BITMAP (sprite'y gracza, przeszkod, tla)
+  - Brak dzwieku (MMSYSTEM nie uzywany)
+  - Game loop: PeekMessage (nie GetMessage) -> WM_TIMER/WM_PAINT -> BitBlt
 
-ETAP 12 - Wielozadaniowosc kooperatywna                           [TODO]
---------------------------------------------------------------------------
-[ ] Scheduler kooperatywny (jak Win 3.1): przelaczanie przy GetMessage/Yield
-[ ] Kilka apek Win16 jednoczesnie (np. 2x hello_win)
-[ ] TaskSwitch przez LIDT/LGDT swap lub TSS
+Problem #1: nasze KERNEL/GDI/USER maja INNE numery ordynalow niz prawdziwy
+  Win16. Np. nasz KERNEL.1=OutputDebugString, ale SKI chce KERNEL.115.
+  Trzeba przebudowac DLL z prawdziwymi Win16 numerami ordynalow.
+
+Problem #2: SKI wymaga funkcji ktorych jeszcze nie mamy:
+  InitTask, GlobalAlloc, LocalAlloc, BitBlt, LoadBitmap, PeekMessage,
+  GetTickCount, CreateCompatibleDC, SelectObject, GetDeviceCaps, ...
+
+---------------------------------------------------------------------------
+ETAP 11 - Przebudowa KERNEL/USER/GDI na prawdziwe Win16 ordynaly [TODO]
+---------------------------------------------------------------------------
+Cel: loader musi rozwiazywac importy SKI.EXE po prawdziwych numerach.
+Nasze DLL musza eksportowac funkcje pod numerami zgodnymi z Win16/SDK.
+
+[ ] 11a: Nowy STEP11/ skopiowany z STEP10/
+[ ] 11b: kernel.c - eksporty pod prawdziwymi numerami (wlink export ORD.N)
+    Wymagane przez SKI.EXE:
+      1   = FatalExit          (stub: nic nie rob / HLT)
+      5   = LocalAlloc         (alokuj z lokalnego stosu DGROUP)
+      6   = LocalReAlloc       (stub zwracajacy ten sam handle)
+      7   = LocalFree          (zwolnij lokalny blok)
+      15  = GlobalAlloc        (alokuj z naszego heapa przez _dos_allocmem)
+      16  = GlobalReAlloc      (stub)
+      17  = GlobalFree         (zwolnij globalny blok)
+      23  = LockSegment        (stub: zwroc argument)
+      24  = UnlockSegment      (stub: zwroc 1)
+      30  = WaitEvent          (stub: zwroc 0)
+      88  = lstrCpy            (kopiuj far string)
+      90  = lstrLen            (dlugosc far string)
+      91  = InitTask           (KRYTYCZNE - inicjalizacja tasku Win16)
+      115 = OutputDebugString  (nasze COM1 print)
+      128 = GetPrivateProfileString (zwroc domyslna wartosc)
+      129 = WritePrivateProfileString (stub)
+      137 = FatalAppExit       (stub: HLT lub reset)
+    Poprzednie nasze eksporty (LIBMAIN.2, GLOBALFREE.3 itp.) -> usunac lub
+    zachowac jako aliasy dla kompatybilnosci z naszymi hello_win testami.
+[ ] 11c: user.c - eksporty pod prawdziwymi numerami USER.EXE SDK
+    Wymagane przez SKI.EXE:
+      1   = MessageBox         (stub: zwroc IDOK=1)
+      5   = InitApp            (inicjalizacja instancji apki)
+      6   = PostQuitMessage
+      13  = GetTickCount       (licznik ms; czytamy z PIT lub staly increment)
+      22  = SetFocus           (stub)
+      31  = IsIconic           (stub: zwroc 0)
+      33  = GetClientRect      (zwroc rect okna)
+      37  = SetWindowText      (stub)
+      39  = BeginPaint
+      40  = EndPaint
+      41  = CreateWindow
+      42  = ShowWindow
+      44  = OpenIcon           (stub)
+      50  = FindWindow         (stub: zwroc 0)
+      53  = DestroyWindow      (stub)
+      56  = MoveWindow         (stub)
+      57  = RegisterClass
+      66  = GetDC
+      68  = ReleaseDC
+      81  = FillRect           (PatBlt z BLACKBRUSH/WHITEBRUSH)
+      83  = FrameRect          (stub)
+      107 = DefWindowProc
+      108 = GetMessage
+      109 = PeekMessage        (WAZNE: nieblokujacy, game loop)
+      113 = TranslateMessage
+      114 = DispatchMessage
+      124 = UpdateWindow
+      125 = InvalidateRect     (oznacz okno do przerysowania)
+      173 = LoadCursor         (stub: zwroc 1)
+      174 = LoadIcon           (stub: zwroc 1)
+      175 = LoadBitmap         (KRYTYCZNE: zasoby RT_BITMAP z SKI.EXE)
+      176 = LoadString         (zaladuj string z zasobow)
+      232 = SetWindowPos       (stub lub prosta impl)
+      420 = wsprintf           (formatowanie stringa - jak sprintf)
+[ ] 11d: gdi.c - eksporty pod prawdziwymi numerami GDI.EXE SDK
+    Wymagane przez SKI.EXE:
+      29  = PatBlt             (wypelnij prostokat kolorem/wzorem)
+      33  = TextOut
+      34  = BitBlt             (KRYTYCZNE: kopiowanie bitmap -> ekran)
+      45  = SelectObject       (wybierz bitmap/pen/brush do DC)
+      48  = CreateBitmap       (stworz bitmap w pamieci)
+      51  = CreateCompatibleBitmap
+      52  = CreateCompatibleDC (offscreen DC)
+      68  = DeleteDC
+      69  = DeleteObject       (zwolnij GDI object)
+      80  = GetDeviceCaps      (parametry ekranu: szerokosc, wysokosc, bpp)
+      82  = GetObject          (pobierz info o GDI obiekcie)
+      87  = GetStockObject     (BLACK_BRUSH, WHITE_BRUSH, NULL_BRUSH, fonty)
+      91  = GetTextExtent      (szerokosc stringa w pikselach)
+      93  = GetTextMetrics     (metryki fontu: wysokosc, szerokosc znaku)
+[ ] 11e: Makefile - zaktualizowac wlink export dla nowych numerow
+[ ] 11f: loader.c - sprawdzic czy module reference table rozwiazuje
+        nazwy "KERNEL", "USER", "GDI" -> nasze DLL (powinno dzialac)
+
+---------------------------------------------------------------------------
+ETAP 12 - KERNEL: InitTask + GlobalAlloc + LocalAlloc + stringi  [TODO]
+---------------------------------------------------------------------------
+Cel: SKI.EXE musi sie w ogole uruchomic (przed pierwszym oknem).
+
+[ ] 12a: InitTask (KERNEL.91) - KRYTYCZNE
+        Win16 WinMain nie jest wywolywany bezposrednio; SKI.EXE wywoluje
+        InitTask w prologu zeby zarejestrowac sie w systemie.
+        Minimalna implementacja:
+          - Zwraca hInstance (sel DATA apki), hPrevInstance=0,
+            lpszCmdLine=far ptr do pustego stringa, nCmdShow=SW_SHOWNORMAL
+          - Rejestruje segment danych apki jako "current task DS"
+          - W Win16: AX=hInstance, CX=stack size, DX=heap size,
+            DI=hPrevInst, ES:SI=cmdline -> my ignorujemy i zwracamy minimum
+        Kluczowe: bez dzialajacego InitTask apka crashuje przy starcie.
+
+[ ] 12b: GlobalAlloc (KERNEL.15) / GlobalFree (KERNEL.17)
+        GlobalAlloc(wFlags, dwBytes) -> HGLOBAL
+        Flagi: GMEM_FIXED(0), GMEM_MOVEABLE(2), GMEM_ZEROINIT(0x40)
+        Implementacja: _dos_allocmem lub nasz wewnetrzny heap
+        Zwroc handle = selektor zaalokowanego segmentu
+        GlobalFree: zwolnij segment
+
+[ ] 12c: LocalAlloc (KERNEL.5) / LocalFree (KERNEL.7) / LocalReAlloc (KERNEL.6)
+        Lokalny heap wewnatrz DGROUP apki (ne_heap bajty za danymi)
+        Prosta implementacja: bump allocator w DGROUP apki
+        LMEM_FIXED(0): handle = offset w DGROUP
+        LocalFree: oznacz jako wolny (lub ignoruj)
+
+[ ] 12d: LstrCpy (KERNEL.88) / LstrLen (KERNEL.90)
+        Far string copy/length (jak strcpy/strlen ale far pointery)
+
+[ ] 12e: GetPrivateProfileString (KERNEL.128)
+        Wczytaj string z pliku .INI; SKI.EXE czyta SKI.INI
+        Na razie: zawsze zwroc domyslna wartosc (lpszDefault)
+
+[ ] 12f: LockSegment/UnlockSegment (KERNEL.23/24) - stubs
+        W Win16 blokuje segment w pamieci. U nas: zwroc segment/1.
+
+---------------------------------------------------------------------------
+ETAP 13 - USER: PeekMessage + GetTickCount + pelne okno          [TODO]
+---------------------------------------------------------------------------
+Cel: SKI.EXE tworzy okno i wchodzi w game loop z PeekMessage.
+
+[ ] 13a: PeekMessage (USER.109)
+        PeekMessage(lpMsg, hWnd, min, max, wRemoveMsg)
+        Nieblokujacy odpowiednik GetMessage.
+        PM_NOREMOVE(0): tylko podejrzyj kolejke
+        PM_REMOVE(1): wyjmij komunikat
+        Zwraca TRUE jesli jest wiadomosc, FALSE jesli kolejka pusta
+        Kluczowe dla game loop: while(1) { if(PeekMessage(...,PM_REMOVE))
+          { if(msg==WM_QUIT) break; TranslateMessage; DispatchMessage; }
+          else { /* frame logika */ } }
+
+[ ] 13b: GetTickCount (USER.13)
+        Zwraca czas w milisekundach od uruchomienia systemu (32-bit).
+        Implementacja: licznik w loaderze inkrementowany w INT 1Ch (BIOS timer tick)
+        lub staly increment per wywolanie (18.2 Hz BIOS = ~55ms/tick)
+        Alternatywa: PIT channel 0 daje 18.2 Hz, liczymy ticki * 55
+
+[ ] 13c: InvalidateRect (USER.125)
+        Oznacz prostokat okna jako "dirty" -> WM_PAINT trafi do kolejki
+        Implementacja: PostMessage(hwnd, WM_PAINT, 0, 0) jesli bWipe=TRUE
+
+[ ] 13d: GetClientRect (USER.33)
+        Wypelnij RECT {0, 0, szerokosc, wysokosc} okna klienta
+        Na razie: zawsze 640x480 (caly ekran)
+
+[ ] 13e: SetWindowPos (USER.232)
+        Zmien pozycje/rozmiar okna. Stub lub prosta impl.
+
+[ ] 13f: wsprintf (USER.420)
+        Formatowanie stringa (far ptr) jak sprintf.
+        Wymagane przez SKI.EXE do wypisywania wynikow itp.
+        Implementacja: vsprintf z Watcom stdlib, przepisz do far bufora
+
+[ ] 13g: InitApp (USER.5)
+        Inicjalizacja instancji aplikacji. Minimal: zwroc 1 (sukces).
+
+[ ] 13h: LoadString (USER.176)
+        Zaladuj string z zasobow RT_STRING apki.
+        SKI.EXE ma 2 x RT_STRING. Czytaj z tablicy zasobow NE.
+
+---------------------------------------------------------------------------
+ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [TODO]
+---------------------------------------------------------------------------
+Cel: SKI.EXE laduje 86 bitmap (sprite'y) przez LoadBitmap.
+
+[ ] 14a: Parser tablicy zasobow NE w loader.c
+        NE resource table: turaz za ne_rsrctab offsetem w NE headerze
+        Struktura: align_shift, potem TYPEINFO{type_id, count, ...},
+          potem NAMEINFO{offset, length, flags, id, ...} per zasob
+        Offset zasobu w pliku: nameinfo.offset << align_shift
+        Rozmiar: nameinfo.length << align_shift
+
+[ ] 14b: Zaladuj wszystkie RT_BITMAP SKI.EXE do pamieci przy starcie
+        g_resources[]: tablica {id, phys_ptr, size} dla 86 bitmap
+        Alokacja: _dos_allocmem per bitmap lub jeden duzy bufor
+
+[ ] 14c: LoadBitmap (USER.175)
+        LoadBitmap(hInstance, lpBitmapName)
+        lpBitmapName: MAKERESOURCE(id) = (const char*)(id & 0xFFFF)
+        Znajdz bitmap po id w g_resources[], zwroc HBITMAP = indeks+1
+        Format zasobu: BITMAPINFOHEADER (40B) + paleta + bity
+        Zapisz pointer do danych DIB jako HBITMAP
+
+[ ] 14d: GetObject (GDI.82)
+        GetObject(hObject, cbBuffer, lpObject)
+        Dla HBITMAP: wypelnij BITMAP struct {bmType, bmWidth, bmHeight,
+          bmWidthBytes, bmPlanes, bmBitsPixel, bmBits}
+
+---------------------------------------------------------------------------
+ETAP 15 - GDI: BitBlt + DC objects (pierwsza klatka SkiFree)    [TODO]
+---------------------------------------------------------------------------
+Cel: pierwsza klatka gry widoczna na ekranie.
+
+[ ] 15a: CreateCompatibleDC (GDI.52)
+        Stworz offscreen DC kompatybilny z ekranem.
+        Nasza impl: alokuj DC struct z buforem 640x480 lub lazy (NULL bitmap)
+
+[ ] 15b: CreateCompatibleBitmap (GDI.51) / CreateBitmap (GDI.48)
+        Alokuj bitmap w pamieci (buffer pikseli w naszym heapie)
+        CreateCompatibleBitmap(hdc, w, h): alokuj w*h*3 bajtow BGR
+
+[ ] 15c: SelectObject (GDI.45)
+        Wybierz bitmap/pen/brush do DC, zwroc poprzedni obiekt.
+        Dla bitmap: DC.hBitmap = hObject; zwroc stary DC.hBitmap
+
+[ ] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69)
+        Zwolnij DC / GDI obiekt z pamieci
+
+[ ] 15e: BitBlt (GDI.34) - KRYTYCZNE
+        BitBlt(hdcDst, xDst, yDst, w, h, hdcSrc, xSrc, ySrc, dwRop)
+        ROP: SRCCOPY(0xCC0020) - kopiuj piksele z src do dst
+        Jezeli hdcDst = screen DC (HDC=1): zapis bezposrednio do LFB
+          przez huge selectors (STEP10 draw_pixel)
+        Jezeli hdcDst = offscreen DC: kopiuj do bufora DC
+        Obsluga przezroczystosci: jesli kolor piksela == kluczowy kolor
+          (zazwyczaj magenta lub bialy) -> pomin piksel (transparentny)
+        Format zrodla: DIB BITMAPINFOHEADER z paleta lub bez
+
+[ ] 15f: PatBlt (GDI.29)
+        PatBlt(hdc, x, y, w, h, dwRop)
+        BLACKNESS(0x000042): wypelnij czarnym
+        WHITENESS(0xFF0062): wypelnij bialym
+        PATCOPY(0xF00021): kopiuj aktualny brush
+
+[ ] 15g: GetDeviceCaps (GDI.80)
+        Zwroc parametry "urzadzenia" (ekranu):
+          HORZRES(8)=640, VERTRES(10)=480, BITSPIXEL(12)=24,
+          PLANES(14)=1, LOGPIXELSX(88)=96, LOGPIXELSY(90)=96
+
+[ ] 15h: GetStockObject (GDI.87)
+        Zwroc predefiniowane GDI obiekty:
+          BLACK_BRUSH(4), WHITE_BRUSH(0), NULL_BRUSH(5),
+          BLACK_PEN(7), WHITE_PEN(8), SYSTEM_FONT(13)
+        Implementacja: zwroc stale handlery (np. 0x10+idx)
+
+[ ] 15i: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93)
+        GetTextExtent: szerokosc stringa w pikselach (len * FONT_W)
+        GetTextMetrics: wypelnij TEXTMETRIC {tmHeight=16, tmAveCharWidth=8}
+
+---------------------------------------------------------------------------
+ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
+---------------------------------------------------------------------------
+Cel: SkiFree reaguje na klawiature (kursory steruja narciarzem).
+
+[ ] 16a: IRQ1 handler w PM (scan codes -> Virtual Keys -> PostMessage)
+        Tablica scancode -> VK (VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_ESCAPE)
+        PostMessage(g_active_hwnd, WM_KEYDOWN, vk, lParam)
+        Przy zwolnieniu: PostMessage(WM_KEYUP, vk, lParam|0x80000000)
+
+[ ] 16b: TranslateMessage: generuj WM_CHAR z WM_KEYDOWN dla znakow ASCII
+
+---------------------------------------------------------------------------
+ETAP 17 - Mysz: WM_MOUSEMOVE + WM_LBUTTONDOWN                    [TODO]
+---------------------------------------------------------------------------
+[ ] IRQ12 handler (PS/2 mouse): odczyt pakietu 3B, delta x/y, przyciski
+[ ] PostMessage WM_MOUSEMOVE(lParam=MAKELONG(x,y))
+[ ] PostMessage WM_LBUTTONDOWN / WM_LBUTTONUP
 
 NARZEDZIA
 ---------
