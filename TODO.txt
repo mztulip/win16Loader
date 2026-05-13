@@ -230,88 +230,136 @@ Problem #2: SKI wymaga funkcji ktorych jeszcze nie mamy:
   GetTickCount, CreateCompatibleDC, SelectObject, GetDeviceCaps, ...
 
 ---------------------------------------------------------------------------
-ETAP 11 - Przebudowa KERNEL/USER/GDI na prawdziwe Win16 ordynaly [TODO]
+ETAP 11 - Przebudowa KERNEL/USER/GDI na prawdziwe Win16 ordynaly [DONE]
 ---------------------------------------------------------------------------
 Cel: loader musi rozwiazywac importy SKI.EXE po prawdziwych numerach.
 Nasze DLL musza eksportowac funkcje pod numerami zgodnymi z Win16/SDK.
 
-[ ] 11a: Nowy STEP11/ skopiowany z STEP10/
-[ ] 11b: kernel.c - eksporty pod prawdziwymi numerami (wlink export ORD.N)
-    Wymagane przez SKI.EXE:
-      1   = FatalExit          (stub: nic nie rob / HLT)
-      5   = LocalAlloc         (alokuj z lokalnego stosu DGROUP)
-      6   = LocalReAlloc       (stub zwracajacy ten sam handle)
-      7   = LocalFree          (zwolnij lokalny blok)
-      15  = GlobalAlloc        (alokuj z naszego heapa przez _dos_allocmem)
-      16  = GlobalReAlloc      (stub)
-      17  = GlobalFree         (zwolnij globalny blok)
-      23  = LockSegment        (stub: zwroc argument)
-      24  = UnlockSegment      (stub: zwroc 1)
-      30  = WaitEvent          (stub: zwroc 0)
-      88  = lstrCpy            (kopiuj far string)
-      90  = lstrLen            (dlugosc far string)
-      91  = InitTask           (KRYTYCZNE - inicjalizacja tasku Win16)
-      115 = OutputDebugString  (nasze COM1 print)
-      128 = GetPrivateProfileString (zwroc domyslna wartosc)
-      129 = WritePrivateProfileString (stub)
-      137 = FatalAppExit       (stub: HLT lub reset)
-    Poprzednie nasze eksporty (LIBMAIN.2, GLOBALFREE.3 itp.) -> usunac lub
-    zachowac jako aliasy dla kompatybilnosci z naszymi hello_win testami.
-[ ] 11c: user.c - eksporty pod prawdziwymi numerami USER.EXE SDK
-    Wymagane przez SKI.EXE:
-      1   = MessageBox         (stub: zwroc IDOK=1)
-      5   = InitApp            (inicjalizacja instancji apki)
-      6   = PostQuitMessage
-      13  = GetTickCount       (licznik ms; czytamy z PIT lub staly increment)
+[x] 11a: Nowy STEP11/ skopiowany z STEP10/
+
+[x] 11b: kernel.c - eksporty pod prawdziwymi numerami (wlink export ORD.N)
+    Zaimplementowane:
+      1   = FatalExit          (stub: serial print + HLT)
+      3   = KernelStub3        (stub: Watcom DLL prolog potrzebuje KERNEL.3)
+      4   = KernelStub4        (stub: Watcom DLL prolog potrzebuje KERNEL.4)
+      5   = LocalAlloc         (stub: zwraca 0, ETAP 12)
+      6   = LocalReAlloc       (stub: zwraca 0)
+      7   = LocalFree          (stub: zwraca 1)
+      15  = GlobalAlloc        (stub: zwraca 0, ETAP 12)
+      16  = GlobalReAlloc      (stub: zwraca 0)
+      17  = GlobalFree         (stub: zwraca 1)
+      23  = LockSegment        (stub: zwraca argument)
+      24  = UnlockSegment      (stub: zwraca 1)
+      30  = WaitEvent          (stub: zwraca 0)
+      88  = lstrCpy            (dziala: far string copy)
+      90  = lstrLen            (dziala: far string length)
+      91  = InitTask           (stub: zwraca 1 = hInstance)
+      113 = KernelStub113      (stub: Watcom DLL prolog potrzebuje KERNEL.113)
+      115 = OutputDebugString  (dziala: serial print na COM1)
+      128 = GetPrivateProfileString (stub: kopiuje lpszDefault do bufora)
+      129 = WritePrivateProfileString (stub: zwraca 0)
+      137 = FatalAppExit       (stub: serial print + HLT)
+      200 = LibMain             (zwraca 1)
+    Uwaga: KERNEL.3/4/113 to Watcom internals - kazda DLL skompilowana przez
+    wlink system windows_dll generuje fixupy do tych ordynalow. Musza istniec.
+
+[x] 11c: user.c - eksporty pod prawdziwymi numerami USER.EXE SDK
+    Zaimplementowane:
+      1   = MessageBox         (stub: serial print, zwraca IDOK=1)
+      5   = InitApp            (stub: zwraca 1)
+      6   = PostQuitMessage    (dziala: PostMessage WM_QUIT)
+      13  = GetTickCount       (dziala: zwraca g_tick_ms, +55 per PeekMessage)
       22  = SetFocus           (stub)
-      31  = IsIconic           (stub: zwroc 0)
-      33  = GetClientRect      (zwroc rect okna)
+      28  = PostMessage        (dziala: wpisuje MSG do kolejki ring buffer 64)
+      31  = IsIconic           (stub: zwraca 0)
+      33  = GetClientRect      (zwraca {0,0,640,480})
       37  = SetWindowText      (stub)
-      39  = BeginPaint
-      40  = EndPaint
-      41  = CreateWindow
-      42  = ShowWindow
+      39  = BeginPaint         (dziala: zwraca HDC=1, wyslij WM_ERASEBKGND)
+      40  = EndPaint           (dziala: czyci okno z pending paint flag)
+      41  = CreateWindow       (dziala: alokuj HWND, wyslij WM_CREATE)
+      42  = ShowWindow         (dziala: ustaw state, wyslij WM_SHOWWINDOW)
       44  = OpenIcon           (stub)
-      50  = FindWindow         (stub: zwroc 0)
-      53  = DestroyWindow      (stub)
+      50  = FindWindow         (stub: zwraca 0)
+      53  = DestroyWindow      (stub: serial print)
       56  = MoveWindow         (stub)
-      57  = RegisterClass
-      66  = GetDC
-      68  = ReleaseDC
-      81  = FillRect           (PatBlt z BLACKBRUSH/WHITEBRUSH)
-      83  = FrameRect          (stub)
-      107 = DefWindowProc
-      108 = GetMessage
-      109 = PeekMessage        (WAZNE: nieblokujacy, game loop)
-      113 = TranslateMessage
-      114 = DispatchMessage
-      124 = UpdateWindow
-      125 = InvalidateRect     (oznacz okno do przerysowania)
-      173 = LoadCursor         (stub: zwroc 1)
-      174 = LoadIcon           (stub: zwroc 1)
-      175 = LoadBitmap         (KRYTYCZNE: zasoby RT_BITMAP z SKI.EXE)
-      176 = LoadString         (zaladuj string z zasobow)
-      232 = SetWindowPos       (stub lub prosta impl)
-      420 = wsprintf           (formatowanie stringa - jak sprintf)
-[ ] 11d: gdi.c - eksporty pod prawdziwymi numerami GDI.EXE SDK
-    Wymagane przez SKI.EXE:
-      29  = PatBlt             (wypelnij prostokat kolorem/wzorem)
-      33  = TextOut
-      34  = BitBlt             (KRYTYCZNE: kopiowanie bitmap -> ekran)
-      45  = SelectObject       (wybierz bitmap/pen/brush do DC)
-      48  = CreateBitmap       (stworz bitmap w pamieci)
-      51  = CreateCompatibleBitmap
-      52  = CreateCompatibleDC (offscreen DC)
-      68  = DeleteDC
-      69  = DeleteObject       (zwolnij GDI object)
-      80  = GetDeviceCaps      (parametry ekranu: szerokosc, wysokosc, bpp)
-      82  = GetObject          (pobierz info o GDI obiekcie)
-      87  = GetStockObject     (BLACK_BRUSH, WHITE_BRUSH, NULL_BRUSH, fonty)
-      91  = GetTextExtent      (szerokosc stringa w pikselach)
-      93  = GetTextMetrics     (metryki fontu: wysokosc, szerokosc znaku)
-[ ] 11e: Makefile - zaktualizowac wlink export dla nowych numerow
-[ ] 11f: loader.c - sprawdzic czy module reference table rozwiazuje
-        nazwy "KERNEL", "USER", "GDI" -> nasze DLL (powinno dzialac)
+      57  = RegisterClass      (dziala: rejestruje WNDCLASS w tablicy klas)
+      66  = GetDC              (dziala: zwraca HDC=1, przeniesione z GDI!)
+      68  = ReleaseDC          (dziala: zwraca 1, przeniesione z GDI!)
+      81  = FillRect           (stub: zwraca 1)
+      83  = FrameRect          (stub: zwraca 1)
+      107 = DefWindowProc      (dziala: WM_DESTROY->PostQuitMessage, reszta 0)
+      108 = GetMessage         (dziala: blokujacy, petla dopoki kolejka pusta)
+      109 = PeekMessage        (dziala: nieblokujacy, +55ms do g_tick_ms)
+      113 = TranslateMessage   (stub: zwraca 1)
+      114 = DispatchMessage    (dziala: wywola WndProc apki)
+      124 = UpdateWindow       (dziala: PostMessage WM_PAINT)
+      125 = InvalidateRect     (dziala: PostMessage WM_PAINT)
+      173 = LoadCursor         (stub: zwraca 1)
+      174 = LoadIcon           (stub: zwraca 1)
+      175 = LoadBitmap         (stub: zwraca 0, ETAP 14)
+      176 = LoadString         (stub: zwraca 0, ETAP 13h)
+      232 = SetWindowPos       (stub)
+      420 = Wsprintf           (stub: zwraca 0; variadic nie moze byc __pascal)
+      500 = LibMain             (zwraca 1)
+    Klucz: GetDC/ReleaseDC przeniesione z GDI.EXE do USER.EXE (zgodnie z SDK).
+    MAX_EXPORTS: 128 -> 512 (ordinal 420 wymaga tablicy 512 elementow w loaderze).
+    MSG struct rozszerzona o pola time/x/y (zgodnie z prawdziwym Win16).
+    Kolejka MSG: 32 -> 64 elementow.
+
+[x] 11d: gdi.c - eksporty pod prawdziwymi numerami GDI.EXE SDK
+    Zaimplementowane:
+      29  = PatBlt             (stub: zwraca 1, ETAP 15)
+      33  = TextOut            (dziala: draw_char_gdi z huge selectors, bialy)
+      34  = BitBlt             (stub: zwraca 1, ETAP 15)
+      45  = SelectObject       (stub: zwraca 0)
+      48  = CreateBitmap       (stub: zwraca 0)
+      51  = CreateCompatibleBitmap (stub: zwraca 0)
+      52  = CreateCompatibleDC     (stub: zwraca 0)
+      68  = DeleteDC           (stub: zwraca 1)
+      69  = DeleteObject       (stub: zwraca 1)
+      80  = GetDeviceCaps      (dziala: 640/480/24/1/96/96 per nIndex)
+      82  = GetObject          (stub: zwraca 0)
+      87  = GetStockObject     (dziala: zwraca 0x8000|nObject jako handle)
+      91  = GetTextExtent      (dziala: zwraca DWORD (FONT_H<<16 | len*FONT_W))
+      93  = GetTextMetrics     (dziala: wypelnia TEXTMETRIC dla 8x16)
+      200 = LibMain             (zwraca 1)
+    Usniete: GetDC(1) i ReleaseDC(2) - przeniesione do USER.EXE.
+    TextOut pozostaje na ordynale 33 (prawdziwy Win16 GDI ordinal).
+
+[x] 11e: Makefile - wlink export dla wszystkich nowych numerow
+    win16app.exe zaimportowany pod prawdziwymi numerami:
+      KERNEL.115 (OutputDebugString), USER.57 (RegisterClass),
+      USER.41 (CreateWindow), USER.28 (PostMessage), USER.6 (PostQuitMessage),
+      USER.108 (GetMessage), USER.113 (TranslateMessage),
+      USER.114 (DispatchMessage), USER.42 (ShowWindow), USER.124 (UpdateWindow),
+      USER.39 (BeginPaint), USER.40 (EndPaint), USER.107 (DefWindowProc),
+      GDI.33 (TextOut)
+
+[x] 11f: loader.c - MAX_EXPORTS: 128 -> 512
+    Konieczne poniewaz USER.420 (wsprintf) wymaga tablicy 512 elementow.
+    parse_entry_table poprawnie obsluguje puste bundles (null type=0x00)
+    dla duzych luk miedzy ordynalem 176 a 232, 232 a 420.
+
+    Klucze techniczne:
+    - wlink export FUNCNAME.N: eksportuje funkcje pod ordynalem N
+    - Watcom DLL prolog (wlink system windows_dll) generuje fixupy do
+      KERNEL.3 (__WINGETPROCADDRESS), KERNEL.4 (__WINSTARTLIB),
+      KERNEL.113 (__WINMAIN__). Musza byc eksportowane nawet jezeli
+      nie sa uzywane przez apke docelowa.
+    - GetDC/ReleaseDC: w prawdziwym Win16 SDK sa w USER.EXE (ord 66/68),
+      nie w GDI.EXE. Przeniesione zgodnie z SDK.
+    - PeekMessage zwraca FALSE gdy kolejka pusta, TRUE gdy jest wiadomosc.
+      Dla game loop SKI.EXE: while(1) { if(!PeekMessage) { game_tick(); } }
+    - Weryfikacja w QEMU: 18 fixupow WIN16APP rozwiazanych poprawnie.
+      Wynik serialowy:
+        USER: RegisterClass OK
+        USER: CreateWindow -> WM_CREATE
+        STEP10: WM_CREATE
+        STEP10: WM_PAINT
+        GDI: TextOut "Hello, Win16!"
+        STEP10: WM_DESTROY
+        USER: PostQuitMessage
+        STEP10: loop done.
 
 ---------------------------------------------------------------------------
 ETAP 12 - KERNEL: InitTask + GlobalAlloc + LocalAlloc + stringi  [TODO]
