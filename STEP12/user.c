@@ -35,7 +35,7 @@
  *   125 = InvalidateRect
  *   173 = LoadCursor         (stub: return 1)
  *   174 = LoadIcon           (stub: return 1)
- *   175 = LoadBitmap         (stub: return 0, ETAP 14)
+ *   175 = LoadBitmap         (fake HBITMAP = 0x100|id, non-zero by ETAP 14)
  *   176 = LoadString         (stub: return 0)
  *   232 = SetWindowPos       (stub)
  *   420 = Wsprintf           (stub)
@@ -558,8 +558,12 @@ unsigned __far __pascal LoadIcon(unsigned hInstance, const char __far *lpIconNam
 
 unsigned __far __pascal LoadBitmap(unsigned hInstance, const char __far *lpBitmapName)
 {
-    (void)hInstance; (void)lpBitmapName;
-    return 0;   /* stub: ETAP 14 */
+    /* MAKERESOURCE(id) = (const char*)(id & 0xFFFF): segment=0, offset=id */
+    unsigned id = (unsigned)((unsigned long)lpBitmapName & 0x00FFUL);
+    (void)hInstance;
+    /* Zwracamy fake HBITMAP = 0x100|id, zawsze non-zero.
+     * Dzieki temu SKI nie przerywa petli ladowania sprite'ow po pierwszym NULL. */
+    return (unsigned)(0x0100U | id);
 }
 
 int __far __pascal LoadString(unsigned hInstance, unsigned uID,
