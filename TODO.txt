@@ -362,185 +362,180 @@ Nasze DLL musza eksportowac funkcje pod numerami zgodnymi z Win16/SDK.
         STEP10: loop done.
 
 ---------------------------------------------------------------------------
-ETAP 12 - KERNEL: InitTask + GlobalAlloc + LocalAlloc + stringi  [TODO]
+ETAP 12 - KERNEL + USER: InitTask + GlobalAlloc + PeekMessage    [DONE]
 ---------------------------------------------------------------------------
-Cel: SKI.EXE musi sie w ogole uruchomic (przed pierwszym oknem).
+Cel: SKI.EXE uruchamia sie, tworzy okna i wchodzi w game loop.
+Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
 
-[ ] 12a: InitTask (KERNEL.91) - KRYTYCZNE
-        Win16 WinMain nie jest wywolywany bezposrednio; SKI.EXE wywoluje
-        InitTask w prologu zeby zarejestrowac sie w systemie.
-        Minimalna implementacja:
-          - Zwraca hInstance (sel DATA apki), hPrevInstance=0,
-            lpszCmdLine=far ptr do pustego stringa, nCmdShow=SW_SHOWNORMAL
-          - Rejestruje segment danych apki jako "current task DS"
-          - W Win16: AX=hInstance, CX=stack size, DX=heap size,
-            DI=hPrevInst, ES:SI=cmdline -> my ignorujemy i zwracamy minimum
-        Kluczowe: bez dzialajacego InitTask apka crashuje przy starcie.
+[x] 12a: InitTask (KERNEL.91) - KRYTYCZNE
+        Zwraca AX=hInstance(0x0040=SEL_APP_DATA), DI=hPrevInst=0, ES:SI=cmdline,
+        CX=ne_stack, DX=ne_heap. SKI: hPrevInst=0 -> nowe okno (nie reuse).
+        Klucz: zwracamy SI=0 (hPrevInst DX:AX -> DI:AX, SI=0) z libstubs.asm.
 
-[ ] 12b: GlobalAlloc (KERNEL.15) / GlobalFree (KERNEL.17)
-        GlobalAlloc(wFlags, dwBytes) -> HGLOBAL
-        Flagi: GMEM_FIXED(0), GMEM_MOVEABLE(2), GMEM_ZEROINIT(0x40)
-        Implementacja: _dos_allocmem lub nasz wewnetrzny heap
-        Zwroc handle = selektor zaalokowanego segmentu
-        GlobalFree: zwolnij segment
+[x] 12b: GlobalAlloc (KERNEL.15) / GlobalFree (KERNEL.17)
+        Implementacja: _dos_allocmem z wewnetrznego heapu (bump allocator).
+        Zwraca HGLOBAL = selektor zaalokowanego segmentu (lub handle).
+        SKI.EXE: alokuje bufory sprite'ow, kolejki, struktury okien.
 
-[ ] 12c: LocalAlloc (KERNEL.5) / LocalFree (KERNEL.7) / LocalReAlloc (KERNEL.6)
-        Lokalny heap wewnatrz DGROUP apki (ne_heap bajty za danymi)
-        Prosta implementacja: bump allocator w DGROUP apki
-        LMEM_FIXED(0): handle = offset w DGROUP
-        LocalFree: oznacz jako wolny (lub ignoruj)
+[x] 12c: LocalAlloc (KERNEL.5) / LocalFree (KERNEL.7)
+        Stubs: LocalAlloc zwraca offset, LocalFree zwraca 1.
+        SKI.EXE uzywa lokalnego heapu do malych alokacji.
 
-[ ] 12d: LstrCpy (KERNEL.88) / LstrLen (KERNEL.90)
-        Far string copy/length (jak strcpy/strlen ale far pointery)
+[x] 12d: LstrCpy (KERNEL.88) / LstrLen (KERNEL.90) - dzialaja
+[x] 12e: GetPrivateProfileString (KERNEL.128) - zwraca lpszDefault
+[x] 12f: LockSegment/UnlockSegment (KERNEL.23/24) - stubs OK
 
-[ ] 12e: GetPrivateProfileString (KERNEL.128)
-        Wczytaj string z pliku .INI; SKI.EXE czyta SKI.INI
-        Na razie: zawsze zwroc domyslna wartosc (lpszDefault)
+[x] 13a: PeekMessage (USER.109) - dziala (PM_NOREMOVE/PM_REMOVE, +55ms tick)
+[x] 13b: GetTickCount (USER.13) - dziala (g_tick_ms += 55 per PeekMessage)
+[x] 13c: InvalidateRect (USER.125) - PostMessage WM_PAINT
+[x] 13d: GetClientRect (USER.33) - zwraca {0,0,640,480}
+[x] 13e: SetWindowPos (USER.232) - stub
+[x] 13g: InitApp (USER.5) - stub zwraca 1
+[x] 13h: LoadString (USER.176) - stub zwraca 0
 
-[ ] 12f: LockSegment/UnlockSegment (KERNEL.23/24) - stubs
-        W Win16 blokuje segment w pamieci. U nas: zwroc segment/1.
+[ ] 13f: Wsprintf (USER.420) - stub (zwraca 0, pusty string)
+        SKI.EXE uzywa do formatowania wynikow: "%ld " (dystans), "%s line %u"
+        Wymagane: %d, %u, %ld, %lu, %s, %%
+        Blokuje: wyswietlanie tekstu w grze (wynik/dystans)
+
+[x] KLUCZOWY BUG STEP12 - ShowWindow (USER.42):
+        Problem: ShowWindow byl no-op stubem. SKI.EXE sprawdza dwie flagi:
+          [0xb3e] = "game active" (ustawiany przez 0x35C2 jesli [0xb02]=hwnd i [0xb1e]=1)
+          [0xb1e] = "window visible" (ustawiany przez 0x365F jesli [0xae2]!=0 i [0xb68]==0)
+          [0xae2] = wParam z WM_ACTIVATE (WA_ACTIVE=1)
+          [0xb68] = wParam z WM_SIZE (SIZE_MINIMIZED=1 sets it, SIZE_RESTORED=0 clears it)
+        Bez WM_SIZE i WM_ACTIVATE: [0xb1e]=0, [0xb3e]=0 -> game loop zapetla sie na
+          PeekMessage bez wywolania funkcji gry 0x34fb.
+        Naprawka: ShowWindow wywoluje SendMessage(hwnd, WM_SIZE, 0, 640|480<<16)
+          i SendMessage(hwnd, WM_ACTIVATE, 1, 0) -> ustawia obie flagi.
+        Weryfikacja: serial pokazuje cykliczne BitBlt + PatBlt + GetTickCount.
+
+    Klucze techniczne:
+    - SKI game loop (0x3F8A): PeekMessage (PM_NOREMOVE) -> jesli kolejka pusta
+      i [0xb3e] AND [0xb1e] != 0 -> call 0x34fb (frame update/render)
+    - [0xb02] = HWND glownego okna (z CreateWindow ordinal 41)
+    - Dwa CreateWindow: hwnd=[0xb02] (klasa "WNDPROCMAIN"), hwnd2=[0xaee] (klasa "WNDPROCSTATUS")
+    - WM_PAINT dla okna statusu wywoluje GetStockObject + FrameRect + LStrLen + TextOut
+    - Wsprintf uzywane do formatowania ale wyniki sa pustymi stringami (stub)
 
 ---------------------------------------------------------------------------
-ETAP 13 - USER: PeekMessage + GetTickCount + pelne okno          [TODO]
+ETAP 13 - USER: Wsprintf + LoadString                            [PARTIAL]
 ---------------------------------------------------------------------------
-Cel: SKI.EXE tworzy okno i wchodzi w game loop z PeekMessage.
 
-[ ] 13a: PeekMessage (USER.109)
-        PeekMessage(lpMsg, hWnd, min, max, wRemoveMsg)
-        Nieblokujacy odpowiednik GetMessage.
-        PM_NOREMOVE(0): tylko podejrzyj kolejke
-        PM_REMOVE(1): wyjmij komunikat
-        Zwraca TRUE jesli jest wiadomosc, FALSE jesli kolejka pusta
-        Kluczowe dla game loop: while(1) { if(PeekMessage(...,PM_REMOVE))
-          { if(msg==WM_QUIT) break; TranslateMessage; DispatchMessage; }
-          else { /* frame logika */ } }
-
-[ ] 13b: GetTickCount (USER.13)
-        Zwraca czas w milisekundach od uruchomienia systemu (32-bit).
-        Implementacja: licznik w loaderze inkrementowany w INT 1Ch (BIOS timer tick)
-        lub staly increment per wywolanie (18.2 Hz BIOS = ~55ms/tick)
-        Alternatywa: PIT channel 0 daje 18.2 Hz, liczymy ticki * 55
-
-[ ] 13c: InvalidateRect (USER.125)
-        Oznacz prostokat okna jako "dirty" -> WM_PAINT trafi do kolejki
-        Implementacja: PostMessage(hwnd, WM_PAINT, 0, 0) jesli bWipe=TRUE
-
-[ ] 13d: GetClientRect (USER.33)
-        Wypelnij RECT {0, 0, szerokosc, wysokosc} okna klienta
-        Na razie: zawsze 640x480 (caly ekran)
-
-[ ] 13e: SetWindowPos (USER.232)
-        Zmien pozycje/rozmiar okna. Stub lub prosta impl.
-
-[ ] 13f: wsprintf (USER.420)
-        Formatowanie stringa (far ptr) jak sprintf.
-        Wymagane przez SKI.EXE do wypisywania wynikow itp.
-        Implementacja: vsprintf z Watcom stdlib, przepisz do far bufora
-
-[ ] 13g: InitApp (USER.5)
-        Inicjalizacja instancji aplikacji. Minimal: zwroc 1 (sukces).
+[ ] 13f: Wsprintf (USER.420)
+        Format: "%ld " (dystans), "%s line %u" (assert), "High Scores" (brak fmt)
+        Implementacja bez stdlib (brak -zl):
+          - reczny itoa dla %d, %u, %ld, %lu
+          - far string copy dla %s
+          - Watcom __cdecl varargs: va_list po lpFmt na stosie
+        Blokuje: wyswietlanie wyniku w grze
 
 [ ] 13h: LoadString (USER.176)
-        Zaladuj string z zasobow RT_STRING apki.
-        SKI.EXE ma 2 x RT_STRING. Czytaj z tablicy zasobow NE.
+        SKI.EXE ma RT_STRING zasoby. Stub zwraca 0.
+        Blokuje: wczytanie nazw okien z zasobow NE
 
 ---------------------------------------------------------------------------
 ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [TODO]
 ---------------------------------------------------------------------------
 Cel: SKI.EXE laduje 86 bitmap (sprite'y) przez LoadBitmap.
+Stan: SKI.EXE wywoluje LoadBitmap w WM_CREATE (CREATE child window handler).
+  LoadBitmap(hInst, MAKERESOURCE(id)) -> zwracamy stub HBITMAP=1.
+  GetObject (GDI.82) odpytuje bitmap o rozmiary - zwracamy stub 0.
+  Brak zaladowanych bitmap -> BitBlt nie moze kopiowac pikseli sprite'ow.
 
 [ ] 14a: Parser tablicy zasobow NE w loader.c
-        NE resource table: turaz za ne_rsrctab offsetem w NE headerze
+        NE resource table: tuz za ne_rsrctab offsetem w NE headerze
         Struktura: align_shift, potem TYPEINFO{type_id, count, ...},
           potem NAMEINFO{offset, length, flags, id, ...} per zasob
         Offset zasobu w pliku: nameinfo.offset << align_shift
         Rozmiar: nameinfo.length << align_shift
+        SKI.EXE: 86 zasobow RT_BITMAP (type_id=0x8002), ids 1..86+
 
 [ ] 14b: Zaladuj wszystkie RT_BITMAP SKI.EXE do pamieci przy starcie
         g_resources[]: tablica {id, phys_ptr, size} dla 86 bitmap
-        Alokacja: _dos_allocmem per bitmap lub jeden duzy bufor
+        Format: Windows DIB = BITMAPINFOHEADER(40B) + paleta + bity
+        Alokacja: jeden ciagly bufor (GlobalAlloc) lub _dos_allocmem per bitmap
+        Uwaga: SKI.EXE ma format paletowy (8bpp lub 4bpp) - trzeba konwertowac
+          paleta -> BGR24 przy blit do LFB
 
 [ ] 14c: LoadBitmap (USER.175)
         LoadBitmap(hInstance, lpBitmapName)
-        lpBitmapName: MAKERESOURCE(id) = (const char*)(id & 0xFFFF)
+        lpBitmapName: MAKERESOURCE(id) = (const char*)(id & 0xFFFF) gdy id < 0x8000
         Znajdz bitmap po id w g_resources[], zwroc HBITMAP = indeks+1
-        Format zasobu: BITMAPINFOHEADER (40B) + paleta + bity
-        Zapisz pointer do danych DIB jako HBITMAP
+        Zapisz pointer do danych DIB jako HBITMAP handle
 
 [ ] 14d: GetObject (GDI.82)
-        GetObject(hObject, cbBuffer, lpObject)
-        Dla HBITMAP: wypelnij BITMAP struct {bmType, bmWidth, bmHeight,
-          bmWidthBytes, bmPlanes, bmBitsPixel, bmBits}
+        GetObject(hObject, cbBuffer, lpObject) dla HBITMAP:
+        Wypelnij BITMAP struct {bmType=0, bmWidth, bmHeight,
+          bmWidthBytes, bmPlanes=1, bmBitsPixel, bmBits=far ptr}
+        SKI.EXE sprawdza rozmiary bitmap przed SelectObject
 
 ---------------------------------------------------------------------------
-ETAP 15 - GDI: BitBlt + DC objects (pierwsza klatka SkiFree)    [TODO]
+ETAP 15 - GDI: PatBlt + BitBlt (pierwsza klatka SkiFree)        [TODO]
 ---------------------------------------------------------------------------
 Cel: pierwsza klatka gry widoczna na ekranie.
+Stan: SKI.EXE juz wywoluje PatBlt i BitBlt w kazdej klatce (game loop aktywny).
+  Sekwencja per klatka (z serial log):
+    GetTickCount -> BitBlt(G:0022) -> PatBlt(G:001D) -> repeat
+  Obie funkcje to stubs zwracajace 1 bez rysowania.
 
-[ ] 15a: CreateCompatibleDC (GDI.52)
-        Stworz offscreen DC kompatybilny z ekranem.
-        Nasza impl: alokuj DC struct z buforem 640x480 lub lazy (NULL bitmap)
+[x] 15a: CreateCompatibleDC (GDI.52) - stub zwraca HDC=2,3,... (g_next_hdc++)
+[x] 15b: CreateCompatibleBitmap (GDI.51) - stub zwraca HBMP=0x100+i
+[x] 15c: SelectObject (GDI.45) - stub zwraca 0
+[x] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69) - stubs zwracaja 1
+[x] 15g: GetDeviceCaps (GDI.80) - dziala (640/480 per nIndex)
+[x] 15h: GetStockObject (GDI.87) - dziala (0x8000|nObject)
+[x] 15i: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93) - dzialaja
 
-[ ] 15b: CreateCompatibleBitmap (GDI.51) / CreateBitmap (GDI.48)
-        Alokuj bitmap w pamieci (buffer pikseli w naszym heapie)
-        CreateCompatibleBitmap(hdc, w, h): alokuj w*h*3 bajtow BGR
-
-[ ] 15c: SelectObject (GDI.45)
-        Wybierz bitmap/pen/brush do DC, zwroc poprzedni obiekt.
-        Dla bitmap: DC.hBitmap = hObject; zwroc stary DC.hBitmap
-
-[ ] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69)
-        Zwolnij DC / GDI obiekt z pamieci
-
-[ ] 15e: BitBlt (GDI.34) - KRYTYCZNE
-        BitBlt(hdcDst, xDst, yDst, w, h, hdcSrc, xSrc, ySrc, dwRop)
-        ROP: SRCCOPY(0xCC0020) - kopiuj piksele z src do dst
-        Jezeli hdcDst = screen DC (HDC=1): zapis bezposrednio do LFB
-          przez huge selectors (STEP10 draw_pixel)
-        Jezeli hdcDst = offscreen DC: kopiuj do bufora DC
-        Obsluga przezroczystosci: jesli kolor piksela == kluczowy kolor
-          (zazwyczaj magenta lub bialy) -> pomin piksel (transparentny)
-        Format zrodla: DIB BITMAPINFOHEADER z paleta lub bez
-
-[ ] 15f: PatBlt (GDI.29)
+[ ] 15f: PatBlt (GDI.29) - NASTEPNY KROK
         PatBlt(hdc, x, y, w, h, dwRop)
-        BLACKNESS(0x000042): wypelnij czarnym
-        WHITENESS(0xFF0062): wypelnij bialym
-        PATCOPY(0xF00021): kopiuj aktualny brush
+        SKI.EXE uzywa do wypelniania tla sniegu i czyszczenia regionow.
+        Implementacja minimalna:
+          WHITENESS (0x00FF0062): fill_rect(x, y, w, h, 0xFF, 0xFF, 0xFF)
+          BLACKNESS (0x00000042): fill_rect(x, y, w, h, 0x00, 0x00, 0x00)
+          PATCOPY   (0x00F00021): use white (brak brush system)
+        fill_rect: petla y_row..y_row+h, draw_pixel per kolumna
 
-[ ] 15g: GetDeviceCaps (GDI.80)
-        Zwroc parametry "urzadzenia" (ekranu):
-          HORZRES(8)=640, VERTRES(10)=480, BITSPIXEL(12)=24,
-          PLANES(14)=1, LOGPIXELSX(88)=96, LOGPIXELSY(90)=96
-
-[ ] 15h: GetStockObject (GDI.87)
-        Zwroc predefiniowane GDI obiekty:
-          BLACK_BRUSH(4), WHITE_BRUSH(0), NULL_BRUSH(5),
-          BLACK_PEN(7), WHITE_PEN(8), SYSTEM_FONT(13)
-        Implementacja: zwroc stale handlery (np. 0x10+idx)
-
-[ ] 15i: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93)
-        GetTextExtent: szerokosc stringa w pikselach (len * FONT_W)
-        GetTextMetrics: wypelnij TEXTMETRIC {tmHeight=16, tmAveCharWidth=8}
+[ ] 15e: BitBlt (GDI.34) - KRYTYCZNE dla sprite'ow
+        BitBlt(hdcDst, xDst, yDst, w, h, hdcSrc, xSrc, ySrc, dwRop)
+        SKI.EXE: SRCCOPY (0x00CC0020) - kopiuj sprite z bitmap do ekranu
+        Wymaga: zaladowane bitmap (ETAP 14) i sprawne SelectObject
+        Jezeli hdcDst=HDC_SCREEN(1): zapis do LFB przez draw_pixel (huge sel)
+        Jezeli hdcSrc=memory DC z bitmapa: czytaj piksele z bufora sprite'u
+        Kolor przezroczysty (colorkey): bialy (0xFF,0xFF,0xFF) -> skip
+        Format sprite DIB: prawdopodobnie 8bpp paletowy -> konwersja BGR24
 
 ---------------------------------------------------------------------------
 ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
 ---------------------------------------------------------------------------
 Cel: SkiFree reaguje na klawiature (kursory steruja narciarzem).
+Stan: SKI.EXE obsluguje WM_KEYDOWN w WndProc (case 0x0100 w 0x4C9A).
+  VK_LEFT/VK_RIGHT zmieniaja kierunek narciarza.
+  VK_F1..F3: zmiana trybu gry.
+  WM_CHAR (0x0102): klawisze literowe (F=full screen itp).
+  Bez handlera IRQ1 gra nie reaguje na wejscie.
 
 [ ] 16a: IRQ1 handler w PM (scan codes -> Virtual Keys -> PostMessage)
-        Tablica scancode -> VK (VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_ESCAPE)
-        PostMessage(g_active_hwnd, WM_KEYDOWN, vk, lParam)
-        Przy zwolnieniu: PostMessage(WM_KEYUP, vk, lParam|0x80000000)
+        Tablica scancode -> VK (VK_LEFT=0x25, VK_RIGHT=0x27, VK_UP=0x26,
+          VK_DOWN=0x28, VK_ESCAPE=0x1B, VK_F1..F12=0x70..0x7B)
+        Handler w pm_call.asm: INT 1 -> odczyt port 0x60, konwersja,
+          PostMessage(g_active_hwnd, WM_KEYDOWN, vk, 0)
+        EOI: outb(0x20, 0x20)
 
-[ ] 16b: TranslateMessage: generuj WM_CHAR z WM_KEYDOWN dla znakow ASCII
+[ ] 16b: TranslateMessage (USER.113): generuj WM_CHAR z WM_KEYDOWN dla ASCII
 
 ---------------------------------------------------------------------------
 ETAP 17 - Mysz: WM_MOUSEMOVE + WM_LBUTTONDOWN                    [TODO]
 ---------------------------------------------------------------------------
+Stan: SkiFree uzywa myszy do sterowania (ruch myszy = kierunek narciarza).
+  WM_MOUSEMOVE (0x0200): lParam=MAKELONG(x,y) -> SKI oblicza kat ruchu.
+  WM_LBUTTONDOWN (0x0201): skok lub akcja.
+  Bez myszy gra jest grywalana tylko klawiatura.
+
 [ ] IRQ12 handler (PS/2 mouse): odczyt pakietu 3B, delta x/y, przyciski
-[ ] PostMessage WM_MOUSEMOVE(lParam=MAKELONG(x,y))
-[ ] PostMessage WM_LBUTTONDOWN / WM_LBUTTONUP
+        port 0x60 po ACK z 0x64; pakiet: btn|dx_sign|dy_sign, dx, dy
+[ ] PostMessage(g_hwnd, WM_MOUSEMOVE, 0, MAKELONG(abs_x, abs_y))
+[ ] PostMessage(g_hwnd, WM_LBUTTONDOWN/UP, MK_LBUTTON, MAKELONG(x,y))
 
 NARZEDZIA
 ---------
