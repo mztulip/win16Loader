@@ -396,7 +396,9 @@ Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
 [ ] 13f: Wsprintf (USER.420) - stub (zwraca 0, pusty string)
         SKI.EXE uzywa do formatowania wynikow: "%ld " (dystans), "%s line %u"
         Wymagane: %d, %u, %ld, %lu, %s, %%
+        Obserwacja: Wsprintf + TextOut wywolywane ~3.3M razy (co klatkę = wynik na ekranie)
         Blokuje: wyswietlanie tekstu w grze (wynik/dystans)
+        Uwaga: TextOut dostaje pusty string wiec nie rysuje nic widocznego
 
 [x] KLUCZOWY BUG STEP12 - ShowWindow (USER.42):
         Problem: ShowWindow byl no-op stubem. SKI.EXE sprawdza dwie flagi:
@@ -431,8 +433,9 @@ ETAP 13 - USER: Wsprintf + LoadString                            [PARTIAL]
         Blokuje: wyswietlanie wyniku w grze
 
 [ ] 13h: LoadString (USER.176)
-        SKI.EXE ma RT_STRING zasoby. Stub zwraca 0.
-        Blokuje: wczytanie nazw okien z zasobow NE
+        SKI.EXE wywoluje LoadString 13 razy przy starcie (serial: U:00B0 x13).
+        Stub zwraca 0 (pusty string). Prawdopodobnie laduje tytuly okien, menu, help.
+        Nie blokuje game loopu, ale wpływa na wyswietlany tekst UI.
 
 ---------------------------------------------------------------------------
 ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [TODO]
@@ -458,11 +461,13 @@ Stan: SKI.EXE wywoluje LoadBitmap w WM_CREATE (CREATE child window handler).
         Uwaga: SKI.EXE ma format paletowy (8bpp lub 4bpp) - trzeba konwertowac
           paleta -> BGR24 przy blit do LFB
 
-[ ] 14c: LoadBitmap (USER.175)
-        LoadBitmap(hInstance, lpBitmapName)
-        lpBitmapName: MAKERESOURCE(id) = (const char*)(id & 0xFFFF) gdy id < 0x8000
-        Znajdz bitmap po id w g_resources[], zwroc HBITMAP = indeks+1
-        Zapisz pointer do danych DIB jako HBITMAP handle
+[ ] 14c: LoadBitmap (USER.175) - PILNE: stub musi zwracac non-zero!
+        Obserwacja: serial log pokazuje TYLKO 1 wywolanie LoadBitmap mimo 86 bitmap.
+        Przyczyna: stub zwraca 0 (NULL), SKI sprawdza wynik i przerywa petlę ladowania.
+        Minimalna naprawka: zwroc fake HBITMAP = (unsigned)(id & 0x7FFF) | 0x100
+          (wystarczy by SKI kontynuowal petlę i zalokowal DC/SelectObject per bitmap)
+        Pelna impl: LoadBitmap(hInstance, lpBitmapName) szuka zasobu po id,
+          zwraca HBITMAP = indeks w tablicy g_bitmaps[]
 
 [ ] 14d: GetObject (GDI.82)
         GetObject(hObject, cbBuffer, lpObject) dla HBITMAP:
@@ -475,9 +480,10 @@ ETAP 15 - GDI: PatBlt + BitBlt (pierwsza klatka SkiFree)        [TODO]
 ---------------------------------------------------------------------------
 Cel: pierwsza klatka gry widoczna na ekranie.
 Stan: SKI.EXE juz wywoluje PatBlt i BitBlt w kazdej klatce (game loop aktywny).
-  Sekwencja per klatka (z serial log):
-    GetTickCount -> BitBlt(G:0022) -> PatBlt(G:001D) -> repeat
-  Obie funkcje to stubs zwracajace 1 bez rysowania.
+  Sekwencja per klatka (z serial log, po dlugim uruchomieniu):
+    GetTickCount(x4.9M) -> BitBlt(x5M) -> PatBlt(x2.5M) -> TextOut(x3.3M) -> repeat
+  Proporcja ~2 BitBlt : 1 PatBlt per klatka.
+  Obie funkcje to stubs zwracajace 1 bez rysowania - ekran pozostaje czarny.
 
 [x] 15a: CreateCompatibleDC (GDI.52) - stub zwraca HDC=2,3,... (g_next_hdc++)
 [x] 15b: CreateCompatibleBitmap (GDI.51) - stub zwraca HBMP=0x100+i
