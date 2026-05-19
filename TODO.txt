@@ -385,15 +385,6 @@ Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
 [x] 12e: GetPrivateProfileString (KERNEL.128) - zwraca lpszDefault
 [x] 12f: LockSegment/UnlockSegment (KERNEL.23/24) - stubs OK
 
-[x] 13a: PeekMessage (USER.109) - dziala (PM_NOREMOVE/PM_REMOVE, +55ms tick)
-[x] 13b: GetTickCount (USER.13) - dziala (g_tick_ms += 55 per PeekMessage)
-[x] 13c: InvalidateRect (USER.125) - PostMessage WM_PAINT
-[x] 13d: GetClientRect (USER.33) - zwraca {0,0,640,480}
-[x] 13e: SetWindowPos (USER.232) - stub
-[x] 13g: InitApp (USER.5) - stub zwraca 1
-[x] 13h: LoadString (USER.176) - dziala (RT_STRING z KCB, ETAP 13)
-[x] 13f: Wsprintf (USER.420) - dziala (%d/%u/%ld/%s + width/precision, ETAP 13)
-
 [x] KLUCZOWY BUG STEP12 - ShowWindow (USER.42):
         Problem: ShowWindow byl no-op stubem. SKI.EXE sprawdza dwie flagi:
           [0xb3e] = "game active" (ustawiany przez 0x35C2 jesli [0xb02]=hwnd i [0xb1e]=1)
@@ -415,8 +406,16 @@ Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
     - Wsprintf (ETAP 13f) i LoadString (ETAP 13h) zaimplementowane pozniej
 
 ---------------------------------------------------------------------------
-ETAP 13 - USER: Wsprintf + LoadString                            [DONE]
+ETAP 13 - USER: PeekMessage + GetTickCount + Wsprintf + LoadString [DONE]
 ---------------------------------------------------------------------------
+Cel: SKI.EXE wyswietla HUD (czas, dystans, predkosc, styl) z poprawnymi danymi.
+
+[x] 13a: PeekMessage (USER.109) - dziala (PM_NOREMOVE/PM_REMOVE, +55ms tick)
+[x] 13b: GetTickCount (USER.13) - dziala (g_tick_ms += 55 per PeekMessage)
+[x] 13c: InvalidateRect (USER.125) - PostMessage WM_PAINT
+[x] 13d: GetClientRect (USER.33) - zwraca {0,0,640,480}
+[x] 13e: SetWindowPos (USER.232) - stub
+[x] 13g: InitApp (USER.5) - stub zwraca 1
 
 [x] 13f: Wsprintf (USER.420)
         Format: "%2u:%2.2u:%2.2u.%2.2u" (czas), "%5.2dm" (dystans),
