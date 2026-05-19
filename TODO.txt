@@ -391,14 +391,8 @@ Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
 [x] 13d: GetClientRect (USER.33) - zwraca {0,0,640,480}
 [x] 13e: SetWindowPos (USER.232) - stub
 [x] 13g: InitApp (USER.5) - stub zwraca 1
-[x] 13h: LoadString (USER.176) - stub zwraca 0
-
-[ ] 13f: Wsprintf (USER.420) - stub (zwraca 0, pusty string)
-        SKI.EXE uzywa do formatowania wynikow: "%ld " (dystans), "%s line %u"
-        Wymagane: %d, %u, %ld, %lu, %s, %%
-        Obserwacja: Wsprintf + TextOut wywolywane ~3.3M razy (co klatkę = wynik na ekranie)
-        Blokuje: wyswietlanie tekstu w grze (wynik/dystans)
-        Uwaga: TextOut dostaje pusty string wiec nie rysuje nic widocznego
+[x] 13h: LoadString (USER.176) - dziala (RT_STRING z KCB, ETAP 13)
+[x] 13f: Wsprintf (USER.420) - dziala (%d/%u/%ld/%s + width/precision, ETAP 13)
 
 [x] KLUCZOWY BUG STEP12 - ShowWindow (USER.42):
         Problem: ShowWindow byl no-op stubem. SKI.EXE sprawdza dwie flagi:
@@ -418,7 +412,7 @@ Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
     - [0xb02] = HWND glownego okna (z CreateWindow ordinal 41)
     - Dwa CreateWindow: hwnd=[0xb02] (klasa "WNDPROCMAIN"), hwnd2=[0xaee] (klasa "WNDPROCSTATUS")
     - WM_PAINT dla okna statusu wywoluje GetStockObject + FrameRect + LStrLen + TextOut
-    - Wsprintf uzywane do formatowania ale wyniki sa pustymi stringami (stub)
+    - Wsprintf (ETAP 13f) i LoadString (ETAP 13h) zaimplementowane pozniej
 
 ---------------------------------------------------------------------------
 ETAP 13 - USER: Wsprintf + LoadString                            [DONE]
@@ -467,6 +461,8 @@ Stan: SKI.EXE wywoluje LoadBitmap w WM_CREATE (CREATE child window handler).
         Offset zasobu w pliku: nameinfo.offset << align_shift
         Rozmiar: nameinfo.length << align_shift
         SKI.EXE: 86 zasobow RT_BITMAP (type_id=0x8002), ids 1..86+
+        UWAGA: infrastruktura parsowania NE resource table juz istnieje
+          w load_ski_strings() (ETAP 13h) - wystarczy rozszerzyc o RT_BITMAP.
 
 [ ] 14b: Zaladuj wszystkie RT_BITMAP SKI.EXE do pamieci przy starcie
         g_resources[]: tablica {id, phys_ptr, size} dla 86 bitmap
