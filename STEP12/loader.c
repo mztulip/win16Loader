@@ -396,16 +396,25 @@ unsigned short g_has_data;
 #define GLOBAL_HEAP_SIZE  (256UL * 1024)   /* 256KB dla GlobalAlloc */
 #define GDYN_FIRST_SEL    0x128            /* pierwszy slot GDT dla GlobalAlloc */
 
+#define RSC_STR_MAX_BLOCKS 2   /* max RT_STRING blocks w KCB */
+
 #pragma pack(push, 1)
 typedef struct {
-    unsigned short app_hinstance;
-    unsigned short next_dyn_sel;
-    unsigned long  heap_phys;
-    unsigned long  heap_next;
-    unsigned long  heap_end;
-    unsigned short local_heap_off;  /* near offset in app data seg where local heap starts */
+    unsigned short app_hinstance;        /* 0 */
+    unsigned short next_dyn_sel;         /* 2 */
+    unsigned long  heap_phys;            /* 4 */
+    unsigned long  heap_next;            /* 8 */
+    unsigned long  heap_end;             /* 12 */
+    unsigned short local_heap_off;       /* 16 */
+    unsigned char  rsc_nblocks;          /* 18: liczba wczytanych blokow RT_STRING */
+    unsigned char  rsc_pad;              /* 19 */
+    unsigned short rsc_block_ids[2];     /* 20,22: ID bloku (1=str1..16, 2=str17..32) */
+    unsigned short rsc_block_sizes[2];   /* 24,26: rozmiar danych bloku w bajtach */
+    /* bajty 28..255: surowe dane RT_STRING (maks 228 bajtow) */
 } KCB_LAYOUT;
 #pragma pack(pop)
+
+#define KCB_RSC_DATA_OFF  28  /* offset bajtow danych RT_STRING w KCB */
 
 unsigned long g_kcb_phys = 0;   /* eksport do pm_call.asm */
 unsigned long g_psp_phys = 0;   /* fake PSP (256 B zeroed) – ES at app startup */
@@ -1006,6 +1015,15 @@ int load_ne(const char *filename)
             file_size  = seg.ns_cbseg ? seg.ns_cbseg : 0;
             alloc_size = seg.ns_minalloc ? seg.ns_minalloc : 65535;
             if (file_size > alloc_size) alloc_size = file_size;
+            /* Segment danych aplikacji: dodaj ne_heap + ne_stack jak Windows 3.1.
+             * Przyklad SKI.EXE: ns_minalloc=3016, ne_heap=16384, ne_stack=16384
+             * -> alloc=35784, wiec offset 0x404A (16458) jest w zakresie. */
+            if (ne.ne_autodata != 0 && i == (unsigned)(ne.ne_autodata - 1)) {
+                unsigned long total = (unsigned long)alloc_size
+                                    + (unsigned long)ne.ne_heap
+                                    + (unsigned long)ne.ne_stack;
+                alloc_size = (total > 65535UL) ? 65535U : (unsigned)total;
+            }
 
             kprintf("Seg %u: file=%u alloc=%u flags=0x%04X%s\n",
                     i+1, file_size, alloc_size, seg.ns_flags,
@@ -1113,6 +1131,98 @@ err:
 }
 
 /* ============================================================
+ * load_ski_strings: wczytaj bloki RT_STRING z SKI.EXE do KCB
+ * ============================================================ */
+static void load_ski_strings(const char *filename)
+{
+    FILE *f;
+    MZ_HEADER mz;
+    NE_HEADER ne;
+    long ne_off;
+    unsigned short rsctab_abs, rscAlignShift;
+    unsigned short kcb_seg;
+    KCB_LAYOUT __far *kcb;
+    unsigned char  __far *kdata;   /* wskaznik na bajty KCB */
+    unsigned short data_off;       /* offset zapisu surowych danych w KCB */
+    unsigned short nb;
+
+    f = fopen(filename, "rb");
+    if (!f) { kprintf("WARN: nie mozna otworzyc %s dla zasobow\n", filename); return; }
+
+    if (fread(&mz, sizeof(mz), 1, f) != 1) { fclose(f); return; }
+    ne_off = (long)mz.e_lfanew;
+    fseek(f, ne_off, SEEK_SET);
+    if (fread(&ne, sizeof(ne), 1, f) != 1) { fclose(f); return; }
+    if (ne.ne_magic != 0x454E) { fclose(f); return; }
+
+    rsctab_abs   = (unsigned short)(ne_off + ne.ne_rsrctab);
+    fseek(f, rsctab_abs, SEEK_SET);
+    if (fread(&rscAlignShift, 2, 1, f) != 1) { fclose(f); return; }
+
+    kcb_seg = (unsigned short)(g_kcb_phys >> 4);
+    kcb     = (KCB_LAYOUT __far *)MK_FP(kcb_seg, 0);
+    kdata   = (unsigned char __far *)MK_FP(kcb_seg, 0);
+    nb      = 0;
+    data_off = KCB_RSC_DATA_OFF;
+
+    /* Przeszukaj tabele zasobow w poszukiwaniu RT_STRING (0x8006) */
+    for (;;) {
+        unsigned short rt_id, rt_count;
+        unsigned short j;
+
+        if (fread(&rt_id, 2, 1, f) != 1) break;
+        if (rt_id == 0) break;
+        if (fread(&rt_count, 2, 1, f) != 1) break;
+        fseek(f, 4, SEEK_CUR);  /* pomin rt_reserved */
+
+        for (j = 0; j < rt_count; j++) {
+            unsigned short rn_offset, rn_length, rn_flags, rn_id;
+            long file_off;
+            unsigned long block_size;
+
+            if (fread(&rn_offset, 2, 1, f) != 1) break;
+            if (fread(&rn_length, 2, 1, f) != 1) break;
+            if (fread(&rn_flags,  2, 1, f) != 1) break;
+            if (fread(&rn_id,     2, 1, f) != 1) break;
+            fseek(f, 4, SEEK_CUR);  /* pomin rn_handle/rn_usage */
+
+            if (rt_id == 0x8006 && nb < RSC_STR_MAX_BLOCKS) {
+                long save_pos = ftell(f);
+                unsigned short block_id = rn_id & 0x7FFF;
+                file_off   = (long)rn_offset << rscAlignShift;
+                block_size = (unsigned long)rn_length << rscAlignShift;
+
+                if (block_size > 228U || data_off + (unsigned short)block_size > 256U) {
+                    kprintf("RSC: blok %u za duzy (%lu B), pomijam\n",
+                            block_id, block_size);
+                } else {
+                    unsigned short i;
+                    unsigned char __far *dst = kdata + data_off;
+                    fseek(f, file_off, SEEK_SET);
+                    for (i = 0; i < (unsigned short)block_size; i++) {
+                        int c = fgetc(f);
+                        if (c == EOF) break;
+                        dst[i] = (unsigned char)c;
+                    }
+                    kcb->rsc_block_ids[nb]   = block_id;
+                    kcb->rsc_block_sizes[nb] = (unsigned short)block_size;
+                    data_off += (unsigned short)block_size;
+                    nb++;
+                    kprintf("RSC: blok %u (str%u..%u) %u B wczytany\n",
+                            block_id, (block_id-1)*16+1, block_id*16,
+                            (unsigned short)block_size);
+                    fseek(f, save_pos, SEEK_SET);
+                }
+            }
+        }
+    }
+
+    kcb->rsc_nblocks = (unsigned char)nb;
+    kprintf("RSC: %u blokow RT_STRING wczytanych do KCB\n", nb);
+    fclose(f);
+}
+
+/* ============================================================
  * main
  * ============================================================ */
 int main(void)
@@ -1171,7 +1281,7 @@ int main(void)
         g_psp_phys = (unsigned long)psp_seg << 4;
         kprintf("PSP: seg=0x%04X phys=0x%05lX\n", psp_seg, g_psp_phys);
 
-        if (_dos_allocmem(2, &kcb_seg) != 0) {   /* 2 paragraphs = 32 bytes, enough for KCB_LAYOUT (18 bytes) */
+        if (_dos_allocmem(16, &kcb_seg) != 0) {  /* 16 paragrafow = 256 B: KCB (28 B) + RT_STRING data */
             kprintf("ERROR: alloc KCB\n"); return 1;
         }
         g_kcb_phys = (unsigned long)kcb_seg << 4;
@@ -1191,6 +1301,7 @@ int main(void)
         kcb->heap_next      = heap_phys;
         kcb->heap_end       = heap_phys + GLOBAL_HEAP_SIZE;
         kcb->local_heap_off = 0x1000;            /* 4KB after start of data seg = past BSS */
+        kcb->rsc_nblocks    = 0;
         kprintf("KCB init: hInst=0x%04X dyn_sel=0x%04X heap=0x%05lX..0x%05lX\n",
                 kcb->app_hinstance, kcb->next_dyn_sel,
                 kcb->heap_phys, kcb->heap_end);
@@ -1200,6 +1311,9 @@ int main(void)
     kprintf("--- Ladowanie SKI.EXE ---\n");
     if (load_ne("SKI.EXE") != 0)
         return 1;
+
+    /* 6b. Wczytaj zasoby RT_STRING z SKI.EXE do KCB */
+    load_ski_strings("SKI.EXE");
 
     g_orig_cs = get_cs();
     g_orig_ss = get_ss();

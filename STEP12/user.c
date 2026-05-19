@@ -42,6 +42,8 @@
  *   500 = LibMain
  */
 
+#include <stdarg.h>
+
 /* Port I/O */
 unsigned char io_inb(unsigned port);
 #pragma aux io_inb = "in al, dx" parm [dx] value [al] modify [al];
@@ -133,6 +135,31 @@ typedef struct {
 typedef struct {
     int left, top, right, bottom;
 } RECT;
+
+/* ============================================================
+ * KCB - Kernel Control Block (SEL_KCB=0x98, 256 bajtow)
+ * ============================================================ */
+#define SEL_KCB      ((unsigned short)0x98)
+#define KCB_RSC_DATA_OFF 28   /* offset surowych danych RT_STRING w KCB */
+
+#define KCB_MK_FP(off) \
+    ((unsigned char __far *)(((unsigned long)(SEL_KCB) << 16) | (unsigned short)(off)))
+
+#pragma pack(push, 1)
+typedef struct {
+    unsigned short app_hinstance;
+    unsigned short next_dyn_sel;
+    unsigned long  heap_phys;
+    unsigned long  heap_next;
+    unsigned long  heap_end;
+    unsigned short local_heap_off;
+    unsigned char  rsc_nblocks;
+    unsigned char  rsc_pad;
+    unsigned short rsc_block_ids[2];
+    unsigned short rsc_block_sizes[2];
+    /* bajty 28..255: surowe dane RT_STRING */
+} KCB_USR;
+#pragma pack(pop)
 
 /* ============================================================
  * Wewnetrzne tablice klas i okien
@@ -569,8 +596,60 @@ unsigned __far __pascal LoadBitmap(unsigned hInstance, const char __far *lpBitma
 int __far __pascal LoadString(unsigned hInstance, unsigned uID,
                                char __far *lpBuffer, int nBufferMax)
 {
-    (void)hInstance; (void)uID;
-    if (nBufferMax > 0) lpBuffer[0] = 0;
+    KCB_USR __far *kcb;
+    unsigned char __far *kp;
+    unsigned block_id, str_in_block;
+    unsigned nb, i;
+    unsigned data_off;
+    unsigned char __far *data;
+    unsigned length;
+
+    (void)hInstance;
+    if (nBufferMax <= 0 || uID == 0) { if (nBufferMax > 0) lpBuffer[0] = 0; return 0; }
+
+    kcb = (KCB_USR __far *)KCB_MK_FP(0);
+    kp  = (unsigned char __far *)KCB_MK_FP(0);
+    nb  = kcb->rsc_nblocks;
+
+    block_id     = (uID - 1) / 16 + 1;
+    str_in_block = (uID - 1) % 16;
+
+    /* Znajdz blok RT_STRING o danym block_id */
+    data_off = KCB_RSC_DATA_OFF;
+    for (i = 0; i < nb; i++) {
+        if (kcb->rsc_block_ids[i] == (unsigned short)block_id) {
+            /* Przejdz przez 16 napisow w bloku */
+            unsigned si;
+            data = kp + data_off;
+            for (si = 0; si < 16; si++) {
+                length = *data++;
+                if (si == str_in_block) {
+                    unsigned n, j;
+                    n = (length < (unsigned)(nBufferMax - 1))
+                        ? length : (unsigned)(nBufferMax - 1);
+                    for (j = 0; j < n; j++) lpBuffer[j] = (char)data[j];
+                    lpBuffer[n] = 0;
+                    { unsigned v = uID; int k;
+                      serial_puts("USR:LoadStr(");
+                      for (k=12; k>=0; k-=4) {
+                          unsigned char nib=(unsigned char)((v>>k)&0xF);
+                          serial_putc(nib<10?'0'+nib:'A'+nib-10);
+                      }
+                      serial_putc(')');
+                      serial_putc('=');
+                      { const char __far *fp = lpBuffer; while(*fp) serial_putc(*fp++); }
+                      serial_putc('\n'); }
+                    return (int)n;
+                }
+                data += length;
+            }
+            lpBuffer[0] = 0;
+            return 0;
+        }
+        data_off += kcb->rsc_block_sizes[i];
+    }
+
+    lpBuffer[0] = 0;
     return 0;
 }
 
@@ -583,14 +662,138 @@ BOOL __far __pascal SetWindowPos(HWND hwnd, HWND hwndInsertAfter,
 }
 
 /* ============================================================
- * ordinal 420: wsprintf - stub
- * Prawdziwa implementacja w ETAP 13.
+ * ordinal 420: Wsprintf
+ * Win16 __cdecl varargs. Obsługuje: %d %u %ld %lu %s %c %%
+ * Win16 konwencja: %s = LPSTR (far pointer, 4 bajty na stosie).
+ * Konwersja decimal bez __U4D: iterowane odejmowanie poteg 10.
  * ============================================================ */
+
+#define USR_MK_FP(seg, off) \
+    ((char __far *)(((unsigned long)(seg) << 16) | (unsigned short)(off)))
+
+static const unsigned long wsp_pow10[10] = {
+    1000000000UL, 100000000UL, 10000000UL, 1000000UL,
+    100000UL,     10000UL,     1000UL,     100UL, 10UL, 1UL
+};
+
+static int wsp_u32(unsigned long v, char __far *buf)
+{
+    int i, len, started, digit;
+    len = 0; started = 0;
+    for (i = 0; i < 10; i++) {
+        digit = 0;
+        while (v >= wsp_pow10[i]) { v -= wsp_pow10[i]; digit++; }
+        if (digit || started || i == 9) { buf[len++] = '0' + digit; started = 1; }
+    }
+    return len;
+}
+
 int __far __cdecl Wsprintf(char __far *lpOut, const char __far *lpFmt, ...)
 {
-    (void)lpFmt;
-    if (lpOut) lpOut[0] = 0;
-    return 0;
+    va_list ap;
+    const char __far *fmt;
+    char __far *out;
+    char __far *s;
+    int count, is_long, n;
+    long lval;
+    unsigned long uval;
+    unsigned soff, sseg;
+
+    fmt = lpFmt; out = lpOut; count = 0;
+    va_start(ap, lpFmt);
+
+    /* DEBUG: print '!' to confirm entry, then lpFmt bytes */
+    serial_putc('!');
+    { unsigned long addr = (unsigned long)lpFmt;
+      int i; unsigned char nibble;
+      for (i = 28; i >= 0; i -= 4) {
+          nibble = (unsigned char)((addr >> i) & 0xF);
+          serial_putc(nibble < 10 ? '0' + nibble : 'A' + nibble - 10);
+          if (i == 16) serial_putc(':');
+      }
+      serial_putc('[');
+      { const char __far *p = lpFmt; int n = 0;
+        while (*p && n < 8) { serial_putc(*p++); n++; } }
+      serial_putc(']');
+      serial_putc('\n'); }
+
+    {
+        /* Zmienne dla parsowania formatu - zadeklarowane raz dla calej petli */
+        int flag_left, flag_zero, width, prec, neg, tlen, k, total, pad;
+        static char tmp[12];  /* static: w DS, bo SS != DS w DLL (thunk) */
+        char pc;
+
+        while (*fmt) {
+            if (*fmt != '%') { *out++ = *fmt++; count++; continue; }
+            fmt++;
+            if (*fmt == '%') { *out++ = '%'; count++; fmt++; continue; }
+
+            /* Parsuj flagi */
+            flag_left = 0; flag_zero = 0;
+            while (*fmt == '-' || *fmt == '+' || *fmt == ' ' || *fmt == '0') {
+                if (*fmt == '-') flag_left = 1;
+                if (*fmt == '0') flag_zero = 1;
+                fmt++;
+            }
+            /* Parsuj szerokosc pola */
+            width = 0;
+            while (*fmt >= '0' && *fmt <= '9') { width = width*10 + (*fmt - '0'); fmt++; }
+            /* Parsuj precyzje */
+            prec = -1;
+            if (*fmt == '.') {
+                fmt++; prec = 0;
+                while (*fmt >= '0' && *fmt <= '9') { prec = prec*10 + (*fmt - '0'); fmt++; }
+            }
+            is_long = 0;
+            if (*fmt == 'l') { is_long = 1; fmt++; }
+
+            switch (*fmt++) {
+            case 'd': case 'i':
+                lval = is_long ? va_arg(ap, long) : (long)va_arg(ap, int);
+                neg = (lval < 0L) ? 1 : 0;
+                uval = neg ? (unsigned long)(-lval) : (unsigned long)lval;
+                goto fmt_num;
+            case 'u':
+                uval = is_long ? va_arg(ap, unsigned long) : (unsigned long)va_arg(ap, unsigned);
+                neg = 0;
+            fmt_num:
+                tlen = wsp_u32(uval, tmp); tmp[tlen] = 0;
+                /* Precyzja: minimum cyfr (dopelnij zerami z lewej) */
+                if (prec >= 0 && tlen < prec) {
+                    pad = prec - tlen;
+                    for (k = tlen; k >= 0; k--) tmp[k + pad] = tmp[k];
+                    for (k = 0; k < pad; k++) tmp[k] = '0';
+                    tlen += pad;
+                }
+                total = tlen + (neg ? 1 : 0);
+                pad   = (width > total) ? width - total : 0;
+                pc    = (flag_zero && prec < 0) ? '0' : ' ';
+                if (!flag_left) {
+                    if (neg && pc == '0') { *out++ = '-'; count++; neg = 0; }
+                    for (k = 0; k < pad; k++) { *out++ = pc; count++; }
+                }
+                if (neg) { *out++ = '-'; count++; }
+                for (k = 0; k < tlen; k++) { *out++ = tmp[k]; count++; }
+                if (flag_left) { for (k = 0; k < pad; k++) { *out++ = ' '; count++; } }
+                break;
+            case 's':
+                /* Win16: %s = LPSTR = far ptr (4 bajty: off, seg) */
+                soff = va_arg(ap, unsigned);
+                sseg = va_arg(ap, unsigned);
+                s = USR_MK_FP(sseg, soff);
+                while (s && *s) { *out++ = *s++; count++; }
+                break;
+            case 'c':
+                *out++ = (char)va_arg(ap, int); count++;
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    *out = '\0';
+    va_end(ap);
+    return count;
 }
 
 /* ============================================================

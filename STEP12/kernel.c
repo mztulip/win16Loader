@@ -66,7 +66,12 @@ typedef struct {
     unsigned long  heap_phys;
     unsigned long  heap_next;
     unsigned long  heap_end;
-    unsigned short local_heap_off;   /* near offset in app data seg where local heap starts */
+    unsigned short local_heap_off;
+    unsigned char  rsc_nblocks;
+    unsigned char  rsc_pad;
+    unsigned short rsc_block_ids[2];
+    unsigned short rsc_block_sizes[2];
+    /* bajty 28..255: surowe dane RT_STRING */
 } KCB;
 #pragma pack(pop)
 
