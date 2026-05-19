@@ -297,9 +297,9 @@ Nasze DLL musza eksportowac funkcje pod numerami zgodnymi z Win16/SDK.
       173 = LoadCursor         (stub: zwraca 1)
       174 = LoadIcon           (stub: zwraca 1)
       175 = LoadBitmap         (stub: zwraca 0, ETAP 14)
-      176 = LoadString         (stub: zwraca 0, ETAP 13h)
+      176 = LoadString         (dziala: wczytuje RT_STRING z KCB, ETAP 13h)
       232 = SetWindowPos       (stub)
-      420 = Wsprintf           (stub: zwraca 0; variadic nie moze byc __pascal)
+      420 = Wsprintf           (dziala: %d/%u/%ld/%s + width/prec, ETAP 13f)
       500 = LibMain             (zwraca 1)
     Klucz: GetDC/ReleaseDC przeniesione z GDI.EXE do USER.EXE (zgodnie z SDK).
     MAX_EXPORTS: 128 -> 512 (ordinal 420 wymaga tablicy 512 elementow w loaderze).
@@ -421,21 +421,35 @@ Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
     - Wsprintf uzywane do formatowania ale wyniki sa pustymi stringami (stub)
 
 ---------------------------------------------------------------------------
-ETAP 13 - USER: Wsprintf + LoadString                            [PARTIAL]
+ETAP 13 - USER: Wsprintf + LoadString                            [DONE]
 ---------------------------------------------------------------------------
 
-[ ] 13f: Wsprintf (USER.420)
-        Format: "%ld " (dystans), "%s line %u" (assert), "High Scores" (brak fmt)
-        Implementacja bez stdlib (brak -zl):
-          - reczny itoa dla %d, %u, %ld, %lu
-          - far string copy dla %s
-          - Watcom __cdecl varargs: va_list po lpFmt na stosie
-        Blokuje: wyswietlanie wyniku w grze
+[x] 13f: Wsprintf (USER.420)
+        Format: "%2u:%2.2u:%2.2u.%2.2u" (czas), "%5.2dm" (dystans),
+          "%5.2dm/s" (predkosc), "%7ld" (styl), "%s", "%ld", "%%"
+        Implementacja bez stdlib (reczny itoa, iterowane odejmowanie poteg 10).
+        Parsuje flagi (-,0), szerokosc pola, precyzje (.N), modyfikator 'l'.
+        Precyzja dla int/uint: minimum N cyfr (dopelnia zerami z lewej).
+        Szerokosc: minimum N znakow (dopelnia spacjami/zerami z lewej).
+        KLUCZOWY BUG: 'tmp[12]' musi byc 'static' - w thunkach DLL SS != DS
+          (SS = stos apki, DS = DGROUP DLL). Tablica na stosie przekazana jako
+          near ptr do subfunkcji jest adresowana przez DS -> blad!
+          Lokalny char[] -> static char[] przenosi do segmentu danych DLL.
+        Wynik: " 0:00:00.00", "   00m", "   00m/s" poprawnie formatowane.
 
-[ ] 13h: LoadString (USER.176)
-        SKI.EXE wywoluje LoadString 13 razy przy starcie (serial: U:00B0 x13).
-        Stub zwraca 0 (pusty string). Prawdopodobnie laduje tytuly okien, menu, help.
-        Nie blokuje game loopu, ale wpływa na wyswietlany tekst UI.
+[x] 13h: LoadString (USER.176)
+        RT_STRING zasoby z SKI.EXE wczytane do KCB rozszerzonego do 256B.
+        Strings: 2 (Time:), 3 (Ski Paused...), 4-7 (etykiety HUD), 8-11 (poczatkowe
+          wartosci), 12-15 (formaty: %2u:%2.2u:%2.2u.%2.2u / %5.2dm / %5.2dm/s / %7ld).
+        KCB rozszerzony: loader alokuje 16 paragrafow (256B) zamiast 2 (32B).
+          - bajty 0-17: istniejace pola KCB
+          - bajt 18: rsc_nblocks (liczba blokow RT_STRING)
+          - bajty 20-23: rsc_block_ids[2] (ID bloku: 1=str1..16, 2=str17..32)
+          - bajty 24-27: rsc_block_sizes[2] (rozmiar danych bloku w bajtach)
+          - bajty 28-255: surowe dane Pascal-string z RT_STRING (176+48=224B)
+        GDT limit SEL_KCB: 0x001F -> 0x00FF (pm_call.asm).
+        LoadString: szuka bloku w KCB, przechodzi przez 16 Pascal-stringow (length-byte).
+        Weryfikacja: TextOut pokazuje " 0:00:00.00", "   00m", "   00m/s" co klatke.
 
 ---------------------------------------------------------------------------
 ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [TODO]
@@ -559,8 +573,8 @@ PRZYDATNE REFERENCJE
 - Bochs debugger: bochs.sourceforge.io
 - Istniejacy projekt 13ring3/ - podobny protected mode setup (do podejrzenia)
 
-MAPA GDT (STEP10 - po huge selectors)
---------------------------------------
+MAPA GDT (STEP12 - po KCB + GDT_ACCESS + huge selectors)
+----------------------------------------------------------
 0x00  null
 0x08  SEL_CODE32      flat 32-bit code (base=0, limit=4GB) - PM entry
 0x10  SEL_DATA32      flat 32-bit data (base=0, limit=4GB) - font ROM, stos
@@ -568,8 +582,8 @@ MAPA GDT (STEP10 - po huge selectors)
 0x20  SEL_CODE16      16-bit code (base=g_cs_phys) - powrot do RM, int3f
 0x28  SEL_DATA16      16-bit data (base=g_cs_phys) - powrot do RM
 0x30  SEL_APP_CODE    16-bit code apki (base=g_app_phys)
-0x38  SEL_VGA         VGA text buffer (base=0xB8000, limit=0x09FF)
-0x40  SEL_APP_DATA    16-bit data apki (base=g_app_data_phys)
+0x38  SEL_PSP         fake PSP (base=g_psp_phys, limit=255B)
+0x40  SEL_APP_DATA    16-bit data apki (base=g_app_data_phys, limit=ns_minalloc+heap+stack)
 0x48  SEL_DLL_CODE(0) KERNEL code
 0x50  SEL_DLL_DATA(0) KERNEL data (DGROUP)
 0x58  SEL_DLL_CODE(1) USER code
@@ -579,8 +593,11 @@ MAPA GDT (STEP10 - po huge selectors)
 0x78  SEL_DLL_CODE(3) (wolny slot)
 0x80  SEL_DLL_DATA(3) (wolny slot)
 0x88  SEL_THUNK       thunki INT 3F (base=g_thunk_phys, 16-bit code)
-0x90  (dq 0 - bylo SEL_VESA, usuniete w STEP10)
-0x98  (dq 0 - bylo SEL_FONT, usuniete w STEP10)
+0x90  SEL_VESA        32-bit 1MB alias (base=LFB, limit=1MB) - stary, nieuzywany w GDI
+0x98  SEL_KCB         Kernel Control Block (base=g_kcb_phys, limit=255B, 16-bit data)
+                       Layout: hinstance(2) next_dyn_sel(2) heap_phys(4) heap_next(4)
+                         heap_end(4) local_heap_off(2) rsc_nblocks(1) pad(1)
+                         rsc_block_ids[2](4) rsc_block_sizes[2](4) rsc_data[228]
 0xA0  SEL_VESA_WIN(0)  LFB okno 0:  base=LFB+0*65536,   limit=65535 (wiersze  0-33)
 0xA8  SEL_VESA_WIN(1)  LFB okno 1:  base=LFB+1*65536,   limit=65535 (wiersze 34-67)
 0xB0  SEL_VESA_WIN(2)  LFB okno 2:  base=LFB+2*65536,   limit=65535
@@ -597,6 +614,9 @@ MAPA GDT (STEP10 - po huge selectors)
 0x108 SEL_VESA_WIN(13) LFB okno 13: base=LFB+13*65536,  limit=65535
 0x110 SEL_VESA_WIN(14) LFB okno 14: base=LFB+14*65536,  limit=4095  (wiersze 478-479)
 0x118 SEL_FONT         BIOS 8x16 font ROM (base=g_font_phys, limit=0x0FFF)
+0x120 SEL_GDT_ACCESS  samoodniesienie GDT (base=g_cs_phys+gdt, limit=0x527)
+                       MK_FP(0x120, sel) = bajt 'sel' w GDT = deskryptor
+0x128 GDYN_FIRST      poczatek dynamicznych slotow GlobalAlloc (do 0x528)
 
 Uwaga: 640*480*3 = 921600 B
   okno 0:  B[0..65535]         -> wiersze 0..33   (34*1920=65280)
