@@ -1106,6 +1106,12 @@ int __far __cdecl Wsprintf(char __far *lpOut, const char __far *lpFmt, ...)
 int __far __pascal LibMain(unsigned hInst, unsigned wData,
                             unsigned cbHeap, const char __far *cmd)
 {
+    unsigned i;
     (void)hInst; (void)wData; (void)cbHeap; (void)cmd;
+    /* Zero-init wnd_w[8] - KCB nie jest zerowane przez DOS, smieci blokuja klipowanie */
+    for (i = 0; i < 8u; i++) {
+        short __far *kw = (short __far *)KCB_MK_FP(KCB_WND_W_OFF + i * 2u);
+        *kw = 0;
+    }
     return 1;
 }

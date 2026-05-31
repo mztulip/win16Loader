@@ -639,6 +639,16 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         unsigned buf_sel = g_dc_buf_sel[hdcSrc];
         if (buf_sel != 0 && g_dc_has_bg[hdcSrc]) {
             int row, col;
+            /* Precompute child window x exclusion range (raz przed petla, nie per piksel) */
+            int excl_x1 = -1, excl_x2 = -1;
+            {
+                int ci;
+                for (ci = 0; ci < KCB_MAX_HWNDS; ci++) {
+                    short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
+                    short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
+                    if (cw > 0) { excl_x1 = (int)cx; excl_x2 = (int)cx + (int)cw; break; }
+                }
+            }
             for (row = 0; row < h; row++) {
                 int sy = ySrc + row;
                 int dy = yDst + row;
@@ -651,17 +661,7 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                     unsigned char __far *bp;
                     if (sx < 0 || sx >= DC_BUF_W) continue;
                     if (dx < 0 || dx >= 640) continue;
-                    /* Pomiń piksele należące do child windows */
-                    {
-                        int ci;
-                        int skip = 0;
-                        for (ci = 0; ci < KCB_MAX_HWNDS; ci++) {
-                            short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
-                            short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
-                            if (cw > 0 && dx >= (int)cx && dx < (int)cx + (int)cw) { skip = 1; break; }
-                        }
-                        if (skip) continue;
-                    }
+                    if (excl_x1 >= 0 && dx >= excl_x1 && dx < excl_x2) continue;
                     buf_off = (unsigned long)sy * DC_BUF_PITCH + (unsigned long)sx * 4u;
                     bp = (unsigned char __far *)MK_FP(
                             buf_sel + (unsigned)(buf_off >> 16) * 8u,
