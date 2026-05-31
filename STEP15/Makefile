@@ -200,8 +200,9 @@ test14e.exe: test14e.obj
 # -------------------------------------------------------
 # boot_test.img - obraz do testowania (bez SKI.EXE)
 # -------------------------------------------------------
-boot_test.img: kernel.exe user.exe gdi.exe loader.exe test14e.exe fdauto_test.bat $(FDBOOT)
+boot_test.img: kernel.exe user.exe gdi.exe loader.exe test14e.exe fdauto_test.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot_test.img
+	mcopy -i boot_test.img -o fdconfig.sys    ::fdconfig.sys
 	mdel  -i boot_test.img ::fdauto.bat 2>/dev/null || true
 	mcopy -i boot_test.img fdauto_test.bat ::fdauto.bat
 	mcopy -i boot_test.img kernel.exe    ::kernel.exe
@@ -218,8 +219,9 @@ run-test14e: boot_test.img
 	    -d cpu_reset,int,guest_errors -D qemu.log
 
 # -------------------------------------------------------
-boot.img: kernel.exe user.exe gdi.exe loader.exe fdauto.bat $(FDBOOT)
+boot.img: kernel.exe user.exe gdi.exe loader.exe fdauto.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot.img
+	mcopy -i boot.img -o fdconfig.sys         ::fdconfig.sys
 	mdel  -i boot.img ::fdauto.bat 2>/dev/null || true
 	mcopy -i boot.img fdauto.bat              ::fdauto.bat
 	mcopy -i boot.img kernel.exe              ::kernel.exe
