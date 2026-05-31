@@ -411,7 +411,7 @@ class App(tk.Tk):
 
     def _mk_text(self, parent):
         txt = tk.Text(parent,
-            font=("TkFixedFont", 10), wrap="none",
+            font=("Courier", 10), wrap="none",
             bg=C_BG2, fg=C_FG, insertbackground=C_FG,
             selectbackground=C_SEL_BG, selectforeground=C_SEL_FG,
             relief="flat", borderwidth=0,
