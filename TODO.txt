@@ -445,80 +445,62 @@ Cel: SKI.EXE wyswietla HUD (czas, dystans, predkosc, styl) z poprawnymi danymi.
         Weryfikacja: TextOut pokazuje " 0:00:00.00", "   00m", "   00m/s" co klatke.
 
 ---------------------------------------------------------------------------
-ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [TODO]
+ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [DONE]
 ---------------------------------------------------------------------------
 Cel: SKI.EXE laduje 86 bitmap (sprite'y) przez LoadBitmap.
-Stan: SKI.EXE wywoluje LoadBitmap w WM_CREATE (CREATE child window handler).
-  LoadBitmap(hInst, MAKERESOURCE(id)) -> zwracamy stub HBITMAP=1.
-  GetObject (GDI.82) odpytuje bitmap o rozmiary - zwracamy stub 0.
-  Brak zaladowanych bitmap -> BitBlt nie moze kopiowac pikseli sprite'ow.
 
-[ ] 14a: Parser tablicy zasobow NE w loader.c
-        NE resource table: tuz za ne_rsrctab offsetem w NE headerze
-        Struktura: align_shift, potem TYPEINFO{type_id, count, ...},
-          potem NAMEINFO{offset, length, flags, id, ...} per zasob
-        Offset zasobu w pliku: nameinfo.offset << align_shift
-        Rozmiar: nameinfo.length << align_shift
-        SKI.EXE: 86 zasobow RT_BITMAP (type_id=0x8002), ids 1..86+
-        UWAGA: infrastruktura parsowania NE resource table juz istnieje
-          w load_ski_strings() (ETAP 13h) - wystarczy rozszerzyc o RT_BITMAP.
+[x] 14a: Parser tablicy zasobow NE w loader.c (load_ski_bitmaps)
+        Rozszerzenie load_ski_strings() o typ 0x8002 (RT_BITMAP).
+        Skanuje NE resource table SKI.EXE, wczytuje 86 sprite'ow do bufora.
+        KLUCZOWY BUG alokacji: _dos_allocmem musi byc wywolany PRZED file I/O
+          (fopen/fread z DLL loading powoduje C runtime sbrk -> brak miejsca DOS).
+          Fix: alloc PSP/KCB/bufor_bitmap/heap wspolnie przed load_ne_dll().
 
-[ ] 14b: Zaladuj wszystkie RT_BITMAP SKI.EXE do pamieci przy starcie
-        g_resources[]: tablica {id, phys_ptr, size} dla 86 bitmap
-        Format: Windows DIB = BITMAPINFOHEADER(40B) + paleta + bity
-        Alokacja: jeden ciagly bufor (GlobalAlloc) lub _dos_allocmem per bitmap
-        Uwaga: SKI.EXE ma format paletowy (8bpp lub 4bpp) - trzeba konwertowac
-          paleta -> BGR24 przy blit do LFB
+[x] 14b: Bufor bitmap (SEL_BITMAPS=0x128, 56KB DOS buffer)
+        Format: [count(2)][pad(2)][offsets[86]*2=172B][dane DIB ~52KB]
+        HBITMAP = id (1..86); MK_FP(SEL_BITMAPS, offsets[id-1]) = BITMAPINFOHEADER.
+        Wszystkie sprite'y 4bpp paletowe, dol-do-gory, DWORD-aligned rows.
+        GDT: SEL_BITMAPS=0x128 (nowy slot), GDYN_FIRST=0x130 (byl 0x128).
 
-[ ] 14c: LoadBitmap (USER.175) - PILNE: stub musi zwracac non-zero!
-        Obserwacja: serial log pokazuje TYLKO 1 wywolanie LoadBitmap mimo 86 bitmap.
-        Przyczyna: stub zwraca 0 (NULL), SKI sprawdza wynik i przerywa petlę ladowania.
-        Minimalna naprawka: zwroc fake HBITMAP = (unsigned)(id & 0x7FFF) | 0x100
-          (wystarczy by SKI kontynuowal petlę i zalokowal DC/SelectObject per bitmap)
-        Pelna impl: LoadBitmap(hInstance, lpBitmapName) szuka zasobu po id,
-          zwraca HBITMAP = indeks w tablicy g_bitmaps[]
+[x] 14c: LoadBitmap (USER.175) - zwraca HBITMAP = id (1..86)
+        MAKEINTRESOURCE(n): far ptr segment=0, offset=n -> id = offset & 0xFFFF.
 
-[ ] 14d: GetObject (GDI.82)
-        GetObject(hObject, cbBuffer, lpObject) dla HBITMAP:
-        Wypelnij BITMAP struct {bmType=0, bmWidth, bmHeight,
-          bmWidthBytes, bmPlanes=1, bmBitsPixel, bmBits=far ptr}
-        SKI.EXE sprawdza rozmiary bitmap przed SelectObject
+[x] 14d: GetObject (GDI.82) - wypelnia BITMAP struct z BITMAPINFOHEADER
+        bmWidth/bmHeight z bi->biWidth/biHeight, bmWidthBytes DWORD-aligned.
 
 ---------------------------------------------------------------------------
-ETAP 15 - GDI: PatBlt + BitBlt (pierwsza klatka SkiFree)        [TODO]
+ETAP 15 - GDI: PatBlt + BitBlt (pierwsza klatka SkiFree)        [DONE]
 ---------------------------------------------------------------------------
-Cel: pierwsza klatka gry widoczna na ekranie.
-Stan: SKI.EXE juz wywoluje PatBlt i BitBlt w kazdej klatce (game loop aktywny).
-  Sekwencja per klatka (z serial log, po dlugim uruchomieniu):
-    GetTickCount(x4.9M) -> BitBlt(x5M) -> PatBlt(x2.5M) -> TextOut(x3.3M) -> repeat
-  Proporcja ~2 BitBlt : 1 PatBlt per klatka.
-  Obie funkcje to stubs zwracajace 1 bez rysowania - ekran pozostaje czarny.
+Cel: pierwsza klatka gry widoczna na ekranie. Sprite'y narciarza renderowane.
 
-[x] 15a: CreateCompatibleDC (GDI.52) - stub zwraca HDC=2,3,... (g_next_hdc++)
+[x] 15a: CreateCompatibleDC (GDI.52) - zwraca HDC=2,3,... (g_next_hdc++)
 [x] 15b: CreateCompatibleBitmap (GDI.51) - stub zwraca HBMP=0x100+i
-[x] 15c: SelectObject (GDI.45) - stub zwraca 0
-[x] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69) - stubs zwracaja 1
-[x] 15g: GetDeviceCaps (GDI.80) - dziala (640/480 per nIndex)
+[x] 15c: SelectObject (GDI.45) - zapamietuje HBITMAP w g_dc_bitmap[hdc]
+[x] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69) - zwracaja 1
+[x] 15g: GetDeviceCaps (GDI.80) - dziala (HORZRES=640, VERTRES=640)
+        KLUCZOWY FIX: VERTRES=640 (nie 480) - SKI oblicza rozmiar okna jako
+          min(VERTRES,HORZRES)=640, okno 640x640 przy x=0 (nie 480x480 przy x=80).
 [x] 15h: GetStockObject (GDI.87) - dziala (0x8000|nObject)
 [x] 15i: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93) - dzialaja
 
-[ ] 15f: PatBlt (GDI.29) - NASTEPNY KROK
-        PatBlt(hdc, x, y, w, h, dwRop)
-        SKI.EXE uzywa do wypelniania tla sniegu i czyszczenia regionow.
-        Implementacja minimalna:
-          WHITENESS (0x00FF0062): fill_rect(x, y, w, h, 0xFF, 0xFF, 0xFF)
-          BLACKNESS (0x00000042): fill_rect(x, y, w, h, 0x00, 0x00, 0x00)
-          PATCOPY   (0x00F00021): use white (brak brush system)
-        fill_rect: petla y_row..y_row+h, draw_pixel per kolumna
+[x] 15f: PatBlt (GDI.29)
+        WHITENESS (0x00FF0062) -> fill (255,255,255); BLACKNESS (0x00000042) -> (0,0,0).
+        fill_rect przez draw_pixel (huge selectors LFB).
 
-[ ] 15e: BitBlt (GDI.34) - KRYTYCZNE dla sprite'ow
-        BitBlt(hdcDst, xDst, yDst, w, h, hdcSrc, xSrc, ySrc, dwRop)
-        SKI.EXE: SRCCOPY (0x00CC0020) - kopiuj sprite z bitmap do ekranu
-        Wymaga: zaladowane bitmap (ETAP 14) i sprawne SelectObject
-        Jezeli hdcDst=HDC_SCREEN(1): zapis do LFB przez draw_pixel (huge sel)
-        Jezeli hdcSrc=memory DC z bitmapa: czytaj piksele z bufora sprite'u
-        Kolor przezroczysty (colorkey): bialy (0xFF,0xFF,0xFF) -> skip
-        Format sprite DIB: prawdopodobnie 8bpp paletowy -> konwersja BGR24
+[x] 15e: BitBlt (GDI.34) - atlas tracking (sprite compositing)
+        5 przypadkow: sprite->memDC, memDC->memDC, screen->memDC, SRCAND/SRCPAINT,
+          memDC->screen (final blit z auto-clear alpha).
+        g_atlas_tab[{dc, y_off}] = sprite_hbm: mapowanie offsetu atlasu -> HBITMAP.
+        g_dc_last_hbm/xoff/yoff[]: przechowuje ostatni sprite z Case 2 per DC6.
+        Kolor przezroczysty: alpha=0 -> skip przy blit na ekran.
+        4bpp paleta -> BGR24 konwersja przez RGBQUAD w BITMAPINFOHEADER.
+
+    Klucze techniczne:
+    - SKI uzywa 2 atlasow: DC2 (sprite male w<=32), DC4 (sprite duze w>32)
+    - DC6: memDC kompozyt (posredni), blit do screen DC=1 w Case C
+    - HWND-based DC: GetDC(child) zwraca 0x4000|hwnd, pozycja z KCB wnd_ox/oy[]
+    - DS!=SS w DLL: lokalne zmienne przekazywane jako near ptr ulegaja korupcji;
+      fix: uzywac zmiennych globalnych lub static zamiast lokalnych tablic
 
 ---------------------------------------------------------------------------
 ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
@@ -568,8 +550,8 @@ PRZYDATNE REFERENCJE
 - Bochs debugger: bochs.sourceforge.io
 - Istniejacy projekt 13ring3/ - podobny protected mode setup (do podejrzenia)
 
-MAPA GDT (STEP12 - po KCB + GDT_ACCESS + huge selectors)
-----------------------------------------------------------
+MAPA GDT (STEP15 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
+------------------------------------------------------------------------
 0x00  null
 0x08  SEL_CODE32      flat 32-bit code (base=0, limit=4GB) - PM entry
 0x10  SEL_DATA32      flat 32-bit data (base=0, limit=4GB) - font ROM, stos
@@ -609,9 +591,12 @@ MAPA GDT (STEP12 - po KCB + GDT_ACCESS + huge selectors)
 0x108 SEL_VESA_WIN(13) LFB okno 13: base=LFB+13*65536,  limit=65535
 0x110 SEL_VESA_WIN(14) LFB okno 14: base=LFB+14*65536,  limit=4095  (wiersze 478-479)
 0x118 SEL_FONT         BIOS 8x16 font ROM (base=g_font_phys, limit=0x0FFF)
-0x120 SEL_GDT_ACCESS  samoodniesienie GDT (base=g_cs_phys+gdt, limit=0x527)
+0x120 SEL_GDT_ACCESS  samoodniesienie GDT (base=g_cs_phys+gdt, limit=0x52F)
                        MK_FP(0x120, sel) = bajt 'sel' w GDT = deskryptor
-0x128 GDYN_FIRST      poczatek dynamicznych slotow GlobalAlloc (do 0x528)
+0x128 SEL_BITMAPS     bufor 86 sprite'ow 4bpp SKI.EXE (base=g_bitmaps_phys, limit=64KB-1)
+                       Format: [count(2)][pad(2)][offsets[86]*2][DIB data ~52KB]
+                       HBITMAP=id (1..86) -> MK_FP(0x128, offsets[id-1]) = BITMAPINFOHEADER
+0x130 GDYN_FIRST      poczatek dynamicznych slotow GlobalAlloc (127 slotow, do 0x52F)
 
 Uwaga: 640*480*3 = 921600 B
   okno 0:  B[0..65535]         -> wiersze 0..33   (34*1920=65280)
