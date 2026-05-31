@@ -1,0 +1,566 @@
+SkiFree GDI Call Analysis — STEP15
+====================================
+(captured via serial trace, 600 calls)
+
+=== GDI FUNCTIONS USED BY SKIFREE ===
+
+1. GetDeviceCaps(hdc, nIndex)
+   - Called during WM_CREATE to query screen dimensions.
+   - Indices used: HORZRES(8), VERTRES(10), BITSPIXEL(12), RASTERCAPS(38).
+   - SKI.EXE uses min(HORZRES, VERTRES) as the game window size.
+   - We return HORZRES=VERTRES=640 so window = 640x640.
+
+2. CreateCompatibleDC(hdc)
+   - Called 5 times during WM_CREATE: creates DC2..DC6.
+   - Win16: allocates a "memory DC" compatible with the screen.
+   - Our impl: allocates a 640x480x4 BGRA pixel buffer from XMS (19 GDT windows each).
+   - All pixels start as alpha=0 (transparent).
+
+3. CreateCompatibleBitmap(hdc, w, h) / CreateBitmap(...)
+   - Called to create bitmap objects associated with atlas DCs.
+   - Results: HBM 0x57 (small sprite atlas bitmap), 0x59 (large sprite atlas),
+     0x58 / 0x5A (mask atlases — CreateBitmap, inverted).
+   - Our impl: returns a fake handle (sequential number >= 87).
+
+4. SelectObject(hdc, hObject)
+   - Binds a bitmap to a DC: g_dc_bitmap[hdc] = hObject.
+   - During atlas init: SelectObject(DC6, sprite_N) sets DC6's "source bitmap" to sprite N.
+   - DC6 is then used as source in BitBlt so that src_hbm = sprite_N triggers Case 1.
+   - Returns previous HBITMAP.
+
+5. BitBlt(hdcDst, xDst, yDst, w, h, hdcSrc, xSrc, ySrc, dwRop)
+   - Core sprite rendering function. Multiple cases depending on DC types and ROP.
+   - See "RENDERING PIPELINE" section below.
+
+6. TextOut(hdc, x, y, str, len)
+   - Renders text using the 8x16 ROM font.
+   - Called for HUD text (Time/Dist/Speed/Style) and title screen text.
+
+7. GetTextExtent(hdc, str, len) / GetTextMetrics(hdc, lptm)
+   - Used to measure text for layout (button sizes, status bar).
+
+8. GetStockObject(nObject)
+   - Returns stock objects (brushes, pens): encoded as 0x8000|nObject.
+   - Used in SelectObject calls for window/button drawing.
+
+9. PatBlt(hdc, x, y, w, h, dwRop)
+   - Fills rectangle with current brush (WHITENESS/BLACKNESS).
+   - NOTE: Not seen in the 600-call trace — may be used for background fill
+     or in messages not reached within trace limit.
+
+10. DeleteDC / DeleteObject
+    - Cleanup stubs. No-op in our implementation.
+
+11. GetObject(hObject, cbBuffer, lpObject)
+    - Fills BITMAP struct for a given HBITMAP.
+    - Used by SKI.EXE to get sprite dimensions (bmWidth, bmHeight).
+
+
+=== DC MAP ===
+
+DC 1  = screen DC (maps to LFB at 0xFD000000, pitch=1920, 3 bytes/px BGR)
+DC 2  = small sprite atlas  (sprites w<=32px)  buf_sel=0x0130  HBM=0x57
+DC 3  = small mask atlas    (NOTSRCCOPY)        buf_sel=0x01C8  HBM=0x58
+DC 4  = large sprite atlas  (sprites w>32px)   buf_sel=0x0260  HBM=0x59
+DC 5  = large mask atlas    (NOTSRCCOPY)        buf_sel=0x02F8  HBM=0x5A
+DC 6  = compositing memDC   (per-frame)         buf_sel=0x0390  HBM=0x5B
+
+Selector spacing: 19 descriptors * 8 bytes = +0x98 per DC.
+DC buffer layout: 640x480 * 4 bytes = 1,228,800 bytes = 19 * 64KB GDT windows.
+Pixel format: BGRA — [B][G][R][A] where A=0=transparent, A=1=opaque.
+
+
+=== RENDERING PIPELINE (BitBlt cases) ===
+
+Case 1: sprite(1..86) → memDC, SRCCOPY
+  Condition: src_hbm in 1..86, hdcDst in 2..15, ROP=CC (SRCCOPY)
+  Action: decode 4bpp sprite pixels from SEL_BITMAPS, write to dst buffer.
+          Transparent pixels (palette idx 15 = white) skipped (alpha stays 0).
+  Used for: atlas building during WM_CREATE. Each sprite blitted at yDst=row_offset.
+
+Case 2B: memDC → memDC, SRCCOPY
+  Condition: hdcSrc in 2..15, hdcDst in 2..15, ROP=CC
+  Action: copy src buffer pixels (alpha=1 only) to dst buffer.
+  Used for: DC4 (atlas row) → DC6 (compositing DC) each frame.
+  Important: only alpha=1 pixels copied, so transparent regions stay clear.
+
+Case A: screen(1) → memDC, SRCCOPY
+  Condition: hdcSrc=1, hdcDst in 2..15, ROP=CC
+  Action: copy screen pixels into memDC buffer (background capture).
+  NOT observed in the 600-call trace for SKI.EXE.
+
+Case B: ANY → memDC, SRCAND(88) or SRCPAINT(EE)
+  Condition: hdcDst in 2..15, ROP=88 or EE
+  Sub-case Bsprite: src is real sprite (1..86)
+    SRCPAINT(EE): write sprite pixels to buffer
+    SRCAND(88): write black where sprite opaque (mask operation)
+  Sub-case Bmemdc: src is memDC
+    SRCPAINT(EE): copy alpha=1 pixels from src buffer
+    SRCAND(88): no-op (would cause solid rectangles — SRCAND on memDC is skipped)
+  NOT observed in game loop trace for SKI.EXE — only during potential init paths.
+
+Case C: memDC → screen(1), SRCCOPY
+  Condition: hdcDst=1, hdcSrc in 2..15, ROP=CC
+  Action: blit alpha=1 pixels from src buffer to LFB. Auto-clears alpha after read.
+          Transparent (alpha=0) pixels don't overwrite background.
+  Used for: DC6 → screen each frame.
+
+Case 4: sprite(1..86) → screen, SRCCOPY
+  Condition: src_hbm in 1..86, hdcDst=1, ROP=CC
+  Action: direct 4bpp→LFB blit via blit_sprite_hbm (no intermediate buffer).
+  NOT observed in the 600-call trace for SKI.EXE.
+
+
+=== CALL SEQUENCE: WM_CREATE (atlas init) ===
+
+1. GetDeviceCaps(HORZRES=8), GetDeviceCaps(VERTRES=10) [garbled in trace - DS!=SS bug]
+2. RegisterClass(proc=0030:4C9A)  [WndProc]
+3. RegisterClass(proc=0030:513C)  [status bar WndProc]
+4. CreateWindow(main) -> WM_CREATE:
+   a. CreateCompatibleDC x5 -> DC2..DC6 (640x480 BGRA buffers)
+   b. CreateCompatibleBitmap(DC2,w,h) -> HBM 0x57
+   c. SelectObject(DC2, 0x57)
+   d. CreateBitmap(1,h,1,1,0) -> HBM 0x58
+   e. SelectObject(DC3, 0x58)
+   f. CreateCompatibleBitmap(DC4,w,h) -> HBM 0x59
+   g. SelectObject(DC4, 0x59)
+   h. CreateBitmap(1,h,1,1,0) -> HBM 0x5A
+   i. SelectObject(DC5, 0x5A)
+   j. FOR sprite N = 1..86:
+      - SelectObject(DC6, N)
+      - BitBlt(DC2 or DC4, 0, yOff, w, h, DC6, 0, 0, SRCCOPY=CC) [Case 1]
+      - BitBlt(DC3 or DC5, 0, yOff, w, h, DC6, 0, 0, NOTSRCCOPY=33) [unhandled, no-op]
+      - SelectObject(DC6, 1) [reset DC6]
+      DC2/DC3 for w<=32px sprites; DC4/DC5 for w>32px sprites.
+      yOff accumulates: each sprite stacked vertically in atlas.
+   k. CreateCompatibleBitmap -> HBM 0x5B
+   l. SelectObject(DC6, 0x5B)
+5. CreateWindow(status_child) -> WM_CREATE:
+   a. SelectObject(HWND-DC 0x4002, GetStockObject(SYSTEM_FONT=0xA))
+
+=== CALL SEQUENCE: Game loop (WM_USER+2 = 0x1002) ===
+
+Per frame (18 Hz, one IRQ0 tick):
+
+1. BitBlt(DC6, 0, 0, w, h, DC4, 0, ySrc, SRCCOPY)
+   [Case 2B: copy sprite row ySrc from large atlas DC4 into DC6 at (0,0)]
+   ySrc changes each frame to select the current animation frame.
+
+2. BitBlt(screen=1, xDst, yDst, w, h, DC6, 0, 0, SRCCOPY)
+   [Case C: blit DC6 to screen at sprite position. Auto-clears DC6 after blit.]
+
+NOTE: Only large sprites (DC4) visible in the 600-call game loop trace.
+Small sprites (DC2) and SRCAND/SRCPAINT may appear later or for specific objects.
+No background clear (PatBlt) observed — background is left from previous frame
+except where sprites are blitted. SKI.EXE relies on the snow-white background
+being preserved (no background rendering after initial setup).
+
+
+=== KEY BUGS FOUND AND FIXED ===
+
+1. decode_4bpp_pixel: DS!=SS output parameter bug
+   PROBLEM: Function had output params (unsigned char *r_out etc.) — near pointers.
+   In Win16 DLL context DS=DGROUP != SS=app_stack. Writing *r_out via near ptr uses DS.
+   Stack locals passed as &rv1 are on SS. Writes go to wrong DS address -> rv1/tr1 garbage.
+   tr1 (transparency flag) stays uninitialized -> all pixels treated as opaque -> SOLID RECTANGLES.
+
+   FIX: Changed return type to unsigned long (DX:AX register return, no memory writes):
+   - Return 0x01000000 for transparent
+   - Return (R<<16)|(G<<8)|B for opaque
+   Callers check (pix & 0x01000000) for transparency, extract R/G/B from low 24 bits.
+
+2. serial_putdec: stack buffer DS!=SS bug
+   PROBLEM: char buf[8] on stack; serial_puts(buf+i) reads via DS -> garbage output.
+   FIX: static char buf[8] (in DGROUP, read via DS correctly).
+
+3. SRCAND from memDC source: solid rectangle bug (STEP15g)
+   PROBLEM: BitBlt(DC6, ..., DC3_mask, ..., SRCAND) wrote black+alpha=1 where mask=opaque,
+   including sprite-transparent interior. Case C blitted these black pixels to screen.
+   FIX: SRCAND from memDC source is a no-op (only SRCPAINT handled for memDC→memDC).
+
+=== SPRITE ID TABLE ===
+(sprite_sheet.png zawiera wszystkie 86 spriteow)
+
+ID   WxH        Opis
+---  ---------  -------------------------------------------------------
+  1  16x32      Narciarz - stoi prosto, jedzie w dol (klatka A)
+  2  16x32      Narciarz - stoi prosto, jedzie w dol (klatka B, lekko inna poza)
+  3  24x28      Narciarz - skret w lewo (lagodny)
+  4  24x28      Narciarz - skret w prawo (lagodny)
+  5  16x32      Narciarz - jedzie w dol, pochylony lekko
+  6  24x28      Narciarz - skret w lewo (sredni)
+  7  24x28      Narciarz - skret w prawo (sredni)
+  8  24x28      Narciarz - skret w lewo (ostry)
+  9  24x28      Narciarz - skret w prawo (ostry)
+ 10  24x28      Narciarz - skret w prawo (bardzo ostry)
+ 11  24x28      Narciarz - skret w lewo (bardzo ostry)
+ 12  32x32      Narciarz - upadek z napisem "OUCH!" (klatka wypadku)
+ 13  32x24      Narciarz - toczacy sie po upadku (tumbling)
+ 14  32x32      Narciarz - lezy po upadku (koniec animacji wypadku)
+ 15  28x31      Narciarz - skok, w powietrzu (klatka A)
+ 16  28x31      Narciarz - skok, w powietrzu (klatka B)
+ 17  28x34      Narciarz - skok wysoki / wycig w gore
+ 18  32x26      Narciarz - figura akrobatyczna (rozlozone rece)
+ 19  32x32      Narciarz - figura akrobatyczna (inna poza)
+ 20  31x24      Narciarz - figura akrobatyczna pozioma (eagle/spread)
+ 21  25x31      Narciarz - jazda w bok / krok boczny (lewo)
+ 22  25x31      Narciarz - jazda w bok / krok boczny (prawo)
+ 23  12x24      Tyczka slalomowa - zielona chorągiewka
+ 24  12x24      Tyczka slalomowa - czerwona chorągiewka
+ 25  12x24      Tyczka slalomowa - zielona (wariant)
+ 26  12x24      Tyczka slalomowa - czerwona (wariant)
+ 27  64x32      Gondola kolejki linowej - kabina [LARGE]
+ 28  24x30      Snowboardzista - jedzie prosto (klatka A)
+ 29  22x29      Snowboardzista - jedzie prosto (klatka B)
+ 30  21x29      Snowboardzista - skret
+ 31  24x24      Snowboardzista - upadek / akrobacja
+ 32  24x24      Snowboardzista - inna poza akrobatyczna
+ 33  21x15      Pies - biega (klatka A, bez tekstu)
+ 34  21x15      Pies - biega (klatka B, bez tekstu)
+ 35  19x19      Pies - szczeka "WOOF!" (klatka A)
+ 36  19x19      Pies - szczeka "WOOF!" (klatka B)
+ 37  26x30      Narciarz - skret w lewo (duzy, inna paleta?)
+ 38  20x30      Narciarz - jedzie w dol (wariant)
+ 39  25x31      Narciarz - skret prawo (wariant)
+ 40  30x29      Narciarz - jazda szybka / pochylony mocno
+ 41  32x32      Narciarz - akrobacja / trick (klatka A)
+ 42  32x32      Narciarz - akrobacja / trick (klatka B)
+ 43  25x29      Narciarz - siad tylny / wypadek boczny
+ 44  29x25      Narciarz - wypadek boczny (inna strona)
+ 45  23x11      Kopczyk sniegu / mulda (maly)
+ 46  16x11      Kopczyk sniegu / mulda (mniejszy)
+ 47  16x4       Cien narciarza (plaska elipsa, bardzo maly)
+ 48  24x8       Cien/ślad na sniegu (poziomy)
+ 49  28x32      Choinka - srednia
+ 50  22x27      Choinka - mala
+ 51  32x64      Choinka - duza (wysoka)
+ 52  32x8       Pasek kolorowy - flagi / dekoracja trasy
+ 53  105x55     Ekran tytulowy - logo "SkiFree by Chris Pirih / Copyright 1991 Microsoft" [LARGE]
+ 54  46x9       Napis "Version 1.0" [LARGE]
+ 55  92x30      Panel instrukcji "Use NumPad (0-9) for better control" [LARGE]
+ 56  63x32      Panel "F2=Restart / F3=Pause" [LARGE]
+ 57  42x27      Znak "Start" (zolty, strzalka w prawo) [LARGE]
+ 58  42x27      Znak "Start" (wariant kolorystyczny) [LARGE]
+ 59  50x29      Znak "Finish" (czerwony) [LARGE]
+ 60  50x29      Znak "Finish" (wariant kolorystyczny) [LARGE]
+ 61  40x36      Znak wyboru trybu "Slalom" (zielony z ptaszkiem) [LARGE]
+ 62  44x36      Znak wyboru trybu "Tree Slalom" (zolty ze strzalka) [LARGE]
+ 63  40x35      Znak wyboru trybu "Free Style" (zielony ze strzalka) [LARGE]
+ 64  24x64      Slup / maszt kolejki linowej (wysoki, czarny)
+ 65  26x32      Yeti (Bigfoot) - maly, stoi (klatka statyczna A)
+ 66  26x32      Yeti - maly, stoi (klatka B)
+ 67  26x32      Yeti - maly, stoi (klatka C)
+ 68  32x48      Yeti - idzie / biegnie (klatka 1)
+ 69  32x48      Yeti - idzie / biegnie (klatka 2)
+ 70  32x48      Yeti - idzie / biegnie (klatka 3)
+ 71  32x48      Yeti - idzie / biegnie (klatka 4)
+ 72  32x48      Yeti - idzie / biegnie (klatka 5)
+ 73  32x48      Yeti - idzie / biegnie (klatka 6)
+ 74  32x48      Yeti - je narciarza (klatka 1, podnosi)
+ 75  32x48      Yeti - je narciarza (klatka 2, trzyma)
+ 76  32x48      Yeti - je narciarza (klatka 3, gryzie, narciarz widoczny)
+ 77  32x48      Yeti - je narciarza (klatka 4, narciarz polkniety)
+ 78  32x48      Yeti - je narciarza (klatka 5)
+ 79  32x48      Yeti - je narciarza (klatka 6, zadowolony)
+ 80  32x48      Yeti - stoi zadowolony po zjedzeniu
+ 81  32x48      Yeti - ostatnia klatka sekwencji (odchodzi?)
+ 82  16x8       Cien (zolta elipsa pod postacia)
+ 83  22x27      Ogien / eksplozja - maly (klatka 1)
+ 84  22x27      Ogien / eksplozja - sredni (klatka 2)
+ 85  22x27      Ogien / eksplozja - duzy (klatka 3)
+ 86  8x11       Maly kamyczek / dziura w sniegu (przeszkoda)
+
+LARGE = sprite trafia do DC4 (large atlas, buf_sel=0x0260); pozostale do DC2 (small).
+Przypisanie DC2 vs DC4: zalezy od kolejnosci w tablicy spriteow i warunku w SKI.EXE
+(prawdopodobnie szerokosc: w>32 -> DC4, w<=32 -> DC2, ale sprite 27 jest 64x32 wiec
+kryterium moze byc HBITMAP index lub kolejnosc inicjalizacji).
+
+=== CALL TRACK: GONDOLA (ruch pionowy) ===
+
+Na ekranie tytułowym gondola porusza się pionowo (wyciąg w górę i w dół).
+Obserwowane w trace (2000 wywołań, ~20s po msg=1002):
+
+Pasażer gondoli / mała kabina (sprite #65, 26x32, DC2 ySrc=1415):
+  -- co klatkę (18 Hz), ~24 kolejne klatki:
+  BitBlt(DC6,    0,   0, 26, 32,  DC2,   0, 1415, SRCCOPY)  [Case 2B: sprite #65 z atlasu DC2]
+  BitBlt(screen, 195, y, 26, 34,  DC6,   0,    0, SRCCOPY)  [Case C:  na ekran]
+    y = 478, 476, 474, ... 382  (ruch: -2 px/klatkę, łącznie 48px w górę)
+    Blit screen ma h=34 (sprite h=32 + 2px cień/margines poniżej)
+
+Kabina gondoli (sprite #27, 64x32, DC4 ySrc=0) — ścieżka DC4 (analogiczna):
+  BitBlt(DC6,    0,   0, 64, 32,  DC4,   0,    0, SRCCOPY)  [Case 2B: sprite #27 z atlasu DC4]
+  BitBlt(screen, x,   y, 64, 32,  DC6,   0,    0, SRCCOPY)  [Case C:  na ekran, x/y zmienia się]
+  (nie zaobserwowano w trace tytułowym — pojawia się w fazie właściwej gry)
+
+Słup masztu (sprite #64, 24x64, DC2 ySrc=1351) — statyczny:
+  BitBlt(DC6,    0,   0, 24, 64,  DC2,   0, 1351, SRCCOPY)  [Case 2B]
+  BitBlt(screen, x,   y, 24, 64,  DC6,   0,    0, SRCCOPY)  [Case C]
+
+Kluczowa obserwacja: gondola NIE używa SRCAND+SRCPAINT.
+Przezroczystość obsługuje nasz system alpha: Case 1 zapisuje piksele sprite z alpha=1,
+Case 2B kopiuje tylko alpha=1, Case C blit tylko alpha=1 → przezroczyste obszary
+nie nadpisują tła. Atlasy masek (DC3/DC5, NOTSRCCOPY) budowane podczas init
+ale NIGDY nie czytane w game loop.
+
+=== CALL TRACK: SPRITE #37 (narciarz wariant) ===
+
+Sprite #37: 26x30, DC2, ySrc w atlasie = 948 (suma wysokości sprite #1..#36).
+
+Inicjalizacja atlasu (WM_CREATE, jednorazowo):
+  SelectObject(DC6, 37)                                    [DC6.hbm = sprite #37]
+  BitBlt(DC2,    0, 948, 26, 30,  DC6,   0,    0, SRCCOPY)  [Case 1: sprite #37 -> DC2 bufor]
+  BitBlt(DC3,    0, 948, 26, 30,  DC6,   0,    0, NOTSRCCOPY=0x33) [no-op w naszej impl.]
+  SelectObject(DC6, 1)                                     [reset DC6.hbm]
+
+Renderowanie co klatkę (gdy sprite #37 aktywny w grze):
+  BitBlt(DC6,    0,   0, 26, 30,  DC2,   0,  948, SRCCOPY)  [Case 2B: wyjmij #37 z atlasu]
+  BitBlt(screen, x,   y, 26, 30,  DC6,   0,    0, SRCCOPY)  [Case C:  na ekran na pozycji x,y]
+
+Sprite #37 (26x30) jest w atlasie małych sprite'ów DC2.
+Wygląda jak narciarz w skręcie w lewo (większy, inna paleta niż #3).
+Jest to jeden z 8 wariantów kierunkowych NPC narciarza (sprity 37-44).
+Szczegółowy opis mechanizmu: patrz sekcja "CALL TRACK: NPC NARCIARZ".
+
+DC2 atlas — rozkład y-offsetów dla wybranych spriteów:
+  #1  y=0     h=32  (narciarz prosto A)
+  #4  y=92    h=28  (narciarz skret prawo lagodny) ← zaobserwowany na title screen @ (308,132)
+  #37 y=948   h=30  (narciarz wariant skret lewo)
+  #64 y=1351  h=64  (slup masztu)
+  #65 y=1415  h=32  (maly pasazer gondoli) ← zaobserwowany w ruchu @ x=195, y:478→382
+
+=== MECHANIZM ZEGAROWY (jak gra odmierza czas) ===
+
+Łańcuch:
+  Sprzęt PIT (8253) -> IRQ0 co ~55ms (18.2 Hz, domyślny divisor=65536)
+    -> irq0_handler (IDT[0x20], pm_call.asm):
+         add word [KCB+28], 55   ; low word licznika ms
+         adc word [KCB+30], 0    ; carry do high word
+    -> GetTickCount() (user.c):
+         return *(unsigned long*)(KCB+28)  ; ms od startu
+
+Jak gra odmierza 20 sekund do startu gondoli:
+  start_tick = GetTickCount();             // zapisz czas startu
+  // ... każda klatka ...
+  if (GetTickCount() - start_tick > 20000) // 20000 ms = ~363 ticki IRQ0
+      gondola_active = 1;
+
+Pętla gry (PeekMessage w user.c) czeka na zmianę licznika:
+  t0 = *tick_p;
+  while (*tick_p == t0) {}   // blokuj do następnego IRQ0 (~55ms)
+  -> jedna klatka = jeden tick IRQ0 = ~55ms -> ~18 klatek/s
+
+SKI.EXE NIE używa SetTimer/WM_TIMER (brak SetTimer w importach USER).
+Cały timing oparty wyłącznie na GetTickCount().
+
+TimerProcMain (eksport ord=1 @ CS:0x3597): callback wywoływany ręcznie
+z pętli gry lub wcześniejszy mechanizm — nie przez WM_TIMER.
+
+Diagnoza ruchu gondoli:
+  Zegar działa poprawnie (IRQ0 co 55ms, GetTickCount OK).
+  Problem nie leży w odmierzaniu czasu — gondola nie rusza się
+  z powodu braku ruchu współrzędnych x/y na ekranie (błąd renderowania).
+
+=== CALL TRACK: NPC NARCIARZ (sprity #37-44) ===
+
+Drugi narciarz przelatuje przez ekran losowo; używa 8 wariantów kierunkowych.
+
+--- System encji (entity linked list) ---
+
+SKI.EXE zarządza listą encji (obiektów ruchomych) zaczepioną w [0xb7c].
+Inicjalizacja w render_or_state (CS:0x3CEB), pool 0x1A00 = 6656 bajtów.
+
+Struktura encji (~52 bajty):
+  +0x00  ptr do następnej encji (linked list)
+  +0x06  pod-licznik / stan pomocniczy
+  +0x08  ID sprite'a bieżącej klatki (aktualizowany przez sprite selection)
+  +0x0A  licznik wieku / tick
+  +0x0C  TYP encji (0=przeszkody, 1=?, 2=?, 3=NPC narciarz, 9=yeti)
+  +0x0E  stan animacji (0x1F..0x27 dla NPC)
+  +0x10  delta-X na klatkę (prędkość X w jednostkach świata)
+  +0x12  delta-Y na klatkę (prędkość Y)
+  +0x14  licznik czasu trwania
+  +0x16  baza X (pozycja startowa w układzie świata)
+  +0x18  baza Y
+  +0x20  bieżąca X w świecie
+  +0x22  bieżąca Y w świecie
+  +0x24  flaga widoczności / warunek aktywności
+  +0x26  prędkość X (aktualizowana przez fizykę)
+  +0x28  prędkość Y
+  +0x2C  bajt flag
+
+--- Typy encji ---
+
+Typ 3 = NPC narciarz (entity_type3 @ CS:0x2594)
+Typ 9 = yeti          (entity_type9 @ CS:0x251E, stany 0x38-0x3C)
+Typ 0 = przeszkody    (drzewa, muldy itp.)
+
+--- Maszyna stanów NPC (CS:0x2594) ---
+
+Stan 0x1F (31) – uśpiony:
+  rand(10): wynik==0 (1/10 szans/klatkę) → stan→32  (aktywacja)
+           wynik!=0 (9/10)               → pozostań w stanie 31
+
+Stan 0x20 (32) – aktywny / "na starcie":
+  rand(10): wynik==0 (1/10)  → stan→31  (deaktywacja)
+           wynik!=0 (9/10)  → pozostań w stanie 32
+
+Stan 0x21 (33) – warunek startu:
+  if [encja+0x24] != 0: pozostań → normalne renderowanie
+  if [encja+0x24] == 0: stan→31  (warunek nie spełniony → znikaj)
+
+Stany 0x22-0x27 (34-39) – cykl animacji (6 klatek):
+  co klatkę: stan++; jeśli stan==39 → stan=32
+  Pętla: 34→35→36→37→38→39→32→(32 z losowością)
+
+Przy ~25 klatkach/s i prawdopodobieństwie 1/10 na klatkę:
+  Oczekiwany czas do aktywacji z stanu 31 ≈ 10×0.04s = 0.4s.
+  Aktywny przez kilka sekund (stany 34-39 wracają do 32, skąd 9/10 zostaje).
+  Opuszcza ekran gdy [encja+0x24] stanie się 0 (wyjście poza granicę widoku).
+
+--- Wybór sprite'a (CS:0x2D41) ---
+
+Sprite wybrany na podstawie prędkości bieżącej klatki:
+  [encja+0x0C] >= 0x5C00  (duże +X): sprite 0x27 = 39  (jedzie w prawo szybko)
+  [encja+0x0C] <= -0x400  (duże -X): sprite 0x29 = 41  (jedzie w lewo szybko)
+  Inne kierunki: sprity 37, 38, 40, 42, 43, 44 (ukośne i wolniejsze warianty)
+
+Mapowanie DC2 y-offset (obliczone z atlasu):
+  #37  ySrc= 948  26×30   (skręt w lewo)
+  #38  ySrc= 978  20×30   (jazda w dół łagodna)
+  #39  ySrc=1008  25×31   (skręt w prawo)
+  #40  ySrc=1039  30×29   (szybka jazda ukośna)
+  #41  ySrc=1068  32×32   (duże przechylenie w lewo)
+  #42  ySrc=1100  32×32   (duże przechylenie w prawo)
+  #43  ySrc=1132  25×29   (siad/powolna jazda)
+  #44  ySrc=1161  29×25   (inny kierunek)
+
+--- Call track: render jednej klatki NPC (gdy aktywny) ---
+
+entity_type3 (stan 34-39) wywołuje co klatkę:
+  call 0x947(encja, stan)    → aktualizuje [encja+0x0E] = stan, wybiera sprite
+
+Rysowanie (analogiczne do gracza, przez DC2 atlas):
+  BitBlt(DC6,    0,   0,  W, H,  DC2,   0, ySrc, SRCCOPY)  [Case 2B: wyciągnij sprite z atlasu]
+  BitBlt(screen, x,   y,  W, H,  DC6,   0,    0, SRCCOPY)  [Case C:  blit na ekran]
+  gdzie W×H = wymiary sprite'a (np. 26×30 dla #37), x/y = pozycja na ekranie
+
+--- Inicjalizacja ścieżki NPC (func_0x36A5 @ CS:0x36A5) ---
+
+Wywoływana jednorazowo z 0x3CEB podczas startu gry.
+Oblicza punkty trasy NPC wzdłuż obu stron ekranu (linia gondoli i krawędzie):
+  [0xb6a] = DC handle atlasu używany do rysowania tła
+  [0xb94] = bufor danych encji (0x1A00 bajtów = do 256 encji × 26 bajtów)
+  [0xb82] = licznik aktywnych encji NPC (reset do 0, inkrementowany przy alloc)
+Funkcja func_0x2b65 (CS:0x2b65) zeruje licznik: mov [0xb82], 0.
+
+--- Pełny call track od game_loop ---
+
+game_loop (CS:0x3F8A):
+  → [co klatkę] call render_frame (CS:0x34FB)
+    → call 0x3342 (main entity update loop)
+      → iteruj listę encji [0xb7c]
+        → dla każdej encji: call entity_update_dispatch (CS:0x2667)
+          → switch [encja+0xc]:
+            case 3: call entity_type3 (CS:0x2594)   ← NPC narciarz
+              → maszyna stanów (patrz wyżej)
+              → call 0x947(encja, stan) → zapisz stan animacji
+            case 9: call entity_type9 (CS:0x251E)   ← yeti
+      → rysowanie encji (via DC2/DC4 atlas → DC6 → screen)
+
+=== WIN16 TLO I RUCH SPRITEOW ===
+
+W Windows 3.1 GDI NIE ma żadnego automatycznego save-behind dla sprite'ów.
+Stare pozycje sprite'ów są kasowane przez background rendering gry (terrain drawing,
+FillRect na śnieg) wykonywanym NA POCZĄTKU każdej klatki — nie przez GDI.
+
+DC6 dostaje świeże tło przez Case 2B (DC4→DC6): kopiuje wybrany wiersz atlasu
+(= konkretny sprite) do DC6 z alpha=1 tylko na piksele sprite'a. Case C blit
+(DC6→screen) zapisuje tylko alpha=1 piksele, reszta ekranu niezmieniona.
+
+Brak ruchu gondoli (problem do zbadania):
+  - Gondola (sprite #27: kabina; #64: słup masztu) porusza się pionowo (wyciąg).
+  - W śladzie gry loop widzimy tylko DC4→DC6→screen (duże sprite'y, klatki skoczka).
+  - Gondola i słup są małymi spriteami (DC2), mogą być renderowane w innej ścieżce
+    albo poza limitem 600 wywołań trace'u.
+  - Do zbadania: czy gondola używa Case B (SRCAND+SRCPAINT) albo SRCPAINT->DC6->screen.
+
+=== KLUCZOWE ADRESY SKI.EXE ===
+(segment danych SEL_APP_DATA=0x40, segment kodu SEL_APP_CODE=0x30)
+
+Zmienne w DS (segmencie danych):
+  DS:0x0B02  HWND głównego okna gry
+  DS:0x0AEE  HWND paska statusu (okno dziecko)
+  DS:0x0B0E  HBITMAP wybrany w DC2 (atlas małych sprite'ów = 0x57)
+  DS:0x0B16  HBITMAP wybrany w DC4 (atlas dużych sprite'ów = 0x59)
+  DS:0x0B32  HBITMAP wybrany w DC3 (atlas małych masek = 0x58)
+  DS:0x0B3C  HBITMAP wybrany w DC5 (atlas dużych masek = 0x5A)
+  DS:0x0B46  HBITMAP wybrany w DC6 (memDC kompozycji = 0x5B+)
+  DS:0x0B34  HDC paska statusu (używany do TextOut w HUD)
+  DS:0x0B3E  flaga aktywności gry (!=0 → render klatki)
+  DS:0x0B1E  flaga inicjalizacji (!=0 → render klatki)
+
+Funkcje w CS (segmencie kodu):
+  CS:0x34FB  render_frame() — rysuje jedną klatkę gry
+  CS:0x3F8A  game_loop() — pętla: PeekMessage + render_frame
+  CS:0x3597  TimerProcMain (entry 1) — callback timera
+  CS:0x4C9A  WndProcMain (entry 2) — WndProc głównego okna
+  CS:0x513C  WndProcStatus (entry 3) — WndProc paska statusu
+
+=== ATLAS LAYOUT ===
+
+Small sprites (1..26, 28..52, 64..86) -> DC2 (buf_sel=0x0130):
+  Sprites stacked vertically: sprite N at y = sum(heights of sprites 1..N-1)
+
+Large sprites (27, 53..63) -> DC4 (buf_sel=0x0260):
+  Same vertical stacking.
+
+During game loop, DC4 is read with varying ySrc to pick the right sprite frame.
+
+=== IMPORTOWANE API (z relokacji NE, 86 spriteów + 97 zasobów) ===
+
+KERNEL (ordynały: 1,5,6,7,15,16,17,23,24,30,88,90,91,115,128,129,137):
+  1=FatalExit  5=LocalAlloc  6=LocalReAlloc  7=LocalFree
+  15=GlobalAlloc  16=GlobalReAlloc  17=GlobalFree
+  23=LockSegment  24=UnlockSegment  30=WaitEvent
+  88=lstrcpy  90=lstrlen  91=InitTask  115=OutputDebugString
+  128=GetPrivateProfileString  129=WritePrivateProfileString
+  137=FatalAppExit
+
+GDI (ordynały: 29,33,34,45,48,51,52,68,69,80,82,87,91,93):
+  29=PatBlt  33=TextOut  34=BitBlt  45=SelectObject
+  48=CreateBitmap  51=CreateCompatibleBitmap  52=CreateCompatibleDC
+  68=DeleteDC  69=DeleteObject  80=GetDeviceCaps  82=GetObject
+  87=GetStockObject  91=GetTextExtent  93=GetTextMetrics
+
+USER (ordynały: 1,5,6,13,22,31,33,37,39,40,41,42,44,50,53,56,57,66,68,
+      81,83,107,108,109,113,114,124,125,173,174,175,176,232,420):
+  1=MessageBox  5=InitApp  6=PostQuitMessage  13=GetTickCount
+  22=SetFocus  31=IsIconic  33=GetClientRect  37=SetWindowText
+  39=BeginPaint  40=EndPaint  41=CreateWindow  42=ShowWindow
+  44=OpenIcon  50=FindWindow  53=DestroyWindow  56=MoveWindow
+  57=RegisterClass  66=GetDC  68=ReleaseDC
+  81=FillRect  83=FrameRect
+  107=DefWindowProc  108=GetMessage  109=PeekMessage
+  113=TranslateMessage  114=DispatchMessage
+  124=UpdateWindow  125=InvalidateRect
+  173=LoadCursor  174=LoadIcon  175=LoadBitmap  176=LoadString
+  232=SetWindowPos  420=wsprintf
+
+Eksporty SKI.EXE (3 nazwane z 22 wpisów entry table):
+  ord 1 = TIMERPROCMAIN  (CS:0x3597)
+  ord 2 = WNDPROCMAIN    (CS:0x4C9A)
+  ord 3 = WNDPROCSTATUS  (CS:0x513C)
+
+=== MEMORY LAYOUT ===
+
+Sprite data buffer: SEL_BITMAPS=0x128, phys=0x41690
+  Format: [count(2)][pad(2)][offsets[86]*2][DIB data for 86 sprites]
+  Each DIB: BITMAPINFOHEADER(40) + palette(64 = 16*RGBQUAD) + 4bpp pixel data
+  Total: 57344 bytes
+
+XMS heap (DC pixel buffers): phys=0x100000..0xFE0000
+  DC2 buf: 0x100000 (sel=0x0130), 19 GDT descriptors
+  DC3 buf: 0x12C000 (sel=0x01C8)
+  DC4 buf: 0x158000 (sel=0x0260)
+  DC5 buf: 0x184000 (sel=0x02F8)
+  DC6 buf: 0x1B0000 (sel=0x0390)

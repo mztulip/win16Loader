@@ -1,0 +1,122 @@
+=== NE Loader STEP14 - GlobalHeap XMS + RAM detection ===
+App: TEST14E.EXE
+--- RAM detection ---
+Memory: 640 KB conv + 896 KB extended  [INT15 E801]
+--- VESA init ---
+VESA MIB: LFB=0xFD000000 pitch=1920
+VESA: tryb 0x0112 ustawiony, LFB=0xFD000000 pitch=1920
+--- Font init ---
+Font ROM: ES=0xC000 off=0x6720
+Font: phys=0x0C6720 (ROM BIOS, bez kopiowania)
+--- Init INT 3F ---
+Thunk buf: phys=0x3C3F0 size=1792
+IDT: phys=0x3CB00 int3f=0x26D4 int21=0x2932 irq0@0x20=0x2918
+--- Ladowanie KERNEL.EXE ---
+DLL KERNEL.EXE: segs=2 cs=1 autodata=2 align=1
+  Seg 1: sector=364 file=1128 alloc=1128 flags=0x0D70 RELOC
+    -> CODE phys=0x3CD10 sel=0x0048
+  Seg 2: sector=941 file=282 alloc=288 flags=0x0C71
+    -> DATA phys=0x3D190 sel=0x0050
+  Eksporty: 21 (ordinals: 200)
+  ModRef[1] 'KERNEL' -> dll[0]
+  Fixupy seg 1:
+  Fixups: 3 rekordow
+THUNK dll=0 ord=4 func=0x03C2 @0x88:0000
+THUNK dll=0 ord=113 func=0x03CB @0x88:0007
+THUNK dll=0 ord=3 func=0x0266 @0x88:000E
+KERNEL zaladowany: code=0x3CD10 data=0x3D190
+--- Ladowanie USER.EXE ---
+DLL USER.EXE: segs=2 cs=1 autodata=2 align=1
+  Seg 1: sector=518 file=4752 alloc=4752 flags=0x0D70 RELOC
+    -> CODE phys=0x3D2C0 sel=0x0058
+  Seg 2: sector=2907 file=376 alloc=1988 flags=0x0C71
+    -> DATA phys=0x3E560 sel=0x0060
+  Eksporty: 36 (ordinals: 500)
+  ModRef[1] 'KERNEL' -> dll[0]
+  Fixupy seg 1:
+  Fixups: 3 rekordow
+THUNK dll=0 ord=4 func=0x03C2 @0x88:0015
+THUNK dll=0 ord=113 func=0x03CB @0x88:001C
+THUNK dll=0 ord=3 func=0x0266 @0x88:0023
+USER zaladowany: code=0x3D2C0 data=0x3E560
+--- Ladowanie GDI.EXE ---
+DLL GDI.EXE: segs=2 cs=1 autodata=2 align=1
+  Seg 1: sector=297 file=3646 alloc=3646 flags=0x0D70 RELOC
+    -> CODE phys=0x3ED40 sel=0x0068
+  Seg 2: sector=2133 file=218 alloc=50836 flags=0x0C71
+    -> DATA phys=0x3FB90 sel=0x0070
+  Eksporty: 15 (ordinals: 200)
+  ModRef[1] 'KERNEL' -> dll[0]
+  Fixupy seg 1:
+  Fixups: 3 rekordow
+THUNK dll=0 ord=4 func=0x03C2 @0x88:002A
+THUNK dll=0 ord=113 func=0x03CB @0x88:0031
+THUNK dll=0 ord=3 func=0x0266 @0x88:0038
+GDI zaladowany: code=0x3ED40 data=0x3FB90
+PSP: seg=0x4C24 phys=0x4C240
+KCB: seg=0x4C35 phys=0x4C350
+BmpBuf: seg=0x4C46 phys=0x4C460 size=57344B
+GlobalHeap: XMS phys=0x100000..0x1E0000 size=896KB
+KCB init: hInst=0x0040 dyn_sel=0x0130 heap=0x100000..0x1E0000
+--- Ladowanie TEST14E.EXE ---
+MZ OK, NE at 0x0080
+NE: segs=2 align=1 cs=1 ip=0x0291 autodata=2 mods=2
+Seg 1: file=1260 alloc=1260 flags=0x0D40 RELOC
+  phys=0x5A470 -> CODE sel=0x0030
+Seg 2: file=912 alloc=10160 flags=0x0C41
+  phys=0x5A970 -> DATA sel=0x0040
+init SP=0x27B0 (data_total=10160)
+App entry table: 0 entries
+ModRef table (2 entries):
+  ModRef[1] 'KERNEL' -> dll[0]
+  ModRef[2] 'USER' -> dll[1]
+Fixupy seg 1:
+  Fixups: 31 rekordow
+THUNK dll=0 ord=115 func=0x011C @0x88:003F
+THUNK dll=0 ord=115 func=0x011C @0x88:0046
+THUNK dll=0 ord=115 func=0x011C @0x88:004D
+THUNK dll=0 ord=115 func=0x011C @0x88:0054
+THUNK dll=0 ord=115 func=0x011C @0x88:005B
+THUNK dll=0 ord=115 func=0x011C @0x88:0062
+THUNK dll=0 ord=115 func=0x011C @0x88:0069
+THUNK dll=0 ord=115 func=0x011C @0x88:0070
+THUNK dll=0 ord=115 func=0x011C @0x88:0077
+THUNK dll=0 ord=115 func=0x011C @0x88:007E
+THUNK dll=0 ord=15 func=0x0178 @0x88:0085
+THUNK dll=0 ord=115 func=0x011C @0x88:008C
+THUNK dll=0 ord=115 func=0x011C @0x88:0093
+THUNK dll=0 ord=115 func=0x011C @0x88:009A
+THUNK dll=0 ord=115 func=0x011C @0x88:00A1
+THUNK dll=0 ord=15 func=0x0178 @0x88:00A8
+THUNK dll=0 ord=115 func=0x011C @0x88:00AF
+THUNK dll=0 ord=15 func=0x0178 @0x88:00B6
+THUNK dll=0 ord=115 func=0x011C @0x88:00BD
+THUNK dll=0 ord=15 func=0x0178 @0x88:00C4
+THUNK dll=0 ord=115 func=0x011C @0x88:00CB
+THUNK dll=0 ord=15 func=0x0178 @0x88:00D2
+THUNK dll=0 ord=115 func=0x011C @0x88:00D9
+THUNK dll=0 ord=115 func=0x011C @0x88:00E0
+THUNK dll=0 ord=115 func=0x011C @0x88:00E7
+THUNK dll=0 ord=115 func=0x011C @0x88:00EE
+THUNK dll=0 ord=115 func=0x011C @0x88:00F5
+THUNK dll=0 ord=115 func=0x011C @0x88:00FC
+THUNK dll=0 ord=115 func=0x011C @0x88:0103
+THUNK dll=0 ord=115 func=0x011C @0x88:010A
+THUNK dll=1 ord=6 func=0x05ED @0x88:0111
+LFB=0xFD000000 pitch=1920 font=0x0C6720 -> wchodze w PM
+K011C2774
+=== ETAP 14e: GlobalAlloc XMS pattern test ===
+K01782772
+KERNEL: GlobalAlloc HEAP FULL
+K011C276C
+14e FAIL: K011C276C
+GlobalAlloc(1MB) sel != 0K011C276C
+
+K011C2774
+14e DONE: K011C2774
+00/K011C2774
+01K011C2774
+ OK
+U05ED2776
+USER: PostQuitMessage
+ARF
