@@ -357,6 +357,36 @@ class NEFile:
         return "\n".join(lines) if lines else "<empty>"
 
 
+# ─── DLL ordinal resolver ────────────────────────────────────────────────────
+
+def scan_dll_dirs(dirs):
+    """
+    Scan directories for NE executables, parse their export tables.
+    Returns { MODULE_NAME_UPPER: { ordinal: func_name } }
+    """
+    result = {}
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            if not fname.upper().endswith((".EXE", ".DLL", ".DRV")):
+                continue
+            path = os.path.join(d, fname)
+            try:
+                dll = NEFile(path)
+                # first export entry is module name (ordinal 0)
+                mod_name = dll.exports[0][1].upper() if dll.exports else fname.upper()
+                name_map = {ord_: name for ord_, name in dll.exports[1:]}
+                # non-resident names may add more
+                name_map.update({ord_: name for ord_, name in dll.nonresident[1:]})
+                if mod_name not in result:
+                    result[mod_name] = {}
+                result[mod_name].update(name_map)
+            except Exception:
+                pass
+    return result
+
+
 # ─── GUI ──────────────────────────────────────────────────────────────────────
 
 class App(tk.Tk):
@@ -366,6 +396,7 @@ class App(tk.Tk):
         self.geometry("1200x800")
         self.configure(bg=C_BG)
         self.ne = None
+        self._ordinal_maps = {}   # { "KERNEL": {6: "GlobalAlloc", ...}, ... }
         self._apply_dark_theme()
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self.quit)
@@ -475,6 +506,7 @@ class App(tk.Tk):
         filemenu = tk.Menu(menubar, bg=C_BG3, fg=C_FG, activebackground=C_SEL_BG,
                            activeforeground=C_SEL_FG, tearoff=0)
         filemenu.add_command(label="Open…", accelerator="Ctrl+O", command=self.open_file)
+        filemenu.add_command(label="Add DLL directory…", command=self.add_dll_dir)
         filemenu.add_separator()
         filemenu.add_command(label="Quit", command=self.quit)
         menubar.add_cascade(label="File", menu=filemenu)
@@ -1078,7 +1110,32 @@ class App(tk.Tk):
         self.title_var.set(
             f"{os.path.basename(path)}  ({len(self.ne.data):,} bytes)  —  {path}"
         )
+        # auto-scan same directory for DLLs to resolve ordinals
+        self._scan_dll_dir(os.path.dirname(path))
         self._populate()
+
+    def add_dll_dir(self):
+        d = filedialog.askdirectory(title="Select directory with Win16 DLLs")
+        if not d:
+            return
+        before = sum(len(v) for v in self._ordinal_maps.values())
+        self._scan_dll_dir(d)
+        after  = sum(len(v) for v in self._ordinal_maps.values())
+        added  = after - before
+        mods   = len(self._ordinal_maps)
+        messagebox.showinfo("DLL scan",
+            f"Loaded {mods} module(s)  ({added} new symbols)\n\n"
+            + "\n".join(f"  {k}  ({len(v)} exports)"
+                        for k, v in sorted(self._ordinal_maps.items())))
+        if self.ne:
+            self._fill_imports()
+
+    def _scan_dll_dir(self, d):
+        new = scan_dll_dirs([d])
+        for mod, names in new.items():
+            if mod not in self._ordinal_maps:
+                self._ordinal_maps[mod] = {}
+            self._ordinal_maps[mod].update(names)
 
     # ── Populate ──────────────────────────────────────────────────────────────
 
@@ -1231,31 +1288,47 @@ class App(tk.Tk):
         stats = []
 
         for mod in self.ne.imports:
-            raw   = table.get(mod, [])
-            # sort: ordinals (#N) numerically, names alphabetically, names after ordinals
-            ords  = sorted([f for f in raw if f.startswith("#") and f[1:].isdigit()],
-                           key=lambda x: int(x[1:]))
-            names = sorted([f for f in raw if not (f.startswith("#") and f[1:].isdigit())])
-            funcs = ords + names
-            n     = len(funcs)
+            raw      = table.get(mod, [])
+            omap     = self._ordinal_maps.get(mod.upper(), {})
+            ords     = sorted([f for f in raw if f.startswith("#") and f[1:].isdigit()],
+                              key=lambda x: int(x[1:]))
+            names    = sorted([f for f in raw if not (f.startswith("#") and f[1:].isdigit())])
+            funcs    = ords + names
+            n        = len(funcs)
+            resolved = sum(1 for f in ords if int(f[1:]) in omap)
             total_funcs += n
 
+            label = f"{n} import{'s' if n != 1 else ''}"
+            if omap and ords:
+                label += f"  ({resolved}/{len(ords)} resolved)"
             parent = tv.insert("", "end",
                 text=mod,
-                values=(f"{n} import{'s' if n != 1 else ''}",),
-                open=n <= 30,  # auto-expand small modules
+                values=(label,),
+                open=n <= 30,
                 tags=("dll",),
             )
             for func in funcs:
-                kind = "ordinal" if func.startswith("#") else "name"
-                tv.insert(parent, "end", text=f"  {func}", values=(kind,), tags=(kind,))
+                if func.startswith("#") and func[1:].isdigit():
+                    ordinal  = int(func[1:])
+                    sym_name = omap.get(ordinal)
+                    if sym_name:
+                        display = f"  {sym_name}  ({func})"
+                        kind    = "resolved"
+                    else:
+                        display = f"  {func}"
+                        kind    = "ordinal"
+                else:
+                    display = f"  {func}"
+                    kind    = "name"
+                tv.insert(parent, "end", text=display, values=(kind,), tags=(kind,))
 
             stats.append((mod, n, ords, names))
 
         # colour coding
-        tv.tag_configure("dll",     foreground=C_ACCENT)
-        tv.tag_configure("ordinal", foreground="#9cdcfe")
-        tv.tag_configure("name",    foreground="#ce9178")
+        tv.tag_configure("dll",      foreground=C_ACCENT)
+        tv.tag_configure("ordinal",  foreground="#9cdcfe")
+        tv.tag_configure("name",     foreground="#ce9178")
+        tv.tag_configure("resolved", foreground="#b5cea8")  # zielony = resolved
 
         # summary panel
         s = self._imp_summary
