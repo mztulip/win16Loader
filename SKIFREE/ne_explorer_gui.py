@@ -8,7 +8,21 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import struct
 import os
+import io
+import signal
+import sys
+import threading
+import tty
+import termios
 from collections import Counter
+
+try:
+    from PIL import Image, ImageTk
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+SKIFREE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SKI.EXE")
 
 # ─── Resource type names ──────────────────────────────────────────────────────
 RT_NAMES = {
@@ -32,6 +46,11 @@ SEG_FLAGS = [
     (0x0008, "ITERATED"), (0x0010, "MOVEABLE"), (0x0020, "SHARED"),
     (0x0040, "PRELOAD"), (0x0080, "ERONLY"), (0x0100, "RELOC"),
     (0x0200, "CONFORM"), (0x0400, "DISCARDABLE"), (0x1000, "DISCARD_PRI"),
+]
+
+ACCEL_FLAGS = [
+    (0x01, "VIRTKEY"), (0x04, "NOINVERT"),
+    (0x08, "SHIFT"),   (0x10, "CONTROL"), (0x20, "ALT"),
 ]
 
 RELOC_SRC  = {0: "LOBYTE", 2: "SEGMENT", 3: "FAR_ADDR", 5: "OFFSET"}
@@ -122,8 +141,6 @@ class NEFile:
         for seg in self.segments:
             seg["relocs"] = self._parse_segment_relocs(seg)
 
-    # ── Segments ──────────────────────────────────────────────────────────────
-
     def _parse_segments(self):
         n = self.ne_off
         off = n + self.ne["seg_table_off"]
@@ -141,10 +158,7 @@ class NEFile:
             })
         return segs
 
-    # ── Resources ─────────────────────────────────────────────────────────────
-
     def _res_name_at(self, res_table_base, offset):
-        """Read Pascal string at res_table_base + offset."""
         abs_off = res_table_base + offset
         if abs_off >= len(self.data):
             return f"<off={offset:#x}>"
@@ -186,10 +200,7 @@ class NEFile:
                 })
         return resources
 
-    # ── Names tables ──────────────────────────────────────────────────────────
-
     def _parse_exports(self):
-        """Resident names table — first entry is module name, rest are exports."""
         n = self.ne_off
         off = n + self.ne["rnames_off"]
         names = []
@@ -203,7 +214,6 @@ class NEFile:
         return names
 
     def _parse_nonresident_names(self):
-        """Non-resident names table (absolute file offset)."""
         off  = self.ne["nrnames_off"]
         size = self.ne["nrnames_size"]
         if off == 0 or size == 0:
@@ -243,7 +253,7 @@ class NEFile:
             if count == 0:
                 break
             seg_type = self.u8(off); off += 1
-            if seg_type == 0x00:  # unused
+            if seg_type == 0x00:
                 ordinal += count
             elif seg_type == 0xFF:  # moveable
                 for _ in range(count):
@@ -254,7 +264,7 @@ class NEFile:
                     entries.append({"ordinal": ordinal, "seg": seg, "offset": ofs,
                                     "flags": flags, "type": "mov"})
                     ordinal += 1
-            else:  # fixed segment
+            else:  # fixed
                 seg = seg_type
                 for _ in range(count):
                     flags  = self.u8(off);  off += 1
@@ -264,11 +274,8 @@ class NEFile:
                     ordinal += 1
         return entries
 
-    # ── Relocations ───────────────────────────────────────────────────────────
-
     def _parse_segment_relocs(self, seg):
-        """Parse NE relocation records appended after segment data."""
-        if not (seg["flags"] & 0x0100):   # RELOC flag
+        if not (seg["flags"] & 0x0100):
             return []
         if not seg["file_off"] or not seg["cbseg"]:
             return []
@@ -288,12 +295,12 @@ class NEFile:
             reloc_off += 8
             reloc_type = raw_flags & 0x03
             additive   = bool(raw_flags & 0x04)
-            if reloc_type == 0:   # INTERNALREF
+            if reloc_type == 0:
                 target_str = f"seg {target1}, off 0x{target2:04X}"
-            elif reloc_type == 1: # IMPORTORDINAL
+            elif reloc_type == 1:
                 mod = self.imports[target1-1] if 0 < target1 <= len(self.imports) else f"mod#{target1}"
                 target_str = f"{mod}.#{target2}"
-            elif reloc_type == 2: # IMPORTNAME
+            elif reloc_type == 2:
                 imp_base = self.ne_off + self.ne["impnames_off"] + target2
                 if imp_base < len(self.data):
                     l  = self.u8(imp_base)
@@ -302,7 +309,7 @@ class NEFile:
                     nm = f"?off={target2}"
                 mod = self.imports[target1-1] if 0 < target1 <= len(self.imports) else f"mod#{target1}"
                 target_str = f"{mod}.{nm}"
-            else:                 # OSFIXUP
+            else:
                 target_str = f"osfixup #{target1}"
             relocs.append({
                 "src_type":   RELOC_SRC.get(src_type, f"0x{src_type:02X}"),
@@ -312,8 +319,6 @@ class NEFile:
                 "target":     target_str,
             })
         return relocs
-
-    # ── Hex dump ──────────────────────────────────────────────────────────────
 
     def hex_dump(self, file_off, size, max_bytes=512):
         if not file_off:
@@ -327,7 +332,7 @@ class NEFile:
             lines.append(f"  {file_off+i:08X}  {hex_part:<47}  {ascii_part}")
         if size > max_bytes:
             lines.append(f"  ... ({size - max_bytes} more bytes not shown)")
-        return "\n".join(lines) if lines else "<empty segment>"
+        return "\n".join(lines) if lines else "<empty>"
 
 
 # ─── GUI ──────────────────────────────────────────────────────────────────────
@@ -336,18 +341,44 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("NE Explorer")
-        self.geometry("1100x750")
+        self.geometry("1200x800")
         self.configure(bg=C_BG)
         self.ne = None
         self._apply_dark_theme()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self.quit)
+        self.bind("<Control-c>", lambda e: self.quit())
+        self.bind("<q>",         lambda e: self.quit())
+        signal.signal(signal.SIGINT, lambda *_: self.quit())
+        self._poll_signals()
+        t = threading.Thread(target=self._watch_stdin, daemon=True)
+        t.start()
+
+    def _poll_signals(self):
+        self.after(200, self._poll_signals)
+
+    def _watch_stdin(self):
+        if not sys.stdin.isatty():
+            return
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch in ('q', 'Q', '\x03', '\x04'):
+                    self.after(0, self.quit)
+                    break
+        except Exception:
+            pass
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     # ── Dark theme ────────────────────────────────────────────────────────────
 
     def _apply_dark_theme(self):
         style = ttk.Style(self)
         style.theme_use("clam")
-
         style.configure(".",
             background=C_BG, foreground=C_FG,
             fieldbackground=C_BG2, troughcolor=C_BG3,
@@ -360,42 +391,59 @@ class App(tk.Tk):
                                         arrowcolor=C_FG)
         style.configure("TNotebook",    background=C_BG, tabmargins=[2, 4, 0, 0])
         style.configure("TNotebook.Tab",
-            background=C_BG3, foreground=C_FG_DIM,
-            padding=[10, 4], focuscolor=C_BG,
-        )
+            background=C_BG3, foreground=C_FG_DIM, padding=[10, 4], focuscolor=C_BG)
         style.map("TNotebook.Tab",
             background=[("selected", C_BG2), ("active", C_BG2)],
             foreground=[("selected", C_FG),  ("active", C_FG)],
         )
         style.configure("Treeview",
             background=C_BG2, foreground=C_FG,
-            fieldbackground=C_BG2, rowheight=20,
-            bordercolor=C_BORDER,
-        )
+            fieldbackground=C_BG2, rowheight=20, bordercolor=C_BORDER)
         style.configure("Treeview.Heading",
-            background=C_HEADER_BG, foreground=C_FG,
-            relief="flat", borderwidth=0,
-        )
+            background=C_HEADER_BG, foreground=C_FG, relief="flat", borderwidth=0)
         style.map("Treeview",
             background=[("selected", C_SEL_BG)],
             foreground=[("selected", C_SEL_FG)],
         )
-        style.map("Treeview.Heading",
-            background=[("active", C_BG3)],
-        )
+        style.map("Treeview.Heading", background=[("active", C_BG3)])
         style.configure("TPanedwindow", background=C_BORDER)
 
-    def _text_widget(self, parent):
+    def _mk_text(self, parent):
         txt = tk.Text(parent,
             font=("TkFixedFont", 10), wrap="none",
             bg=C_BG2, fg=C_FG, insertbackground=C_FG,
             selectbackground=C_SEL_BG, selectforeground=C_SEL_FG,
             relief="flat", borderwidth=0,
         )
-        txt.tag_configure("header",  foreground=C_ACCENT)
-        txt.tag_configure("dim",     foreground=C_FG_DIM)
-        txt.tag_configure("value",   foreground="#ce9178")
+        txt.tag_configure("header", foreground=C_ACCENT)
+        txt.tag_configure("dim",    foreground=C_FG_DIM)
+        txt.tag_configure("str",    foreground="#ce9178")
+        txt.tag_configure("value",  foreground="#ce9178")
         return txt
+
+    def _mk_text_scroll(self, parent):
+        """Pack a scrolled text widget into parent, return the Text."""
+        txt = self._mk_text(parent)
+        sb_y = ttk.Scrollbar(parent, orient="vertical",   command=txt.yview)
+        sb_x = ttk.Scrollbar(parent, orient="horizontal", command=txt.xview)
+        txt.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side="right",  fill="y")
+        sb_x.pack(side="bottom", fill="x")
+        txt.pack(fill="both", expand=True)
+        return txt
+
+    def _mk_tree(self, parent, columns):
+        tv = ttk.Treeview(parent, columns=columns, show="headings")
+        for col in columns:
+            tv.heading(col, text=col)
+            tv.column(col, width=120, anchor="w")
+        sb_y = ttk.Scrollbar(parent, orient="vertical",   command=tv.yview)
+        sb_x = ttk.Scrollbar(parent, orient="horizontal", command=tv.xview)
+        tv.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side="right",  fill="y")
+        sb_x.pack(side="bottom", fill="x")
+        tv.pack(fill="both", expand=True)
+        return tv
 
     # ── UI layout ─────────────────────────────────────────────────────────────
 
@@ -422,42 +470,23 @@ class App(tk.Tk):
 
         self.tab_overview  = self._make_text_tab("Overview")
         self.tab_segments  = self._make_segments_tab()
-        self.tab_resources = self._make_tree_tab("Resources",
-            ["Type", "ID", "File Offset", "Size", "Flags"])
-        self.tab_exports   = self._make_exports_tab()
-        self.tab_imports   = self._make_tree_tab("Imports",
-            ["#", "Module"])
-        self.tab_entries   = self._make_tree_tab("Entry Table",
+        self._make_resources_tab()
+        self._make_exports_tab()
+        self.tab_imports   = self._make_simple_tab("Imports",   ["#", "Module"])
+        self.tab_entries   = self._make_simple_tab("Entry Table",
             ["Ordinal", "Type", "Seg", "Offset", "Flags", "Name"])
 
     def _make_text_tab(self, label):
         frame = ttk.Frame(self.nb)
         self.nb.add(frame, text=label)
-        txt = self._text_widget(frame)
-        sb_y = ttk.Scrollbar(frame, orient="vertical",   command=txt.yview)
-        sb_x = ttk.Scrollbar(frame, orient="horizontal", command=txt.xview)
-        txt.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        sb_y.pack(side="right",  fill="y")
-        sb_x.pack(side="bottom", fill="x")
-        txt.pack(fill="both", expand=True)
-        return txt
+        return self._mk_text_scroll(frame)
 
-    def _make_tree_tab(self, label, columns):
+    def _make_simple_tab(self, label, columns):
         frame = ttk.Frame(self.nb)
         self.nb.add(frame, text=label)
-        tv = ttk.Treeview(frame, columns=columns, show="headings")
-        for col in columns:
-            tv.heading(col, text=col)
-            tv.column(col, width=120, anchor="w")
-        sb_y = ttk.Scrollbar(frame, orient="vertical",   command=tv.yview)
-        sb_x = ttk.Scrollbar(frame, orient="horizontal", command=tv.xview)
-        tv.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        sb_y.pack(side="right",  fill="y")
-        sb_x.pack(side="bottom", fill="x")
-        tv.pack(fill="both", expand=True)
-        return tv
+        return self._mk_tree(frame, columns)
 
-    # ── Segments tab: treeview + detail panel ─────────────────────────────────
+    # ── Segments tab ──────────────────────────────────────────────────────────
 
     def _make_segments_tab(self):
         frame = ttk.Frame(self.nb)
@@ -466,25 +495,13 @@ class App(tk.Tk):
         pane = ttk.PanedWindow(frame, orient="vertical")
         pane.pack(fill="both", expand=True)
 
-        # Top: segment list
         top = ttk.Frame(pane)
         pane.add(top, weight=2)
         cols = ["#", "File Offset", "Size", "MinAlloc", "Flags"]
-        tv = ttk.Treeview(top, columns=cols, show="headings")
-        for col in cols:
-            tv.heading(col, text=col)
-            tv.column(col, width=120, anchor="w")
-        sb_y = ttk.Scrollbar(top, orient="vertical",   command=tv.yview)
-        sb_x = ttk.Scrollbar(top, orient="horizontal", command=tv.xview)
-        tv.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        sb_y.pack(side="right",  fill="y")
-        sb_x.pack(side="bottom", fill="x")
-        tv.pack(fill="both", expand=True)
+        tv = self._mk_tree(top, cols)
 
-        # Bottom: detail (hex + relocs)
         bot = ttk.Frame(pane)
         pane.add(bot, weight=3)
-
         detail_nb = ttk.Notebook(bot)
         detail_nb.pack(fill="both", expand=True)
 
@@ -493,35 +510,12 @@ class App(tk.Tk):
         detail_nb.add(hex_frame,   text="Hex Dump")
         detail_nb.add(reloc_frame, text="Relocations")
 
-        self._seg_hex  = self._text_widget_in(hex_frame)
-        self._seg_reloc_tv = self._reloc_tree_in(reloc_frame)
+        self._seg_hex      = self._mk_text_scroll(hex_frame)
+        self._seg_reloc_tv = self._mk_tree(reloc_frame,
+            ["Offset", "Src Type", "Reloc Type", "Additive", "Target"])
+        self._seg_reloc_tv.column("Target", width=350)
 
         tv.bind("<<TreeviewSelect>>", self._on_segment_select)
-        return tv
-
-    def _text_widget_in(self, parent):
-        txt = self._text_widget(parent)
-        sb_y = ttk.Scrollbar(parent, orient="vertical",   command=txt.yview)
-        sb_x = ttk.Scrollbar(parent, orient="horizontal", command=txt.xview)
-        txt.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        sb_y.pack(side="right",  fill="y")
-        sb_x.pack(side="bottom", fill="x")
-        txt.pack(fill="both", expand=True)
-        return txt
-
-    def _reloc_tree_in(self, parent):
-        cols = ["Offset", "Src Type", "Reloc Type", "Additive", "Target"]
-        tv = ttk.Treeview(parent, columns=cols, show="headings")
-        for col in cols:
-            tv.heading(col, text=col)
-            tv.column(col, width=120, anchor="w")
-        tv.column("Target", width=350)
-        sb_y = ttk.Scrollbar(parent, orient="vertical",   command=tv.yview)
-        sb_x = ttk.Scrollbar(parent, orient="horizontal", command=tv.xview)
-        tv.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        sb_y.pack(side="right",  fill="y")
-        sb_x.pack(side="bottom", fill="x")
-        tv.pack(fill="both", expand=True)
         return tv
 
     def _on_segment_select(self, event):
@@ -533,29 +527,404 @@ class App(tk.Tk):
         idx = int(self.tab_segments.item(sel[0])["values"][0]) - 1
         seg = self.ne.segments[idx]
 
-        # Hex dump
         txt = self._seg_hex
         txt.config(state="normal")
         txt.delete("1.0", "end")
-        txt.insert("end", f"  Segment #{seg['idx']}  —  file offset 0x{seg['file_off']:X}  size 0x{seg['cbseg']:X}\n\n", "header")
+        txt.insert("end",
+            f"  Segment #{seg['idx']}  file offset 0x{seg['file_off']:X}  size 0x{seg['cbseg']:X}\n\n",
+            "header")
         txt.insert("end", self.ne.hex_dump(seg["file_off"], seg["cbseg"]))
         txt.config(state="disabled")
 
-        # Relocations
         rv = self._seg_reloc_tv
         rv.delete(*rv.get_children())
         for r in seg["relocs"]:
             rv.insert("", "end", values=(
-                f"0x{r['offset']:04X}",
-                r["src_type"],
-                r["reloc_type"],
-                "+" if r["additive"] else "",
-                r["target"],
+                f"0x{r['offset']:04X}", r["src_type"], r["reloc_type"],
+                "+" if r["additive"] else "", r["target"],
             ))
         if not seg["relocs"]:
             rv.insert("", "end", values=("—", "no relocations", "", "", ""))
 
-    # ── Exports tab: resident + non-resident ──────────────────────────────────
+    # ── Resources tab ─────────────────────────────────────────────────────────
+
+    def _make_resources_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text="Resources")
+
+        pane = ttk.PanedWindow(frame, orient="horizontal")
+        pane.pack(fill="both", expand=True)
+
+        # Left — grouped tree
+        left = ttk.Frame(pane)
+        pane.add(left, weight=1)
+
+        tv = ttk.Treeview(left, columns=["size"], show="tree headings")
+        tv.heading("#0",   text="Resource")
+        tv.heading("size", text="Size")
+        tv.column("#0",   width=190, anchor="w")
+        tv.column("size", width=70,  anchor="e")
+        sb_y = ttk.Scrollbar(left, orient="vertical",   command=tv.yview)
+        sb_x = ttk.Scrollbar(left, orient="horizontal", command=tv.xview)
+        tv.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side="right",  fill="y")
+        sb_x.pack(side="bottom", fill="x")
+        tv.pack(fill="both", expand=True)
+        tv.bind("<<TreeviewSelect>>", self._on_resource_select)
+        self._res_tree = tv
+
+        # Right — preview + hex
+        right = ttk.Frame(pane)
+        pane.add(right, weight=3)
+
+        detail_nb = ttk.Notebook(right)
+        detail_nb.pack(fill="both", expand=True)
+        self._res_detail_nb = detail_nb
+
+        prev_frame = ttk.Frame(detail_nb)
+        detail_nb.add(prev_frame, text="Preview")
+        self._res_prev = self._mk_text_scroll(prev_frame)
+
+        hex_frame = ttk.Frame(detail_nb)
+        detail_nb.add(hex_frame, text="Hex Dump")
+        self._res_hex = self._mk_text_scroll(hex_frame)
+
+        self._res_photoimage = None  # prevent GC
+
+    def _on_resource_select(self, event):
+        if not self.ne:
+            return
+        sel = self._res_tree.selection()
+        if not sel:
+            return
+        tags = self._res_tree.item(sel[0], "tags")
+        if not tags or not str(tags[0]).startswith("res:"):
+            return
+        idx  = int(str(tags[0])[4:])
+        r    = self.ne.resources[idx]
+        data = self.ne.data[r["offset"]:r["offset"] + r["length"]]
+
+        # Hex
+        h = self._res_hex
+        h.config(state="normal")
+        h.delete("1.0", "end")
+        h.insert("end",
+            f"  {r['type_name']}  {r['name']}  @ 0x{r['offset']:X}  {r['length']} bytes\n\n",
+            "header")
+        h.insert("end", self.ne.hex_dump(r["offset"], r["length"]))
+        h.config(state="disabled")
+
+        # Preview dispatch
+        t = r["type_id"]
+        if   t == 0x8002:            self._render_bitmap(r, data)
+        elif t in (0x8003, 0x8001):  self._render_icon(r, data)
+        elif t in (0x800C, 0x800E):  self._render_group_icon(r, data)
+        elif t == 0x8006:            self._render_string_table(r, data)
+        elif t == 0x8010:            self._render_version(r, data)
+        elif t == 0x8009:            self._render_accelerator(r, data)
+        elif t == 0x8004:            self._render_menu(r, data)
+        elif t == 0x8005:            self._render_dialog(r, data)
+        else:
+            self._res_show_rich([
+                (f"  {r['type_name']}  {r['name']}  {r['length']} bytes\n\n", "header"),
+            ])
+        self._append_hex_to_preview(r)
+
+    def _append_hex_to_preview(self, r):
+        max_b = 512
+        txt = self._res_prev
+        txt.config(state="normal")
+        txt.insert("end",
+            f"\n\n─── Hex  @ 0x{r['offset']:X}  {r['length']} bytes"
+            + (f"  (first {max_b})" if r["length"] > max_b else "") + " ───\n\n",
+            "header")
+        txt.insert("end", self.ne.hex_dump(r["offset"], r["length"], max_bytes=max_b))
+        txt.config(state="disabled")
+
+    def _res_show_rich(self, parts):
+        txt = self._res_prev
+        txt.config(state="normal")
+        txt.delete("1.0", "end")
+        for text, tag in parts:
+            txt.insert("end", text, tag) if tag else txt.insert("end", text)
+        txt.config(state="disabled")
+        self._res_detail_nb.select(0)
+
+    # ── Bitmap / Icon ─────────────────────────────────────────────────────────
+
+    def _dib_to_pil(self, data, is_icon=False):
+        bi_size   = struct.unpack_from('<I', data, 0)[0]
+        height    = struct.unpack_from('<i', data, 8)[0]
+        bit_count = struct.unpack_from('<H', data, 14)[0]
+        clr_used  = struct.unpack_from('<I', data, 32)[0]
+
+        real_h = abs(height) // 2 if is_icon else abs(height)
+
+        if bit_count <= 8:
+            n_colors = clr_used or (1 << bit_count)
+            color_table_size = n_colors * 4
+        else:
+            color_table_size = 0
+
+        pix_offset = bi_size + color_table_size
+        bmp_offset = 14 + pix_offset
+        file_size  = 14 + len(data)
+
+        patched = bytearray(data)
+        if is_icon:
+            struct.pack_into('<i', patched, 8, real_h)
+
+        header = struct.pack('<2sIHHI', b'BM', file_size, 0, 0, bmp_offset)
+        img = Image.open(io.BytesIO(bytes(header) + bytes(patched)))
+        return img.convert("RGBA")
+
+    def _display_image(self, img, r):
+        iw, ih = img.size
+        max_w, max_h = 640, 480
+        scale = min(max_w / max(iw, 1), max_h / max(ih, 1), 8.0)
+        scale = max(scale, 0.5)
+        new_w = max(1, int(iw * scale))
+        new_h = max(1, int(ih * scale))
+        img_disp = img.resize((new_w, new_h), Image.NEAREST)
+
+        if img_disp.mode == "RGBA":
+            bg = Image.new("RGB", (new_w, new_h), (50, 50, 50))
+            bg.paste(img_disp.convert("RGB"), mask=img_disp.getchannel("A"))
+            img_disp = bg
+        else:
+            img_disp = img_disp.convert("RGB")
+
+        photo = ImageTk.PhotoImage(img_disp)
+        self._res_photoimage = photo
+
+        txt = self._res_prev
+        txt.config(state="normal")
+        txt.delete("1.0", "end")
+        txt.insert("end",
+            f"  {r['type_name']}  {r['name']}  {iw}\u00d7{ih}px  "
+            f"{r['length']} bytes  (scale {scale:.1f}\u00d7)\n\n",
+            "header")
+        txt.image_create("end", image=photo)
+        txt.insert("end", "\n")
+        txt.config(state="disabled")
+        self._res_detail_nb.select(0)
+
+    def _render_bitmap(self, r, data):
+        if not HAS_PIL:
+            self._res_show_rich([("  PIL not installed: pip install Pillow\n", "dim")])
+            return
+        try:
+            self._display_image(self._dib_to_pil(data, is_icon=False), r)
+        except Exception as e:
+            self._res_show_rich([(f"  Render error: {e}\n", "dim")])
+
+    def _render_icon(self, r, data):
+        if not HAS_PIL:
+            self._res_show_rich([("  PIL not installed: pip install Pillow\n", "dim")])
+            return
+        try:
+            self._display_image(self._dib_to_pil(data, is_icon=True), r)
+        except Exception as e:
+            self._res_show_rich([(f"  Render error: {e}\n", "dim")])
+
+    def _render_group_icon(self, r, data):
+        try:
+            _, _, count = struct.unpack_from('<HHH', data, 0)
+            parts = [(f"  {r['type_name']}  {r['name']}  count={count}\n\n", "header")]
+            off = 6
+            for i in range(count):
+                if off + 14 > len(data):
+                    break
+                w, h, cc, _, planes, bpp, size, res_id = \
+                    struct.unpack_from('<BBBBHHIh', data, off)
+                off += 14
+                parts += [("  " + f"  #{i+1}  ", "dim"),
+                           (f"{w}\u00d7{h}  {bpp}bpp  size={size}  id=#{res_id}\n", None)]
+            self._res_show_rich(parts)
+        except Exception as e:
+            self._res_show_rich([(f"  Parse error: {e}\n", "dim")])
+
+    # ── String table ──────────────────────────────────────────────────────────
+
+    def _render_string_table(self, r, data):
+        block = (r["id"] & 0x7FFF) if (r["id"] & 0x8000) else 0
+        base  = (block - 1) * 16 if block > 0 else 0
+        parts = [(f"  RT_STRING  block #{block}  (IDs {base}\u2013{base+15})\n\n", "header")]
+        off = 0
+        for i in range(16):
+            if off >= len(data):
+                break
+            length = data[off]; off += 1
+            if length and off + length <= len(data):
+                s = data[off:off+length].decode("latin-1", errors="replace")
+                parts += [(f"  [{base+i:4d}]  ", "dim"), (repr(s) + "\n", "str")]
+            else:
+                parts += [(f"  [{base+i:4d}]  ", "dim"), ("<empty>\n", "dim")]
+            off += length
+        self._res_show_rich(parts)
+
+    # ── Version ───────────────────────────────────────────────────────────────
+
+    def _render_version(self, r, data):
+        parts = [(f"  RT_VERSION  {r['name']}  {r['length']} bytes\n\n", "header")]
+        try:
+            off = 0
+            w_length = struct.unpack_from('<H', data, off)[0]; off += 2
+            v_length = struct.unpack_from('<H', data, off)[0]; off += 2
+            end = data.index(b'\x00', off)
+            key = data[off:end].decode("latin-1"); off = end + 1
+            parts += [
+                ("  Key:             ", "dim"), (f"{key}\n", None),
+                ("  wLength:         ", "dim"), (f"{w_length}\n", None),
+                ("  wValueLength:    ", "dim"), (f"{v_length}\n\n", None),
+            ]
+            if v_length >= 52 and off + 4 <= len(data):
+                sig = struct.unpack_from('<I', data, off)[0]
+                if sig == 0xFEEF04BD:
+                    (_, _, fv_ms, fv_ls, pv_ms, pv_ls,
+                     ffmask, fflags, fos, ftype, fsubtype, _, _
+                    ) = struct.unpack_from('<IIIIIIIIIIIII', data, off)
+                    os_map   = {1:"DOS", 2:"OS2_16", 3:"OS2_32", 4:"NT",
+                                0x10001:"WIN16", 0x40004:"WIN32"}
+                    type_map = {1:"APP", 2:"DLL", 3:"DRV", 4:"FONT", 5:"VXD", 7:"STATIC_LIB"}
+                    parts += [
+                        ("  VS_FIXEDFILEINFO\n", "header"),
+                        ("  FileVersion:     ", "dim"),
+                        (f"{fv_ms>>16}.{fv_ms&0xFFFF}.{fv_ls>>16}.{fv_ls&0xFFFF}\n", None),
+                        ("  ProductVersion:  ", "dim"),
+                        (f"{pv_ms>>16}.{pv_ms&0xFFFF}.{pv_ls>>16}.{pv_ls&0xFFFF}\n", None),
+                        ("  FileOS:          ", "dim"),
+                        (f"0x{fos:08X}  {os_map.get(fos, '')}\n", None),
+                        ("  FileType:        ", "dim"),
+                        (f"0x{ftype:08X}  {type_map.get(ftype, '')}\n", None),
+                        ("  FileFlags:       ", "dim"), (f"0x{fflags:08X}\n", None),
+                    ]
+        except Exception as e:
+            parts.append((f"\n  Parse error: {e}\n", "dim"))
+        self._res_show_rich(parts)
+
+    # ── Accelerator ───────────────────────────────────────────────────────────
+
+    def _render_accelerator(self, r, data):
+        count = len(data) // 5
+        parts = [(f"  RT_ACCELERATOR  {r['name']}  {count} entries\n\n", "header"),
+                 ("  Flags                Key        Cmd\n", "dim"),
+                 ("  " + "─"*40 + "\n",  "dim")]
+        off = 0
+        while off + 5 <= len(data):
+            fvirt = data[off]
+            key   = struct.unpack_from('<H', data, off+1)[0]
+            cmd   = struct.unpack_from('<H', data, off+3)[0]
+            off  += 5
+            fname = flags_str(fvirt & 0x7F, ACCEL_FLAGS)
+            if fvirt & 0x01:
+                key_s = f"VK 0x{key:04X}"
+            else:
+                key_s = repr(chr(key)) if 32 <= key < 127 else f"0x{key:04X}"
+            parts.append((f"  {fname:<22} {key_s:<10} {cmd}\n", None))
+            if fvirt & 0x80:
+                break
+        self._res_show_rich(parts)
+
+    # ── Menu ──────────────────────────────────────────────────────────────────
+
+    def _render_menu(self, r, data):
+        MF_POPUP = 0x0010
+        MF_END   = 0x0080
+        parts    = [(f"  RT_MENU  {r['name']}  {r['length']} bytes\n\n", "header")]
+        off      = [0]  # mutable for nested closure
+
+        try:
+            if len(data) >= 4 and struct.unpack_from('<H', data, 0)[0] == 0:
+                off[0] = 4 + struct.unpack_from('<H', data, 2)[0]
+
+            def read_level(indent):
+                while off[0] < len(data):
+                    if off[0] + 2 > len(data):
+                        break
+                    flags = struct.unpack_from('<H', data, off[0])[0]; off[0] += 2
+                    if flags & MF_POPUP:
+                        end = data.index(b'\x00', off[0])
+                        name = data[off[0]:end].decode("latin-1", errors="replace")
+                        off[0] = end + 1
+                        parts += [("  " + "  "*indent, "dim"), (f"\u25b6 {name}\n", None)]
+                        read_level(indent + 1)
+                    else:
+                        if off[0] + 2 > len(data):
+                            break
+                        item_id = struct.unpack_from('<H', data, off[0])[0]; off[0] += 2
+                        if off[0] < len(data) and data[off[0]] == 0:
+                            name = "<separator>"; off[0] += 1
+                        else:
+                            end = data.index(b'\x00', off[0])
+                            name = data[off[0]:end].decode("latin-1", errors="replace")
+                            off[0] = end + 1
+                        parts += [("  " + "  "*indent + f"[{item_id:4d}]  ", "dim"),
+                                   (f"{name}\n", None)]
+                    if flags & MF_END:
+                        break
+
+            read_level(0)
+        except Exception as e:
+            parts.append((f"\n  Parse error: {e}\n", "dim"))
+        self._res_show_rich(parts)
+
+    # ── Dialog ────────────────────────────────────────────────────────────────
+
+    def _render_dialog(self, r, data):
+        """Win16 DLGTEMPLATE: parse header + control list."""
+        try:
+            if len(data) < 13:
+                raise ValueError("too short")
+            off = 0
+            style    = struct.unpack_from('<I', data, off)[0]; off += 4
+            n_items  = struct.unpack_from('<B', data, off)[0]; off += 1
+            x, y, cx, cy = struct.unpack_from('<hhhh', data, off); off += 8
+
+            def read_sz():
+                nonlocal off
+                end = data.index(b'\x00', off)
+                s = data[off:end].decode("latin-1", errors="replace")
+                off = end + 1
+                return s
+
+            menu_name  = read_sz()
+            class_name = read_sz()
+            caption    = read_sz()
+
+            parts = [(f"  RT_DIALOG  {r['name']}  {r['length']} bytes\n\n", "header"),
+                     ("  Caption:    ", "dim"), (f'"{caption}"\n', "str"),
+                     ("  Class:      ", "dim"), (f"{class_name or '<default>'}\n", None),
+                     ("  Menu:       ", "dim"), (f"{menu_name or '<none>'}\n", None),
+                     ("  Pos/Size:   ", "dim"), (f"({x},{y})  {cx}\u00d7{cy}\n", None),
+                     ("  Style:      ", "dim"), (f"0x{style:08X}\n", None),
+                     ("  Controls:   ", "dim"), (f"{n_items}\n\n", None),
+                     ("  Controls\n", "header")]
+
+            # Win16 DLGITEMTEMPLATE: style(4) x(2) y(2) cx(2) cy(2) id(2) class(1) text(sz) [data]
+            for _ in range(n_items):
+                if off + 13 > len(data):
+                    break
+                i_style = struct.unpack_from('<I', data, off)[0]; off += 4
+                ix, iy, icx, icy = struct.unpack_from('<hhhh', data, off); off += 8
+                i_id    = struct.unpack_from('<H', data, off)[0]; off += 2
+                i_class = struct.unpack_from('<B', data, off)[0]; off += 1
+                CLASS_MAP = {0x80:"BUTTON",0x81:"EDIT",0x82:"STATIC",
+                             0x83:"LISTBOX",0x84:"SCROLLBAR",0x85:"COMBOBOX"}
+                cname = CLASS_MAP.get(i_class, f"0x{i_class:02X}")
+                i_text = read_sz()
+                # extra data byte
+                extra = struct.unpack_from('<B', data, off)[0]; off += 1 + extra
+                parts += [("  ", "dim"),
+                           (f"[{i_id:4d}]  {cname:<12} ({ix},{iy}) {icx}\u00d7{icy}  "
+                            f'"{i_text}"\n', None)]
+
+        except Exception as e:
+            parts = [(f"  RT_DIALOG  {r['name']}\n\n", "header"),
+                     (f"  Parse error: {e}\n", "dim")]
+        self._res_show_rich(parts)
+
+    # ── Exports tab ───────────────────────────────────────────────────────────
 
     def _make_exports_tab(self):
         frame = ttk.Frame(self.nb)
@@ -564,44 +933,23 @@ class App(tk.Tk):
         pane = ttk.PanedWindow(frame, orient="vertical")
         pane.pack(fill="both", expand=True)
 
-        # Resident names
         res_frame = ttk.Frame(pane)
         pane.add(res_frame, weight=1)
         tk.Label(res_frame, text="  Resident Names Table",
                  bg=C_HEADER_BG, fg=C_ACCENT,
                  font=("TkFixedFont", 9, "bold"), anchor="w",
         ).pack(fill="x")
-        cols = ["Ordinal", "Name"]
-        tv_res = ttk.Treeview(res_frame, columns=cols, show="headings")
-        for col in cols:
-            tv_res.heading(col, text=col)
-            tv_res.column(col, width=120, anchor="w")
-        tv_res.column("Name", width=500)
-        sb = ttk.Scrollbar(res_frame, orient="vertical", command=tv_res.yview)
-        tv_res.config(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        tv_res.pack(fill="both", expand=True)
+        self._tv_res = self._mk_tree(res_frame, ["Ordinal", "Name"])
+        self._tv_res.column("Name", width=500)
 
-        # Non-resident names
         nres_frame = ttk.Frame(pane)
         pane.add(nres_frame, weight=1)
         tk.Label(nres_frame, text="  Non-Resident Names Table",
                  bg=C_HEADER_BG, fg=C_ACCENT,
                  font=("TkFixedFont", 9, "bold"), anchor="w",
         ).pack(fill="x")
-        tv_nres = ttk.Treeview(nres_frame, columns=cols, show="headings")
-        for col in cols:
-            tv_nres.heading(col, text=col)
-            tv_nres.column(col, width=120, anchor="w")
-        tv_nres.column("Name", width=500)
-        sb2 = ttk.Scrollbar(nres_frame, orient="vertical", command=tv_nres.yview)
-        tv_nres.config(yscrollcommand=sb2.set)
-        sb2.pack(side="right", fill="y")
-        tv_nres.pack(fill="both", expand=True)
-
-        self._tv_res  = tv_res
-        self._tv_nres = tv_nres
-        return tv_res   # tab_exports points to resident treeview (compat)
+        self._tv_nres = self._mk_tree(nres_frame, ["Ordinal", "Name"])
+        self._tv_nres.column("Name", width=500)
 
     # ── File open ─────────────────────────────────────────────────────────────
 
@@ -622,7 +970,7 @@ class App(tk.Tk):
         )
         self._populate()
 
-    # ── Populate tabs ─────────────────────────────────────────────────────────
+    # ── Populate ──────────────────────────────────────────────────────────────
 
     def _populate(self):
         self._fill_overview()
@@ -640,7 +988,6 @@ class App(tk.Tk):
 
         os_map = {1: "OS/2", 2: "Windows", 3: "European DOS 4.x", 4: "Windows 386"}
         target = os_map.get(ne["target_os"], "Unknown (%d)" % ne["target_os"])
-
         total_relocs = sum(len(s["relocs"]) for s in self.ne.segments)
 
         sections = [
@@ -661,20 +1008,20 @@ class App(tk.Tk):
                 ("Stack SS:SP",     f"{ne['ne_ss']}:{ne['ne_sp']:04X}"),
             ]),
             ("─── Tables ──────────────────────────────────────────────────", [
-                ("Segments",          str(ne["cseg"])),
-                ("Modules imported",  str(ne["cmod"])),
-                ("Resources",         str(ne["res_count"])),
-                ("Moveable entries",  str(ne["moveable_entries"])),
-                ("Align shift",       f"{ne['align_shift']}  (sector = {1 << ne['align_shift']} bytes)"),
+                ("Segments",         str(ne["cseg"])),
+                ("Modules imported", str(ne["cmod"])),
+                ("Resources",        str(ne["res_count"])),
+                ("Moveable entries", str(ne["moveable_entries"])),
+                ("Align shift",      f"{ne['align_shift']}  (sector = {1 << ne['align_shift']} bytes)"),
             ]),
             ("─── Table offsets ───────────────────────────────────────────", [
-                ("Seg table",    f"NE+0x{ne['seg_table_off']:04X}  = 0x{self.ne.ne_off + ne['seg_table_off']:X}"),
-                ("Res table",    f"NE+0x{ne['res_table_off']:04X}  = 0x{self.ne.ne_off + ne['res_table_off']:X}"),
-                ("Rnames",       f"NE+0x{ne['rnames_off']:04X}  = 0x{self.ne.ne_off + ne['rnames_off']:X}"),
-                ("ModRef",       f"NE+0x{ne['modref_off']:04X}  = 0x{self.ne.ne_off + ne['modref_off']:X}"),
-                ("ImpNames",     f"NE+0x{ne['impnames_off']:04X}  = 0x{self.ne.ne_off + ne['impnames_off']:X}"),
-                ("NRnames",      f"0x{ne['nrnames_off']:X}  (absolute)  size={ne['nrnames_size']}"),
-                ("Entry table",  f"NE+0x{ne['entry_table_off']:04X}  size={ne['entry_table_size']}"),
+                ("Seg table",   f"NE+0x{ne['seg_table_off']:04X}  = 0x{self.ne.ne_off + ne['seg_table_off']:X}"),
+                ("Res table",   f"NE+0x{ne['res_table_off']:04X}  = 0x{self.ne.ne_off + ne['res_table_off']:X}"),
+                ("Rnames",      f"NE+0x{ne['rnames_off']:04X}  = 0x{self.ne.ne_off + ne['rnames_off']:X}"),
+                ("ModRef",      f"NE+0x{ne['modref_off']:04X}  = 0x{self.ne.ne_off + ne['modref_off']:X}"),
+                ("ImpNames",    f"NE+0x{ne['impnames_off']:04X}  = 0x{self.ne.ne_off + ne['impnames_off']:X}"),
+                ("NRnames",     f"0x{ne['nrnames_off']:X}  (absolute)  size={ne['nrnames_size']}"),
+                ("Entry table", f"NE+0x{ne['entry_table_off']:04X}  size={ne['entry_table_size']}"),
             ]),
             ("─── Summary ─────────────────────────────────────────────────", [
                 ("Resident exports",     str(max(0, len(self.ne.exports) - 1))),
@@ -708,58 +1055,59 @@ class App(tk.Tk):
         for s in self.ne.segments:
             kind = "DATA" if (s["flags"] & 0x0001) else "CODE"
             fstr = flags_str(s["flags"], SEG_FLAGS)
-            nrel = len(s["relocs"])
             tv.insert("", "end", values=(
                 s["idx"],
                 f"0x{s['file_off']:X}" if s["file_off"] else "—",
                 f"0x{s['cbseg']:X}  ({s['cbseg']})",
                 f"0x{s['minalloc']:X}  ({s['minalloc'] or 65536})",
-                f"{kind}  [{fstr}]  relocs={nrel}",
+                f"{kind}  [{fstr}]  relocs={len(s['relocs'])}",
             ))
         tv.column("#",           width=30)
         tv.column("File Offset", width=100)
         tv.column("Size",        width=120)
         tv.column("MinAlloc",    width=120)
         tv.column("Flags",       width=450)
-
-        # Clear detail panels
         self._seg_hex.config(state="normal")
         self._seg_hex.delete("1.0", "end")
-        self._seg_hex.insert("end", "  Select a segment above to view its hex dump.", "dim")
+        self._seg_hex.insert("end", "  Select a segment above.\n", "dim")
         self._seg_hex.config(state="disabled")
         self._seg_reloc_tv.delete(*self._seg_reloc_tv.get_children())
 
     def _fill_resources(self):
-        tv = self.tab_resources
+        tv = self._res_tree
         tv.delete(*tv.get_children())
-        for r in self.ne.resources:
-            tv.insert("", "end", values=(
-                r["type_name"],
-                r["name"],
-                f"0x{r['offset']:X}",
-                f"0x{r['length']:X}  ({r['length']})",
-                f"0x{r['flags']:04X}",
-            ))
-        tv.column("Type",        width=160)
-        tv.column("ID",          width=100)
-        tv.column("File Offset", width=100)
-        tv.column("Size",        width=120)
-        tv.column("Flags",       width=80)
+
+        by_type = {}
+        for i, r in enumerate(self.ne.resources):
+            by_type.setdefault(r["type_name"], []).append((i, r))
+
+        for type_name, items in sorted(by_type.items()):
+            parent = tv.insert("", "end",
+                text=f"{type_name}  ({len(items)})", open=True)
+            for idx, r in items:
+                tv.insert(parent, "end",
+                    text=r["name"],
+                    values=(f"{r['length']:,}",),
+                    tags=(f"res:{idx}",),
+                )
+
+        # clear detail panels
+        for w in (self._res_prev, self._res_hex):
+            w.config(state="normal")
+            w.delete("1.0", "end")
+            w.insert("end", "  Select a resource.\n", "dim")
+            w.config(state="disabled")
 
     def _fill_exports(self):
-        # Resident names
         tv = self._tv_res
         tv.delete(*tv.get_children())
         for i, (ordinal, name) in enumerate(self.ne.exports):
-            label = "MODULE NAME" if i == 0 else str(ordinal)
-            tv.insert("", "end", values=(label, name))
+            tv.insert("", "end", values=("MODULE NAME" if i == 0 else str(ordinal), name))
 
-        # Non-resident names
         tv2 = self._tv_nres
         tv2.delete(*tv2.get_children())
         for i, (ordinal, name) in enumerate(self.ne.nonresident):
-            label = "MODULE DESC" if i == 0 else str(ordinal)
-            tv2.insert("", "end", values=(label, name))
+            tv2.insert("", "end", values=("MODULE DESC" if i == 0 else str(ordinal), name))
         if not self.ne.nonresident:
             tv2.insert("", "end", values=("—", "<empty>"))
 
@@ -774,24 +1122,19 @@ class App(tk.Tk):
     def _fill_entries(self):
         tv = self.tab_entries
         tv.delete(*tv.get_children())
-        # Build name lookup from both resident and non-resident exports
-        name_map = {ord_: name for ord_, name in self.ne.exports[1:]}
-        name_map.update({ord_: name for ord_, name in self.ne.nonresident[1:]})
+        name_map = {o: n for o, n in self.ne.exports[1:]}
+        name_map.update({o: n for o, n in self.ne.nonresident[1:]})
         for e in self.ne.entries:
-            flag_parts = []
-            if e["flags"] & 1: flag_parts.append("EXPORTED")
-            if e["flags"] & 2: flag_parts.append("SHARED")
-            flag_str = f"0x{e['flags']:02X}" + (f"  {' '.join(flag_parts)}" if flag_parts else "")
-            name = name_map.get(e["ordinal"], "")
+            fp = []
+            if e["flags"] & 1: fp.append("EXPORTED")
+            if e["flags"] & 2: fp.append("SHARED")
+            flag_s = f"0x{e['flags']:02X}" + (f"  {' '.join(fp)}" if fp else "")
             iid = tv.insert("", "end", values=(
-                e["ordinal"],
-                e["type"],
-                e["seg"],
-                f"0x{e['offset']:04X}",
-                flag_str,
-                name,
+                e["ordinal"], e["type"], e["seg"],
+                f"0x{e['offset']:04X}", flag_s,
+                name_map.get(e["ordinal"], ""),
             ))
-            if name:
+            if name_map.get(e["ordinal"]):
                 tv.item(iid, tags=("named",))
         tv.column("Ordinal", width=70)
         tv.column("Type",    width=50)
@@ -803,13 +1146,13 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
-    import sys
     app = App()
-    if len(sys.argv) > 1:
+    path = sys.argv[1] if len(sys.argv) > 1 else (SKIFREE_PATH if os.path.isfile(SKIFREE_PATH) else None)
+    if path:
         try:
-            app.ne = NEFile(sys.argv[1])
+            app.ne = NEFile(path)
             app.title_var.set(
-                f"{os.path.basename(sys.argv[1])}  —  {sys.argv[1]}"
+                f"{os.path.basename(path)}  ({len(app.ne.data):,} bytes)  —  {path}"
             )
             app._populate()
         except Exception as e:
