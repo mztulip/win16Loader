@@ -499,8 +499,12 @@ Cel: pierwsza klatka gry widoczna na ekranie. Sprite'y narciarza renderowane.
     - SKI uzywa 2 atlasow: DC2 (sprite male w<=32), DC4 (sprite duze w>32)
     - DC6: memDC kompozyt (posredni), blit do screen DC=1 w Case C
     - HWND-based DC: GetDC(child) zwraca 0x4000|hwnd, pozycja z KCB wnd_ox/oy[]
-    - DS!=SS w DLL: lokalne zmienne przekazywane jako near ptr ulegaja korupcji;
-      fix: uzywac zmiennych globalnych lub static zamiast lokalnych tablic
+    - DS!=SS w DLL: Watcom -ms bez -zu zaklada SS==DS -> va_list (near ptr)
+      dereferencjonowany przez DS zamiast SS -> odczyt smieci ze stosu apki.
+      Fix: dodac -zu do WCC dla plikow DLL; Watcom generuje va_list jako
+      char __far * z segmentem SS. Hack 'static char[]' (przeniesienie do
+      DGROUP) dziala ale jest obejsciem - wlasciwe rozwiazanie to -zu.
+      W prawdziwym Win16: Microsoft C /Gw + __far pointery na granicach DLL.
 
 ---------------------------------------------------------------------------
 ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
