@@ -23,12 +23,25 @@ STEP15 — SkiFree loads and runs: sprites render, game loop active, status bar 
 
 ## Build
 
-Requirements: Open Watcom (`wcl`, `wlink`), NASM, QEMU or Bochs, FreeDOS floppy image.
+### Tool versions used
+
+| Tool | Version |
+|------|---------|
+| Open Watcom C/C++ (wcc, wlink) | 2.0 beta (Nov 3 2025) |
+| NASM | 3.01 |
+| GNU Make | 4.4.1 |
+| QEMU | 11.0.0 |
+| Bochs | 3.0 |
+
+Open Watcom is installed at `/opt/watcom`. The Makefile sets the required environment variables (`WATCOM`, `INCLUDE`, `PATH`) automatically.
+
+### Build steps
 
 ```bash
 cd STEP15
 make
-make run-qemu   # serial output to stdout
+make run-qemu   # run under QEMU, serial output to stdout
+make run        # run under Bochs with GUI debugger
 ```
 
 ## Project structure
