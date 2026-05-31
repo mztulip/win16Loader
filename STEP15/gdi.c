@@ -108,6 +108,8 @@ typedef unsigned short HDC;
 #define SEL_KCB         ((unsigned short)0x98)
 #define KCB_WND_OX_OFF  208   /* short wnd_ox[8]: abs x per hwnd (indeks hwnd-1) */
 #define KCB_WND_OY_OFF  224   /* short wnd_oy[8]: abs y per hwnd (indeks hwnd-1) */
+#define KCB_WND_W_OFF   240   /* short wnd_w[8]:  szerokosc child window (0=root) */
+#define KCB_MAX_HWNDS   8
 
 /* ETAP 15: pixel buffers dla memDC */
 #define SEL_GDT_ACCESS  0x120   /* samoodniesienie GDT */
@@ -649,6 +651,17 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                     unsigned char __far *bp;
                     if (sx < 0 || sx >= DC_BUF_W) continue;
                     if (dx < 0 || dx >= 640) continue;
+                    /* Pomiń piksele należące do child windows */
+                    {
+                        int ci;
+                        int skip = 0;
+                        for (ci = 0; ci < KCB_MAX_HWNDS; ci++) {
+                            short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
+                            short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
+                            if (cw > 0 && dx >= (int)cx && dx < (int)cx + (int)cw) { skip = 1; break; }
+                        }
+                        if (skip) continue;
+                    }
                     buf_off = (unsigned long)sy * DC_BUF_PITCH + (unsigned long)sx * 4u;
                     bp = (unsigned char __far *)MK_FP(
                             buf_sel + (unsigned)(buf_off >> 16) * 8u,
@@ -673,6 +686,25 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
     }
 
     return 1;
+}
+
+/* ============================================================
+ * clip_screen_x: klipuje zakres x/w omijajac child windows na ekranie (DC=1).
+ * Dla kazdego child window z wnd_w[i]>0: jesli ono zaczyna sie w srodku
+ * rysowanego prostokata, obcinamy w do jego lewej krawedzi.
+ * Obsluguje tylko przypadek child window po prawej stronie rysowania.
+ * ============================================================ */
+static void clip_screen_x(int *px, int *pw)
+{
+    int i;
+    for (i = 0; i < KCB_MAX_HWNDS; i++) {
+        short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)i * 2u);
+        short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)i * 2u);
+        if (cw <= 0) continue;  /* slot pusty (root window) */
+        /* child window zajmuje x w zakresie [cx, cx+cw) */
+        if (*px < (int)cx && *px + *pw > (int)cx)
+            *pw = (int)cx - *px;  /* obetnij prawy bok */
+    }
 }
 
 /* ============================================================
@@ -735,6 +767,8 @@ BOOL __far __pascal PatBlt(HDC hdc, int x, int y, int w, int h,
     if (y < 0) { h += y; y = 0; }
     if (x + w > 640) w = 640 - x;
     if (y + h > 480) h = 480 - y;
+    /* Klipuj wokol child windows (DC=1 rysuje caly ekran bez klipowania okien) */
+    if ((unsigned)hdc == 1u) clip_screen_x(&x, &w);
     if (w <= 0 || h <= 0) return 1;
 
     for (row = 0; row < h; row++) {

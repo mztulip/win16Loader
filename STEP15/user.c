@@ -208,15 +208,17 @@ typedef struct {
  *                        origin czytany z KCB przy kazdym uzyciu
  *   HDC bit15=1      -> (legacy) pozycja zakodowana statycznie
  *
- * Tablica pozycji okien w KCB (64 bajty, offset 208..239):
+ * Tablica pozycji okien w KCB (offset 208..255):
  *   208..223: short wnd_ox[8]  (abs x indeksowane hwnd-1)
  *   224..239: short wnd_oy[8]  (abs y indeksowane hwnd-1)
+ *   240..255: short wnd_w[8]   (szerokosc child window; 0 = brak/root)
  *
- * gdi.c dekoduje origin z HDC w TextOut/PatBlt.
+ * gdi.c dekoduje origin z HDC w TextOut/PatBlt; uzywa wnd_w do klipowania.
  * user.c dekoduje origin z HDC w FillRect/FrameRect.
  * ============================================================ */
 #define KCB_WND_OX_OFF  208
 #define KCB_WND_OY_OFF  224
+#define KCB_WND_W_OFF   240   /* short wnd_w[8]: szerokosc child window (0=root) */
 
 static HDC make_hwnd_dc(unsigned hwnd)
 {
@@ -229,6 +231,12 @@ static void kcb_set_wnd_pos(unsigned hwnd, int ox, int oy)
     short __far *koy = (short __far *)KCB_MK_FP(KCB_WND_OY_OFF + (hwnd - 1u) * 2u);
     *kox = (short)ox;
     *koy = (short)oy;
+}
+
+static void kcb_set_wnd_w(unsigned hwnd, unsigned ww)
+{
+    short __far *kw = (short __far *)KCB_MK_FP(KCB_WND_W_OFF + (hwnd - 1u) * 2u);
+    *kw = (short)ww;
 }
 
 static void decode_hwnd_dc(unsigned hwnd, int *ox, int *oy)
@@ -456,9 +464,11 @@ HWND __far __pascal CreateWindow(
         }
     }
 
-    /* Zapisz pozycje okna do KCB (dla GDI - HWND-based DC) */
-    if (parent != 0)
+    /* Zapisz pozycje i szerokosc okna do KCB (dla GDI - HWND-based DC i klipowanie) */
+    if (parent != 0) {
         kcb_set_wnd_pos((unsigned)hwnd, g_windows[wi].x, g_windows[wi].y);
+        kcb_set_wnd_w((unsigned)hwnd, g_windows[wi].w);
+    }
 
     serial_puts("USER: CW raw_x="); serial_hex16((unsigned short)(short)x);
     serial_puts(" raw_y=");          serial_hex16((unsigned short)(short)y);
@@ -776,9 +786,11 @@ BOOL __far __pascal MoveWindow(HWND hwnd, int x, int y, int w, int h, BOOL repai
             g_windows[i].y = y;
             if (w > 0) g_windows[i].w = (unsigned)w;
             if (h > 0) g_windows[i].h = (unsigned)h;
-            /* Zaktualizuj tablice pozycji w KCB (dla GDI) */
-            if (g_windows[i].parent != 0)
+            /* Zaktualizuj tablice pozycji i szerokosci w KCB (dla GDI) */
+            if (g_windows[i].parent != 0) {
                 kcb_set_wnd_pos((unsigned)hwnd, x, y);
+                kcb_set_wnd_w((unsigned)hwnd, g_windows[i].w);
+            }
             serial_puts("USER: MoveWindow hwnd="); serial_hex16(hwnd);
             serial_puts(" abs_x="); serial_hex16((unsigned short)(short)g_windows[i].x);
             serial_puts(" abs_y="); serial_hex16((unsigned short)(short)g_windows[i].y);
