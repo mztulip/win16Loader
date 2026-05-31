@@ -22,6 +22,11 @@ try:
 except ImportError:
     HAS_PIL = False
 
+try:
+    from win16_ordinals import WIN16_ORDINALS
+except ImportError:
+    WIN16_ORDINALS = {}
+
 SKIFREE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SKI.EXE")
 
 # ─── Resource type names ──────────────────────────────────────────────────────
@@ -396,7 +401,8 @@ class App(tk.Tk):
         self.geometry("1200x800")
         self.configure(bg=C_BG)
         self.ne = None
-        self._ordinal_maps = {}   # { "KERNEL": {6: "GlobalAlloc", ...}, ... }
+        # start with built-in tables, DLL scan can override/extend
+        self._ordinal_maps = {k: dict(v) for k, v in WIN16_ORDINALS.items()}
         self._apply_dark_theme()
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self.quit)
