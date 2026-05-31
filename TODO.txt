@@ -469,36 +469,102 @@ Cel: SKI.EXE laduje 86 bitmap (sprite'y) przez LoadBitmap.
         bmWidth/bmHeight z bi->biWidth/biHeight, bmWidthBytes DWORD-aligned.
 
 ---------------------------------------------------------------------------
-ETAP 15 - GDI: PatBlt + BitBlt (pierwsza klatka SkiFree)        [DONE]
+ETAP 15 - Pelna implementacja API dla SKI.EXE (65 importow)     [DONE]
 ---------------------------------------------------------------------------
-Cel: pierwsza klatka gry widoczna na ekranie. Sprite'y narciarza renderowane.
+Cel: wszystkie funkcje wywolywane przez SKI.EXE zaimplementowane.
+Wynik: sprite'y renderowane, game loop aktywny, HUD z timerem/dystansem dziala.
 
-[x] 15a: CreateCompatibleDC (GDI.52) - zwraca HDC=2,3,... (g_next_hdc++)
-[x] 15b: CreateCompatibleBitmap (GDI.51) - stub zwraca HBMP=0x100+i
-[x] 15c: SelectObject (GDI.45) - zapamietuje HBITMAP w g_dc_bitmap[hdc]
-[x] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69) - zwracaja 1
-[x] 15g: GetDeviceCaps (GDI.80) - dziala (HORZRES=640, VERTRES=640)
-        KLUCZOWY FIX: VERTRES=640 (nie 480) - SKI oblicza rozmiar okna jako
-          min(VERTRES,HORZRES)=640, okno 640x640 przy x=0 (nie 480x480 przy x=80).
-[x] 15h: GetStockObject (GDI.87) - dziala (0x8000|nObject)
-[x] 15i: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93) - dzialaja
+SKI.EXE importuje 65 funkcji: KERNEL(17) + GDI(14) + USER(34).
 
-[x] 15f: PatBlt (GDI.29)
-        WHITENESS (0x00FF0062) -> fill (255,255,255); BLACKNESS (0x00000042) -> (0,0,0).
-        fill_rect przez draw_pixel (huge selectors LFB).
+--- KERNEL (17 funkcji) ---
 
-[x] 15e: BitBlt (GDI.34) - atlas tracking (sprite compositing)
-        5 przypadkow: sprite->memDC, memDC->memDC, screen->memDC, SRCAND/SRCPAINT,
-          memDC->screen (final blit z auto-clear alpha).
-        g_atlas_tab[{dc, y_off}] = sprite_hbm: mapowanie offsetu atlasu -> HBITMAP.
-        g_dc_last_hbm/xoff/yoff[]: przechowuje ostatni sprite z Case 2 per DC6.
-        Kolor przezroczysty: alpha=0 -> skip przy blit na ekran.
-        4bpp paleta -> BGR24 konwersja przez RGBQUAD w BITMAPINFOHEADER.
+[x] FatalExit(1) / FatalAppExit(137) - serial print + HLT
+[x] LocalAlloc(5) - bump allocator w DGROUP apki (near offsets, LMEM_ZEROINIT)
+    LocalReAlloc(6) - stub: returns 0 (SKI nie sprawdza wyniku)
+    LocalFree(7)    - stub: returns 1
+[x] GlobalAlloc(15) - bump allocator z KCB heap; tworzy deskryptor GDT przez
+        SEL_GDT_ACCESS(0x120); zwraca selektor jako HGLOBAL (GMEM_FIXED).
+    GlobalReAlloc(16) - stub: returns 0
+    GlobalFree(17)    - stub: returns 1 (brak GC - sesja krotka)
+    LockSegment(23) / UnlockSegment(24) - stubs (returns arg / 1)
+    WaitEvent(30)   - stub: returns 0
+[x] lstrCpy(88) / lstrLen(90) - dzialaja (__far string ops)
+[x] InitTask(91) - zwraca AX=hInstance(SEL_APP_DATA), DI=0, ES:SI=cmdline
+[x] OutputDebugString(115) - serial COM1
+    GetPrivateProfileString(128) - stub: kopiuje lpszDefault do bufora
+    WritePrivateProfileString(129) - stub: returns 0
+
+--- GDI (14 funkcji) ---
+
+[x] PatBlt(29) - WHITENESS(0x00FF0062)->(255,255,255), BLACKNESS(0x00000042)->(0,0,0)
+        fill_rect przez draw_pixel z huge selectors LFB.
+[x] TextOut(33) - BIOS font 8x16 na LFB; HWND-based DC dla child windows.
+[x] BitBlt(34) - atlas tracking, 5 przypadkow:
+        Case 1: sprite(1..86) -> memDC, SRCCOPY: zapisz piksele 4bpp->BGR24 do bufora
+        Case 2B: memDC -> memDC, SRCCOPY: kopiuj bufor pikselowy
+        Case A: screen(1) -> memDC, SRCCOPY: zapisz LFB do bufora (tlo)
+        Case B: SRCAND/SRCPAINT: compositing z realnego sprite lub bufora memDC
+        Case C: memDC -> screen(1), SRCCOPY: blit z bufora na LFB (auto-clear alpha)
+        g_atlas_tab[{dc,y_off}]=sprite_hbm: mapowanie offsetu atlasu -> HBITMAP
+        g_dc_last_hbm/xoff/yoff[]: ostatni sprite z Case 2 per DC6
+        Przezroczystosc: alpha=0 -> skip; 4bpp paleta -> BGR24 przez RGBQUAD
+[x] SelectObject(45) - stores HBITMAP w g_dc_bitmap[hdc] (tablica 16 DC)
+    CreateBitmap(48)  - stub: returns 0 (SKI uzywa ale wynik ignoruje)
+    CreateCompatibleBitmap(51) - stub: returns fake handle 0x100+i
+[x] CreateCompatibleDC(52) - alokuje memDC z buforem pikselowym (640*480 bytes)
+    DeleteDC(68) / DeleteObject(69) - stubs: returns 1 (brak cleanup - OK)
+[x] GetDeviceCaps(80) - HORZRES=640, VERTRES=640, BITSPIXEL=24, PLANES=1
+        KLUCZOWY FIX: VERTRES=640 (nie 480) -> SKI oblicza min(VERTRES,HORZRES)=640,
+          okno 640x640 przy x=0; z 480 byloby okno 480x480 przy x=80.
+[x] GetObject(82) - wypelnia BITMAP struct: bmWidth/bmHeight z DIB header,
+        bmWidthBytes DWORD-aligned, bmBitsPixel=4
+[x] GetStockObject(87) - returns 0x8000|nObject (fake handle)
+[x] GetTextExtent(91) - returns DWORD: (FONT_H<<16 | len*FONT_W) dla 8x16
+[x] GetTextMetrics(93) - wypelnia TEXTMETRIC dla BIOS font 8x16
+
+--- USER (34 funkcje) ---
+
+[x] RegisterClass(57) - rejestruje WNDCLASS w tablicy klas (max 8)
+[x] CreateWindow(41)  - alokuje HWND, wysyla WM_CREATE; child windows z parent
+[x] ShowWindow(42)    - ustaw state; dla top-level: SendMessage WM_SIZE(0)+WM_ACTIVATE(1)
+        KLUCZOWY FIX: bez tych wiadomosci SKI nie ustawia flag [0xb1e]/[0xb3e]
+          -> game loop kreciby sie na PeekMessage bez wywolania render 0x34fb
+[x] MoveWindow(56)    - aktualizuje pozycje w KCB wnd_ox[]/wnd_oy[] (offset 208/224)
+[x] GetDC(66) - dla child: zwraca 0x4000|hwnd (HWND-based DC z pozycja z KCB)
+                dla glownego: zwraca HDC=1
+    ReleaseDC(68) - stub: returns 1
+[x] BeginPaint(39) / EndPaint(40) - jak GetDC; EndPaint czyci pending paint flag
+[x] GetClientRect(33) - dla child: zwraca rozmiar z KCB; dla root: {0,0,640,480}
+[x] PostMessage(28) / PostQuitMessage(6) - ring buffer 64 MSG
+[x] GetMessage(108) - UWAGA: nie blokuje gdy kolejka pusta (zwraca 1 od razu)
+        W Win3.1 blokowaloby; tu OK bo SKI uzywa PeekMessage w game loop,
+        GetMessage tylko przy inicjalizacji/zamknieciu.
+[x] PeekMessage(109) - nieblokujacy; PM_NOREMOVE/PM_REMOVE; +55ms do g_tick_ms
+[x] DispatchMessage(114) - wywoluje WndProc apki przez int3f_trampoline
+[x] DefWindowProc(107) - WM_DESTROY->PostQuitMessage; inne -> 0
+    TranslateMessage(113) - stub: returns 1 (bez WM_CHAR; OK bo klawiatura nieimpl.)
+[x] UpdateWindow(124) / InvalidateRect(125) - PostMessage WM_PAINT
+[x] FillRect(81) - fill_rect na LFB lub child DC (decode pozycji z KCB)
+[x] FrameRect(83) - rysuje ramke 1px wokol rect na LFB
+[x] LoadBitmap(175) - zwraca HBITMAP=id(1..86); MAKEINTRESOURCE(n): far seg=0,off=n
+[x] LoadString(176) - wczytuje RT_STRING z KCB (bajty 28..255); Pascal-string blocks
+[x] Wsprintf(420) - %d/%u/%ld/%s/%% + szerokosc/precyzja/flagi(-,0); bez stdlib
+[x] GetTickCount(13) - zwraca g_tick_ms (+=55 per PeekMessage, 18.2Hz)
+    MessageBox(1)    - stub: serial print, returns IDOK=1
+    InitApp(5)       - stub: returns 1
+    SetFocus(22)     - stub: returns 0 (Win3.1 zwraca stary HWND; SKI nie sprawdza)
+    IsIconic(31)     - stub: returns 0
+    SetWindowText(37) - stub: returns 1
+    OpenIcon(44)     - stub: returns 0
+    FindWindow(50)   - stub: returns 0
+    DestroyWindow(53) - stub: returns 1 (serial print)
+    SetWindowPos(232) - stub: returns 1
+    LoadCursor(173) / LoadIcon(174) - stubs: returns 1
 
     Klucze techniczne:
     - SKI uzywa 2 atlasow: DC2 (sprite male w<=32), DC4 (sprite duze w>32)
-    - DC6: memDC kompozyt (posredni), blit do screen DC=1 w Case C
-    - HWND-based DC: GetDC(child) zwraca 0x4000|hwnd, pozycja z KCB wnd_ox/oy[]
+    - DC6: memDC kompozyt posredni; blit na screen DC=1 w Case C
+    - HWND-based DC: dekodowanie pozycji child window z KCB przy kazdym rysowaniu
     - DS!=SS w DLL: Watcom -ms bez -zu zaklada SS==DS -> va_list (near ptr)
       dereferencjonowany przez DS zamiast SS -> odczyt smieci ze stosu apki.
       Fix: dodac -zu do WCC dla plikow DLL; Watcom generuje va_list jako
