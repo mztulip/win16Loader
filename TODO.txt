@@ -365,7 +365,7 @@ Nasze DLL musza eksportowac funkcje pod numerami zgodnymi z Win16/SDK.
 ETAP 12 - KERNEL + USER: InitTask + GlobalAlloc + PeekMessage    [DONE]
 ---------------------------------------------------------------------------
 Cel: SKI.EXE uruchamia sie, tworzy okna i wchodzi w game loop.
-Katalog: STEP12.
+Uwaga: etapy 12 i 13 zostaly zrealizowane razem w STEP12.
 
 [x] 12a: InitTask (KERNEL.91) - KRYTYCZNE
         Zwraca AX=hInstance(0x0040=SEL_APP_DATA), DI=hPrevInst=0, ES:SI=cmdline,
@@ -403,79 +403,125 @@ Katalog: STEP12.
     - [0xb02] = HWND glownego okna (z CreateWindow ordinal 41)
     - Dwa CreateWindow: hwnd=[0xb02] (klasa "WNDPROCMAIN"), hwnd2=[0xaee] (klasa "WNDPROCSTATUS")
     - WM_PAINT dla okna statusu wywoluje GetStockObject + FrameRect + LStrLen + TextOut
+    - Wsprintf (ETAP 13f) i LoadString (ETAP 13h) zaimplementowane pozniej
 
-[x] 12g: Wsprintf (USER.420)
+---------------------------------------------------------------------------
+ETAP 13 - USER: PeekMessage + GetTickCount + Wsprintf + LoadString [DONE]
+---------------------------------------------------------------------------
+Cel: SKI.EXE wyswietla HUD (czas, dystans, predkosc, styl) z poprawnymi danymi.
+
+[x] 13a: PeekMessage (USER.109) - dziala (PM_NOREMOVE/PM_REMOVE, +55ms tick)
+[x] 13b: GetTickCount (USER.13) - dziala (g_tick_ms += 55 per PeekMessage)
+[x] 13c: InvalidateRect (USER.125) - PostMessage WM_PAINT
+[x] 13d: GetClientRect (USER.33) - zwraca {0,0,640,480}
+[x] 13e: SetWindowPos (USER.232) - stub
+[x] 13g: InitApp (USER.5) - stub zwraca 1
+
+[x] 13f: Wsprintf (USER.420)
         Format: "%2u:%2.2u:%2.2u.%2.2u" (czas), "%5.2dm" (dystans),
           "%5.2dm/s" (predkosc), "%7ld" (styl), "%s", "%ld", "%%"
         Implementacja bez stdlib (reczny itoa, iterowane odejmowanie poteg 10).
         Parsuje flagi (-,0), szerokosc pola, precyzje (.N), modyfikator 'l'.
-        KLUCZOWY BUG: 'tmp[12]' musi byc 'static' - w thunkach DLL SS != DS.
+        Precyzja dla int/uint: minimum N cyfr (dopelnia zerami z lewej).
+        Szerokosc: minimum N znakow (dopelnia spacjami/zerami z lewej).
+        KLUCZOWY BUG: 'tmp[12]' musi byc 'static' - w thunkach DLL SS != DS
+          (SS = stos apki, DS = DGROUP DLL). Tablica na stosie przekazana jako
+          near ptr do subfunkcji jest adresowana przez DS -> blad!
+          Lokalny char[] -> static char[] przenosi do segmentu danych DLL.
         Wynik: " 0:00:00.00", "   00m", "   00m/s" poprawnie formatowane.
 
-[x] 12h: LoadString (USER.176)
+[x] 13h: LoadString (USER.176)
         RT_STRING zasoby z SKI.EXE wczytane do KCB rozszerzonego do 256B.
-        KCB: bajty 28-255 = surowe dane Pascal-string (176+48=224B, 2 bloki).
-        LoadString: szuka bloku, przechodzi 16 Pascal-stringow (length-byte).
-        Weryfikacja: TextOut pokazuje " 0:00:00.00", "   00m", "   00m/s".
+        Strings: 2 (Time:), 3 (Ski Paused...), 4-7 (etykiety HUD), 8-11 (poczatkowe
+          wartosci), 12-15 (formaty: %2u:%2.2u:%2.2u.%2.2u / %5.2dm / %5.2dm/s / %7ld).
+        KCB rozszerzony: loader alokuje 16 paragrafow (256B) zamiast 2 (32B).
+          - bajty 0-17: istniejace pola KCB
+          - bajt 18: rsc_nblocks (liczba blokow RT_STRING)
+          - bajty 20-23: rsc_block_ids[2] (ID bloku: 1=str1..16, 2=str17..32)
+          - bajty 24-27: rsc_block_sizes[2] (rozmiar danych bloku w bajtach)
+          - bajty 28-255: surowe dane Pascal-string z RT_STRING (176+48=224B)
+        GDT limit SEL_KCB: 0x001F -> 0x00FF (pm_call.asm).
+        LoadString: szuka bloku w KCB, przechodzi przez 16 Pascal-stringow (length-byte).
+        Weryfikacja: TextOut pokazuje " 0:00:00.00", "   00m", "   00m/s" co klatke.
 
 ---------------------------------------------------------------------------
-ETAP 13 - RT_BITMAP loader + GDI sprite rendering             [W TOKU]
+ETAP 14 - Resource loader: LoadBitmap + parser zasobow NE        [TODO]
 ---------------------------------------------------------------------------
-Cel: SKI.EXE rysuje sprite'y narciarza i przeszkod (pierwsza klatka gry).
-Katalog: STEP13.
+Cel: SKI.EXE laduje 86 bitmap (sprite'y) przez LoadBitmap.
+Stan: SKI.EXE wywoluje LoadBitmap w WM_CREATE (CREATE child window handler).
+  LoadBitmap(hInst, MAKERESOURCE(id)) -> zwracamy stub HBITMAP=1.
+  GetObject (GDI.82) odpytuje bitmap o rozmiary - zwracamy stub 0.
+  Brak zaladowanych bitmap -> BitBlt nie moze kopiowac pikseli sprite'ow.
 
-[x] 13a: Parser RT_BITMAP w loader.c (load_ski_bitmaps)
-        Rozszerzenie load_ski_strings() o typ 0x8002 (RT_BITMAP).
-        Skanuje NE resource table SKI.EXE, wczytuje 86 sprite'ow do bufora.
-        KLUCZOWY BUG alokacji: _dos_allocmem musi byc wywolany PRZED file I/O
-          (fopen/fread z DLL loading powoduje C runtime sbrk -> brak miejsca DOS).
-          Fix: alloc PSP/KCB/bufor_bitmap/heap wspolnie przed load_ne_dll().
+[ ] 14a: Parser tablicy zasobow NE w loader.c
+        NE resource table: tuz za ne_rsrctab offsetem w NE headerze
+        Struktura: align_shift, potem TYPEINFO{type_id, count, ...},
+          potem NAMEINFO{offset, length, flags, id, ...} per zasob
+        Offset zasobu w pliku: nameinfo.offset << align_shift
+        Rozmiar: nameinfo.length << align_shift
+        SKI.EXE: 86 zasobow RT_BITMAP (type_id=0x8002), ids 1..86+
+        UWAGA: infrastruktura parsowania NE resource table juz istnieje
+          w load_ski_strings() (ETAP 13h) - wystarczy rozszerzyc o RT_BITMAP.
 
-[x] 13b: Bufor bitmap (SEL_BITMAPS=0x128, 56KB DOS buffer)
-        Format: [count(2)][pad(2)][offsets[86]*2=172B][dane DIB ~52KB]
-        HBITMAP = id (1..86); MK_FP(SEL_BITMAPS, offsets[id-1]) = BITMAPINFOHEADER.
-        Wszystkie sprite'y 4bpp paletowe, dol-do-gory, DWORD-aligned rows.
-        GDT: SEL_BITMAPS=0x128 (nowy slot), GDYN_FIRST=0x130 (byl 0x128).
+[ ] 14b: Zaladuj wszystkie RT_BITMAP SKI.EXE do pamieci przy starcie
+        g_resources[]: tablica {id, phys_ptr, size} dla 86 bitmap
+        Format: Windows DIB = BITMAPINFOHEADER(40B) + paleta + bity
+        Alokacja: jeden ciagly bufor (GlobalAlloc) lub _dos_allocmem per bitmap
+        Uwaga: SKI.EXE ma format paletowy (8bpp lub 4bpp) - trzeba konwertowac
+          paleta -> BGR24 przy blit do LFB
 
-[x] 13c: LoadBitmap (USER.175) - zwraca HBITMAP = id (1..86)
-        MAKEINTRESOURCE(n): far ptr segment=0, offset=n -> id = offset & 0xFFFF.
+[ ] 14c: LoadBitmap (USER.175) - PILNE: stub musi zwracac non-zero!
+        Obserwacja: serial log pokazuje TYLKO 1 wywolanie LoadBitmap mimo 86 bitmap.
+        Przyczyna: stub zwraca 0 (NULL), SKI sprawdza wynik i przerywa petlę ladowania.
+        Minimalna naprawka: zwroc fake HBITMAP = (unsigned)(id & 0x7FFF) | 0x100
+          (wystarczy by SKI kontynuowal petlę i zalokowal DC/SelectObject per bitmap)
+        Pelna impl: LoadBitmap(hInstance, lpBitmapName) szuka zasobu po id,
+          zwraca HBITMAP = indeks w tablicy g_bitmaps[]
 
-[x] 13d: GetObject (GDI.82) - wypelnia BITMAP struct z BITMAPINFOHEADER
-        bmWidth/bmHeight z bi->biWidth/biHeight, bmWidthBytes DWORD-aligned.
-
-[x] 13e: SelectObject (GDI.45) - zapamietuje HBITMAP w g_dc_bitmap[hdc]
-        g_dc_bitmap[1..15]: DC -> aktualnie wybrany HBITMAP (1..86 lub 0).
-
-[x] 13f: CreateCompatibleDC (GDI.52) - zwraca HDC=2,3,...
-        Dodany serial debug: "GDI: CreateCompatDC -> XX" do diagnostyki.
-
-[ ] 13g: BitBlt (GDI.34) - implementacja gotowa, sprite'y NIE SA rysowane
-        AKTUALNY BUG: SKI.EXE wywoluje BitBlt z hdcSrc=0 i w=0, h=0.
-        Analiza:
-          - hdcSrc pochodzi z globalnej zmiennej SKI [0x0B46] (powinna = memDC)
-          - w/h z lokalnych zmiennych SKI [BP-0x1C]/[BP-0x1A] (z GetObject)
-          - CreateCompatibleDC zwraca HDC=2, ale [0x0B46] pozostaje 0
-          - Mozliwe: CreateCompatibleDC nie jest w ogole wywolywane przez SKI
-            (lub SKI przechowuje wynik gdzie indziej)
-        Do sprawdzenia: czy CreateCompatDC jest wywolywane i kiedy vs BitBlt.
-        Implementacja (czeka na poprawke parametrow):
-          hdcSrc -> g_dc_bitmap[hdcSrc] = HBITMAP -> offset w SEL_BITMAPS.
-          Konwersja: nibble 4bpp -> paleta RGBQUAD -> draw_pixel BGR24 na LFB.
-          Przezroczystosc: paleta[15] = bialy tlo -> skip.
-          Clip do granic bitmapy; DIB bottom-up (dib_row = height-1-src_row).
-
-[x] 13h: PatBlt (GDI.29) - wypelnianie prostokata
-        WHITENESS (0x00FF0062) -> (255,255,255); BLACKNESS (0x00000042) -> (0,0,0).
-        Inne ROPs: stub (zwraca 1 bez rysowania).
-
-[x] 13i: CreateCompatibleBitmap (GDI.51) - stub (SKI uzywa LoadBitmap, nie CB)
-[x] 13j: DeleteDC (GDI.68) / DeleteObject (GDI.69) - stubs zwracaja 1
-[x] 13k: GetDeviceCaps (GDI.80) - dziala (640/480 per nIndex)
-[x] 13l: GetStockObject (GDI.87) - dziala (0x8000|nObject)
-[x] 13m: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93) - dzialaja
+[ ] 14d: GetObject (GDI.82)
+        GetObject(hObject, cbBuffer, lpObject) dla HBITMAP:
+        Wypelnij BITMAP struct {bmType=0, bmWidth, bmHeight,
+          bmWidthBytes, bmPlanes=1, bmBitsPixel, bmBits=far ptr}
+        SKI.EXE sprawdza rozmiary bitmap przed SelectObject
 
 ---------------------------------------------------------------------------
-ETAP 14 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
+ETAP 15 - GDI: PatBlt + BitBlt (pierwsza klatka SkiFree)        [TODO]
+---------------------------------------------------------------------------
+Cel: pierwsza klatka gry widoczna na ekranie.
+Stan: SKI.EXE juz wywoluje PatBlt i BitBlt w kazdej klatce (game loop aktywny).
+  Sekwencja per klatka (z serial log, po dlugim uruchomieniu):
+    GetTickCount(x4.9M) -> BitBlt(x5M) -> PatBlt(x2.5M) -> TextOut(x3.3M) -> repeat
+  Proporcja ~2 BitBlt : 1 PatBlt per klatka.
+  Obie funkcje to stubs zwracajace 1 bez rysowania - ekran pozostaje czarny.
+
+[x] 15a: CreateCompatibleDC (GDI.52) - stub zwraca HDC=2,3,... (g_next_hdc++)
+[x] 15b: CreateCompatibleBitmap (GDI.51) - stub zwraca HBMP=0x100+i
+[x] 15c: SelectObject (GDI.45) - stub zwraca 0
+[x] 15d: DeleteDC (GDI.68) / DeleteObject (GDI.69) - stubs zwracaja 1
+[x] 15g: GetDeviceCaps (GDI.80) - dziala (640/480 per nIndex)
+[x] 15h: GetStockObject (GDI.87) - dziala (0x8000|nObject)
+[x] 15i: GetTextExtent (GDI.91) / GetTextMetrics (GDI.93) - dzialaja
+
+[ ] 15f: PatBlt (GDI.29) - NASTEPNY KROK
+        PatBlt(hdc, x, y, w, h, dwRop)
+        SKI.EXE uzywa do wypelniania tla sniegu i czyszczenia regionow.
+        Implementacja minimalna:
+          WHITENESS (0x00FF0062): fill_rect(x, y, w, h, 0xFF, 0xFF, 0xFF)
+          BLACKNESS (0x00000042): fill_rect(x, y, w, h, 0x00, 0x00, 0x00)
+          PATCOPY   (0x00F00021): use white (brak brush system)
+        fill_rect: petla y_row..y_row+h, draw_pixel per kolumna
+
+[ ] 15e: BitBlt (GDI.34) - KRYTYCZNE dla sprite'ow
+        BitBlt(hdcDst, xDst, yDst, w, h, hdcSrc, xSrc, ySrc, dwRop)
+        SKI.EXE: SRCCOPY (0x00CC0020) - kopiuj sprite z bitmap do ekranu
+        Wymaga: zaladowane bitmap (ETAP 14) i sprawne SelectObject
+        Jezeli hdcDst=HDC_SCREEN(1): zapis do LFB przez draw_pixel (huge sel)
+        Jezeli hdcSrc=memory DC z bitmapa: czytaj piksele z bufora sprite'u
+        Kolor przezroczysty (colorkey): bialy (0xFF,0xFF,0xFF) -> skip
+        Format sprite DIB: prawdopodobnie 8bpp paletowy -> konwersja BGR24
+
+---------------------------------------------------------------------------
+ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
 ---------------------------------------------------------------------------
 Cel: SkiFree reaguje na klawiature (kursory steruja narciarzem).
 Stan: SKI.EXE obsluguje WM_KEYDOWN w WndProc (case 0x0100 w 0x4C9A).
@@ -484,50 +530,27 @@ Stan: SKI.EXE obsluguje WM_KEYDOWN w WndProc (case 0x0100 w 0x4C9A).
   WM_CHAR (0x0102): klawisze literowe (F=full screen itp).
   Bez handlera IRQ1 gra nie reaguje na wejscie.
 
-[ ] 14a: IRQ1 handler w PM (scan codes -> Virtual Keys -> PostMessage)
+[ ] 16a: IRQ1 handler w PM (scan codes -> Virtual Keys -> PostMessage)
         Tablica scancode -> VK (VK_LEFT=0x25, VK_RIGHT=0x27, VK_UP=0x26,
           VK_DOWN=0x28, VK_ESCAPE=0x1B, VK_F1..F12=0x70..0x7B)
         Handler w pm_call.asm: INT 1 -> odczyt port 0x60, konwersja,
           PostMessage(g_active_hwnd, WM_KEYDOWN, vk, 0)
         EOI: outb(0x20, 0x20)
 
-[ ] 14b: TranslateMessage (USER.113): generuj WM_CHAR z WM_KEYDOWN dla ASCII
+[ ] 16b: TranslateMessage (USER.113): generuj WM_CHAR z WM_KEYDOWN dla ASCII
 
 ---------------------------------------------------------------------------
-ETAP 15 - Mysz: WM_MOUSEMOVE + WM_LBUTTONDOWN                    [TODO]
+ETAP 17 - Mysz: WM_MOUSEMOVE + WM_LBUTTONDOWN                    [TODO]
 ---------------------------------------------------------------------------
 Stan: SkiFree uzywa myszy do sterowania (ruch myszy = kierunek narciarza).
   WM_MOUSEMOVE (0x0200): lParam=MAKELONG(x,y) -> SKI oblicza kat ruchu.
   WM_LBUTTONDOWN (0x0201): skok lub akcja.
   Bez myszy gra jest grywalana tylko klawiatura.
 
-[ ] 15a: IRQ12 handler (PS/2 mouse): odczyt pakietu 3B, delta x/y, przyciski
+[ ] IRQ12 handler (PS/2 mouse): odczyt pakietu 3B, delta x/y, przyciski
         port 0x60 po ACK z 0x64; pakiet: btn|dx_sign|dy_sign, dx, dy
-[ ] 15b: PostMessage(g_hwnd, WM_MOUSEMOVE, 0, MAKELONG(abs_x, abs_y))
-[ ] 15c: PostMessage(g_hwnd, WM_LBUTTONDOWN/UP, MK_LBUTTON, MAKELONG(x,y))
-
----------------------------------------------------------------------------
-ETAP 16 - GlobalHeap z pamieci rozszerzonej (XMS/above 1MB)          [TODO]
----------------------------------------------------------------------------
-Cel: Windows 3.1 trzymal GlobalHeap w pamieci rozszerzonej (powyzej 1MB)
-via HIMEM.SYS/XMS, nie w konwencjonalnej pamieci DOS (<640KB).
-Nasza implementacja uzywa _dos_allocmem (konwencjonalna DOS), co ogranicza
-GlobalHeap do ~64KB (pozostalosci po loaderze, DLL-ach, BmpBuf, SKI.EXE).
-
-Plan:
-[ ] 16a: Uzyc INT 15h AX=E820 lub AX=E801/88h do wykrycia wielkosci RAM
-         (extended memory = powyzej 0x100000)
-[ ] 16b: Zarezerwowac obszar powyzej 1MB jako GlobalHeap (np. 1MB..2MB)
-         bez HIMEM.SYS (bezposredni dostep w PM przez deskryptor GDT
-         z baza >= 0x100000)
-[ ] 16c: Zaktualizowac loader.c: heap_phys = 0x100000, heap_end = 0x200000
-         (lub wedlug wykrytego RAM), bez _dos_allocmem dla heapu
-[ ] 16d: Zaktualizowac pm_call.asm: GDT_ACCESS (SEL 0x120) musi miec
-         limit obejmujacy rowniez adresy powyzej 1MB (base=0, limit=0xFFFF
-         wystarczy dla 16-bit PM z 4GB jesli uzyje deskryptora 32-bit)
-[ ] 16e: Przetestowac GlobalAlloc > 64KB (np. dla duzych buforow bitmap)
-
-Uwaga: wymaga A20 gate wlaczonej (FreeDOS to robi) i QEMU/Bochs z RAM >= 2MB.
+[ ] PostMessage(g_hwnd, WM_MOUSEMOVE, 0, MAKELONG(abs_x, abs_y))
+[ ] PostMessage(g_hwnd, WM_LBUTTONDOWN/UP, MK_LBUTTON, MAKELONG(x,y))
 
 NARZEDZIA
 ---------
@@ -545,8 +568,8 @@ PRZYDATNE REFERENCJE
 - Bochs debugger: bochs.sourceforge.io
 - Istniejacy projekt 13ring3/ - podobny protected mode setup (do podejrzenia)
 
-MAPA GDT (STEP13 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
------------------------------------------------------------------------
+MAPA GDT (STEP12 - po KCB + GDT_ACCESS + huge selectors)
+----------------------------------------------------------
 0x00  null
 0x08  SEL_CODE32      flat 32-bit code (base=0, limit=4GB) - PM entry
 0x10  SEL_DATA32      flat 32-bit data (base=0, limit=4GB) - font ROM, stos
@@ -555,7 +578,7 @@ MAPA GDT (STEP13 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
 0x28  SEL_DATA16      16-bit data (base=g_cs_phys) - powrot do RM
 0x30  SEL_APP_CODE    16-bit code apki (base=g_app_phys)
 0x38  SEL_PSP         fake PSP (base=g_psp_phys, limit=255B)
-0x40  SEL_APP_DATA    16-bit data apki (base=g_app_data_phys, limit=64KB)
+0x40  SEL_APP_DATA    16-bit data apki (base=g_app_data_phys, limit=ns_minalloc+heap+stack)
 0x48  SEL_DLL_CODE(0) KERNEL code
 0x50  SEL_DLL_DATA(0) KERNEL data (DGROUP)
 0x58  SEL_DLL_CODE(1) USER code
@@ -565,7 +588,7 @@ MAPA GDT (STEP13 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
 0x78  SEL_DLL_CODE(3) (wolny slot)
 0x80  SEL_DLL_DATA(3) (wolny slot)
 0x88  SEL_THUNK       thunki INT 3F (base=g_thunk_phys, 16-bit code)
-0x90  SEL_VESA        32-bit 1MB alias (base=LFB, limit=1MB)
+0x90  SEL_VESA        32-bit 1MB alias (base=LFB, limit=1MB) - stary, nieuzywany w GDI
 0x98  SEL_KCB         Kernel Control Block (base=g_kcb_phys, limit=255B, 16-bit data)
                        Layout: hinstance(2) next_dyn_sel(2) heap_phys(4) heap_next(4)
                          heap_end(4) local_heap_off(2) rsc_nblocks(1) pad(1)
@@ -575,7 +598,7 @@ MAPA GDT (STEP13 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
 0xB0  SEL_VESA_WIN(2)  LFB okno 2:  base=LFB+2*65536,   limit=65535
 0xB8  SEL_VESA_WIN(3)  LFB okno 3:  base=LFB+3*65536,   limit=65535
 0xC0  SEL_VESA_WIN(4)  LFB okno 4:  base=LFB+4*65536,   limit=65535
-0xC8  SEL_VESA_WIN(5)  LFB okno 5:  base=LFB+5*65536,   limit=65535
+0xC8  SEL_VESA_WIN(5)  LFB okno 5:  base=LFB+5*65536,   limit=65535  <- "Hello, Win16!" (y=200)
 0xD0  SEL_VESA_WIN(6)  LFB okno 6:  base=LFB+6*65536,   limit=65535
 0xD8  SEL_VESA_WIN(7)  LFB okno 7:  base=LFB+7*65536,   limit=65535
 0xE0  SEL_VESA_WIN(8)  LFB okno 8:  base=LFB+8*65536,   limit=65535
@@ -588,10 +611,7 @@ MAPA GDT (STEP13 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
 0x118 SEL_FONT         BIOS 8x16 font ROM (base=g_font_phys, limit=0x0FFF)
 0x120 SEL_GDT_ACCESS  samoodniesienie GDT (base=g_cs_phys+gdt, limit=0x527)
                        MK_FP(0x120, sel) = bajt 'sel' w GDT = deskryptor
-0x128 SEL_BITMAPS     bufor 86 sprite'ow 4bpp SKI.EXE (base=g_bitmaps_phys, limit=64KB-1)
-                       Format: [count(2)][pad(2)][offsets[86]*2][DIB data ~52KB]
-                       HBITMAP=id (1..86) -> MK_FP(0x128, offsets[id-1]) = BITMAPINFOHEADER
-0x130 GDYN_FIRST      poczatek dynamicznych slotow GlobalAlloc (127 slotow, do 0x527)
+0x128 GDYN_FIRST      poczatek dynamicznych slotow GlobalAlloc (do 0x528)
 
 Uwaga: 640*480*3 = 921600 B
   okno 0:  B[0..65535]         -> wiersze 0..33   (34*1920=65280)
