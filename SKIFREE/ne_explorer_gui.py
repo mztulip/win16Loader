@@ -326,10 +326,11 @@ class NEFile:
         data = self.data[file_off:file_off + min(size, max_bytes)]
         lines = []
         for i in range(0, len(data), 16):
-            chunk      = data[i:i+16]
-            hex_part   = " ".join(f"{b:02X}" for b in chunk)
-            ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-            lines.append(f"  {file_off+i:08X}  {hex_part:<47}  {ascii_part}")
+            chunk = data[i:i+16]
+            g1    = " ".join(f"{b:02X}" for b in chunk[:8])
+            g2    = " ".join(f"{b:02X}" for b in chunk[8:])
+            asc   = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+            lines.append(f"  {file_off+i:08X}  {g1:<23}  {g2:<23}  |{asc:<16}|")
         if size > max_bytes:
             lines.append(f"  ... ({size - max_bytes} more bytes not shown)")
         return "\n".join(lines) if lines else "<empty>"
