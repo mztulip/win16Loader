@@ -320,6 +320,27 @@ class NEFile:
             })
         return relocs
 
+    def build_import_table(self):
+        """Scan all segment relocs → dict { module_name: [func, ...] }."""
+        table = {mod: [] for mod in self.imports}
+        seen  = {mod: set() for mod in self.imports}
+        for seg in self.segments:
+            for r in seg["relocs"]:
+                if r["reloc_type"] not in ("IMPORTORDINAL", "IMPORTNAME"):
+                    continue
+                dot = r["target"].find(".")
+                if dot < 0:
+                    continue
+                mod  = r["target"][:dot]
+                func = r["target"][dot+1:]
+                if mod not in table:
+                    table[mod] = []
+                    seen[mod]  = set()
+                if func not in seen[mod]:
+                    seen[mod].add(func)
+                    table[mod].append(func)
+        return table
+
     def hex_dump(self, file_off, size, max_bytes=512):
         if not file_off:
             return "<no data in file>"
@@ -473,7 +494,7 @@ class App(tk.Tk):
         self.tab_segments  = self._make_segments_tab()
         self._make_resources_tab()
         self._make_exports_tab()
-        self.tab_imports   = self._make_simple_tab("Imports",   ["#", "Module"])
+        self.tab_imports   = self._make_imports_tab()
         self.tab_entries   = self._make_simple_tab("Entry Table",
             ["Ordinal", "Type", "Seg", "Offset", "Flags", "Name"])
 
@@ -977,6 +998,42 @@ class App(tk.Tk):
                      (f"  Parse error: {e}\n", "dim")]
         self._res_show_rich(parts)
 
+    # ── Imports tab ───────────────────────────────────────────────────────────
+
+    def _make_imports_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text="Imports")
+
+        pane = ttk.PanedWindow(frame, orient="horizontal")
+        pane.pack(fill="both", expand=True)
+
+        # Left — DLL tree (hierarchical)
+        left = ttk.Frame(pane)
+        pane.add(left, weight=2)
+
+        tv = ttk.Treeview(left, columns=["info"], show="tree headings")
+        tv.heading("#0",   text="Module / Symbol")
+        tv.heading("info", text="")
+        tv.column("#0",   width=280, anchor="w")
+        tv.column("info", width=100, anchor="w")
+        sb_y = ttk.Scrollbar(left, orient="vertical",   command=tv.yview)
+        sb_x = ttk.Scrollbar(left, orient="horizontal", command=tv.xview)
+        tv.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side="right",  fill="y")
+        sb_x.pack(side="bottom", fill="x")
+        tv.pack(fill="both", expand=True)
+
+        # Right — summary / stats text
+        right = ttk.Frame(pane)
+        pane.add(right, weight=1)
+        tk.Label(right, text="  Summary",
+                 bg=C_HEADER_BG, fg=C_ACCENT,
+                 font=("Courier", 9, "bold"), anchor="w",
+        ).pack(fill="x")
+        self._imp_summary = self._mk_text_scroll(right)
+
+        return tv
+
     # ── Exports tab ───────────────────────────────────────────────────────────
 
     def _make_exports_tab(self):
@@ -1167,10 +1224,51 @@ class App(tk.Tk):
     def _fill_imports(self):
         tv = self.tab_imports
         tv.delete(*tv.get_children())
-        for i, mod in enumerate(self.ne.imports):
-            tv.insert("", "end", values=(i+1, mod))
-        tv.column("#",      width=40)
-        tv.column("Module", width=400)
+
+        table = self.ne.build_import_table()
+
+        total_funcs = 0
+        stats = []
+
+        for mod in self.ne.imports:
+            raw   = table.get(mod, [])
+            # sort: ordinals (#N) numerically, names alphabetically, names after ordinals
+            ords  = sorted([f for f in raw if f.startswith("#") and f[1:].isdigit()],
+                           key=lambda x: int(x[1:]))
+            names = sorted([f for f in raw if not (f.startswith("#") and f[1:].isdigit())])
+            funcs = ords + names
+            n     = len(funcs)
+            total_funcs += n
+
+            parent = tv.insert("", "end",
+                text=mod,
+                values=(f"{n} import{'s' if n != 1 else ''}",),
+                open=n <= 30,  # auto-expand small modules
+                tags=("dll",),
+            )
+            for func in funcs:
+                kind = "ordinal" if func.startswith("#") else "name"
+                tv.insert(parent, "end", text=f"  {func}", values=(kind,), tags=(kind,))
+
+            stats.append((mod, n, ords, names))
+
+        # colour coding
+        tv.tag_configure("dll",     foreground=C_ACCENT)
+        tv.tag_configure("ordinal", foreground="#9cdcfe")
+        tv.tag_configure("name",    foreground="#ce9178")
+
+        # summary panel
+        s = self._imp_summary
+        s.config(state="normal")
+        s.delete("1.0", "end")
+        s.insert("end", f"  {len(self.ne.imports)} DLLs  {total_funcs} imports\n\n", "header")
+        for mod, n, ords, names in stats:
+            s.insert("end", f"  {mod}\n", "header")
+            s.insert("end", f"    ordinals : {len(ords)}\n", "dim")
+            if names:
+                s.insert("end", f"    by name  : {len(names)}\n", "dim")
+            s.insert("end", f"    total    : {n}\n\n", None)
+        s.config(state="disabled")
 
     def _fill_entries(self):
         tv = self.tab_entries
