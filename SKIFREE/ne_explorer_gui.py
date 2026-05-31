@@ -728,19 +728,71 @@ class App(tk.Tk):
             self._res_show_rich([(f"  Render error: {e}\n", "dim")])
 
     def _render_group_icon(self, r, data):
+        is_cursor   = (r["type_id"] == 0x800C)
+        member_type = 0x8001 if is_cursor else 0x8003  # RT_CURSOR or RT_ICON
+
         try:
             _, _, count = struct.unpack_from('<HHH', data, 0)
-            parts = [(f"  {r['type_name']}  {r['name']}  count={count}\n\n", "header")]
+
+            txt = self._res_prev
+            txt.config(state="normal")
+            txt.delete("1.0", "end")
+            txt.insert("end",
+                f"  {r['type_name']}  {r['name']}  {count} {'cursors' if is_cursor else 'icons'}\n\n",
+                "header")
+
+            self._res_photoimage = []  # list — keep all references alive
+
             off = 6
             for i in range(count):
                 if off + 14 > len(data):
                     break
-                w, h, cc, _, planes, bpp, size, res_id = \
-                    struct.unpack_from('<BBBBHHIh', data, off)
+
+                if is_cursor:
+                    # GRPCURSORDIR entry: WORD w, WORD h (×2 incl mask), WORD planes, WORD bpp, DWORD size, WORD id
+                    w, h, planes, bpp, size, res_id = struct.unpack_from('<HHHHIh', data, off)
+                    h //= 2  # actual height
+                else:
+                    # GRPICONDIR entry: BYTE w, BYTE h, BYTE clrCount, BYTE reserved, WORD planes, WORD bpp, DWORD size, WORD id
+                    w, h, _, _, planes, bpp, size, res_id = struct.unpack_from('<BBBBHHIh', data, off)
                 off += 14
-                parts += [("  " + f"  #{i+1}  ", "dim"),
-                           (f"{w}\u00d7{h}  {bpp}bpp  size={size}  id=#{res_id}\n", None)]
-            self._res_show_rich(parts)
+
+                txt.insert("end", f"  #{i+1}  {w}\u00d7{h}  {bpp}bpp  id=#{res_id}  ", "dim")
+
+                # find matching RT_ICON / RT_CURSOR by ordinal id
+                member_data = None
+                for res in self.ne.resources:
+                    if res["type_id"] == member_type and (res["id"] & 0x7FFF) == res_id:
+                        member_data = self.ne.data[res["offset"]:res["offset"] + res["length"]]
+                        break
+
+                if member_data is None:
+                    txt.insert("end", "(member resource not found)\n", "dim")
+                    continue
+
+                if not HAS_PIL:
+                    txt.insert("end", "(PIL not installed)\n", "dim")
+                    continue
+
+                try:
+                    img = self._dib_to_pil(member_data, is_icon=True)
+                    iw, ih = img.size
+                    # zoom up small icons so they're visible
+                    scale = max(1, min(8, 64 // max(iw, ih, 1)))
+                    if scale > 1:
+                        img = img.resize((iw * scale, ih * scale), Image.NEAREST)
+                    # composite RGBA on dark bg
+                    bg = Image.new("RGB", img.size, (50, 50, 50))
+                    bg.paste(img.convert("RGB"), mask=img.getchannel("A"))
+                    photo = ImageTk.PhotoImage(bg)
+                    self._res_photoimage.append(photo)
+                    txt.image_create("end", image=photo)
+                    txt.insert("end", "\n")
+                except Exception as e:
+                    txt.insert("end", f"(render error: {e})\n", "dim")
+
+            txt.config(state="disabled")
+            self._res_detail_nb.select(0)
         except Exception as e:
             self._res_show_rich([(f"  Parse error: {e}\n", "dim")])
 
