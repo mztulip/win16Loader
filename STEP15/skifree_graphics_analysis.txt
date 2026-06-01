@@ -56,18 +56,55 @@ SkiFree GDI Call Analysis — STEP15
     - Used by SKI.EXE to get sprite dimensions (bmWidth, bmHeight).
 
 
+=== SPRITE ATLAS — POJĘCIE ===
+
+"Atlas" (synonim: sprite sheet) to technika pakowania wielu spriteów do jednego
+dużego bufora 2D. Nazwa pochodzi od geograficznego atlasu map, gdzie wiele map
+zmieszcza się na jednej stronie.
+
+SKI.EXE pakuje wszystkie 86 spriteów do DC2 i DC4 jeden pod drugim:
+
+  DC2 (32 × 2283 pikseli):
+    y=0..31     sprite  1 (narciarz prawy)
+    y=32..63    sprite  2 (narciarz lewy)
+    y=64..91    sprite  3 (drzewo małe)
+    ...
+    y=376..407  sprite 14 (gondola wagonik)
+    ...
+
+Zalety:
+  - Jeden CreateCompatibleBitmap / SelectObject na cały atlas zamiast N na N spriteów.
+  - Mniej alokacji GDT — jeden selektor 64KB zamiast 86 osobnych.
+  - Sprity sąsiadujących klatek leżą blisko siebie w pamięci (lepsze cache / prefetch).
+
+Budowanie atlasu (WM_CREATE):
+  FOR sprite N = 1..86:
+    SelectObject(DC6, sprite_N)           -- DC6 wskazuje na sprite N (Case 1 źródło)
+    BitBlt(DC2, 0, y_off, w, h, DC6, 0, 0, SRCCOPY)   -- pakuj do atlasu (Case 1)
+    BitBlt(DC3, 0, y_off, w, h, DC6, 0, 0, NOTSRCCOPY) -- maska do DC3
+    SelectObject(DC6, old)                -- przywróć DC6
+    y_off += h
+
+Użycie atlasu (render loop):
+  BitBlt(DC6, 0, 0, w, h, DC2, 0, y_off, SRCCOPY)     -- wytnij sprite (Case 2B)
+  BitBlt(screen, xDst, yDst, w, h, DC6, 0, 0, SRCCOPY) -- blit na ekran (Case C)
+
+Termin "texture atlas" / "sprite atlas" jest dziś powszechny w OpenGL, Unity, itp.
+— ta sama technika, inna era.
+
+
 === DC MAP ===
 
 DC 1  = screen DC (maps to LFB at 0xFD000000, pitch=1920, 3 bytes/px BGR)
-DC 2  = small sprite atlas  (sprites w<=32px)  buf_sel=0x0130  HBM=0x57
-DC 3  = small mask atlas    (NOTSRCCOPY)        buf_sel=0x01C8  HBM=0x58
-DC 4  = large sprite atlas  (sprites w>32px)   buf_sel=0x0260  HBM=0x59
-DC 5  = large mask atlas    (NOTSRCCOPY)        buf_sel=0x02F8  HBM=0x5A
-DC 6  = compositing memDC   (per-frame)         buf_sel=0x0390  HBM=0x5B
+DC 2  = small sprite atlas  (sprites w<=32px)  32x2283  HBM=0x57
+DC 3  = small mask atlas    (NOTSRCCOPY)        brak bufora (CreateBitmap)  HBM=0x58
+DC 4  = large sprite atlas  (sprites w>32px)   105x377  HBM=0x59
+DC 5  = large mask atlas    (NOTSRCCOPY)        brak bufora (CreateBitmap)  HBM=0x5A
+DC 6  = compositing memDC   (per-frame)         128x128  HBM=0x5B
 
-Selector spacing: 19 descriptors * 8 bytes = +0x98 per DC.
-DC buffer layout: 640x480 * 4 bytes = 1,228,800 bytes = 19 * 64KB GDT windows.
-Pixel format: BGRA — [B][G][R][A] where A=0=transparent, A=1=opaque.
+Wymiary DC od ETAP15b: CreateCompatibleBitmap(w,h) alokuje faktyczny bufor w*h*4 bajtów.
+Selektor GDT: GDYN_FIRST_SEL=0x130, każdy 64KB okno = +8 do selektora.
+Pixel format: BGRA — [B][G][R][A] gdzie A=0=przezroczysty, A=1=nieprzezroczysty.
 
 
 === RENDERING PIPELINE (BitBlt cases) ===
