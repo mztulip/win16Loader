@@ -1,0 +1,11 @@
+# SkiFree binary — third-party, not redistributed
+SKI.EXE
+*.EXE
+*.exe
+
+# virtualenv
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
