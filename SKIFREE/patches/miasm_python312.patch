@@ -1,0 +1,27 @@
+--- /tmp/miasm-0.1.5/miasm/core/sembuilder.py	2021-10-29 20:27:09.000000000 +0200
++++ venv/lib/python3.14/site-packages/miasm/core/sembuilder.py	2026-06-01 14:49:05.131588513 +0200
+@@ -46,12 +46,12 @@
+                 new_name = "ExprInt"
+                 # Replace in the node
+                 node.func.id = new_name
+-                node.args.append(ast.Num(n=size))
++                node.args.append(ast.Constant(value=size))
+ 
+-        elif (isinstance(node.func, ast.Str) or
++        elif (isinstance(node.func, ast.Constant) and isinstance(node.func.value, str) or
+               (isinstance(node.func, ast.BinOp) and
+                isinstance(node.func.op, ast.Mod) and
+-               isinstance(node.func.left, ast.Str))):
++               isinstance(node.func.left, ast.Constant) and isinstance(node.func.left.value, str))):
+             # 'op'(args...) -> ExprOp('op', args...)
+             # ('op' % (fmt))(args...) -> ExprOp('op' % (fmt), args...)
+             op_name = node.func
+@@ -189,7 +189,7 @@
+                 blocks[-1][-1].append(res)
+ 
+             elif (isinstance(statement, ast.Expr) and
+-                  isinstance(statement.value, ast.Str)):
++                  isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str)):
+                 # String (docstring, comment, ...) -> keep it
+                 real_body.append(statement)
+ 
