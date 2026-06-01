@@ -1524,7 +1524,7 @@ int main(int argc, char *argv[])
         g_psp_phys = (unsigned long)psp_seg << 4;
         kprintf("PSP: seg=0x%04X phys=0x%05lX\n", psp_seg, g_psp_phys);
 
-        if (_dos_allocmem(16, &kcb_seg) != 0) {  /* 16 paragrafow = 256 B: KCB + RT_STRING */
+        if (_dos_allocmem(32, &kcb_seg) != 0) {  /* 32 paragrafy = 512 B: KCB (256B) + wnd_h (16B) + RT_STRING */
             kprintf("ERROR: alloc KCB\n"); return 1;
         }
         g_kcb_phys = (unsigned long)kcb_seg << 4;

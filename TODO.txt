@@ -573,6 +573,40 @@ SKI.EXE importuje 65 funkcji: KERNEL(17) + GDI(14) + USER(34).
       W prawdziwym Win16: Microsoft C /Gw + __far pointery na granicach DLL.
 
 ---------------------------------------------------------------------------
+ETAP 15b - Poprawna implementacja CreateCompatibleBitmap (w toku)
+---------------------------------------------------------------------------
+Problem: memDC maja staly bufor 640x480. Atlasy spriteow (DC2/DC4) pakuja
+sprity pionowo i przekraczaja y=480 (np. male spryty do y~1450). Piksele
+powyzej y=480 nie sa zapisywane -> sprity niewyrenderowane.
+
+Tymczasowe obejscie (USUNIETE w tym etapie):
+  g_atlas[90]: tablica (dc, y_off) -> sprite_hbm rejestrowana w Case 1.
+  Case 2B: atlas_lookup(hdcSrc, ySrc) -> renderuj sprite bezposrednio.
+  Zle: hack nie zgodny z Win3.1; zawodzi przy czesciowych odczytach (xSrc!=0).
+
+Poprawna implementacja zgodna z Win16:
+  CreateCompatibleBitmap(hdc, w, h) alokuje bufor XMS o rozmiarze w*h*4 B.
+  SelectObject(hdc, hbm) przypisuje bufor bitmapy do DC; DC dziedziczy w/h.
+  Kazdy DC ma dynamiczne wymiary z zaalokowanej bitmapy (nie stale 640x480).
+  Case 1/2B/A/C uzywaja g_dc_buf_w[hdc]/g_dc_buf_h[hdc] zamiast stalych.
+
+Plan implementacji:
+[ ] 15b-1: Dodac tablice g_dc_buf_w[16], g_dc_buf_h[16] do gdi.c
+[ ] 15b-2: Dodac tablice g_hbm_buf_sel[], g_hbm_w[], g_hbm_h[] dla
+           fake HBM (87..): wiaze HBITMAP z selektorem XMS + wymiarami
+[ ] 15b-3: CreateCompatibleDC: tworzy pusty DC (bez bufora; buf_sel=0, w=h=0)
+[ ] 15b-4: CreateCompatibleBitmap(hdc, w, h): alokuje mini_alloc(w*h*4),
+           zapisuje selektor + w + h pod nowym fake HBITMAP; zwraca HBITMAP
+[ ] 15b-5: SelectObject(hdc, hbm): jesli hbm jest fake compatible bitmap
+           (hbm >= FAKE_HBM_BASE): przepisuje buf_sel/w/h DC z g_hbm_*[]
+[ ] 15b-6: Case 1 (sprite->DC): podmien DC_BUF_H/W/PITCH na g_dc_buf_h/w/pitch
+[ ] 15b-7: Case 2B (DC->DC): podmien stale na per-DC wymiary (src i dst)
+[ ] 15b-8: Case A (screen->DC): uzywaj wymiarow DC docelowego
+[ ] 15b-9: Case C (DC->screen): uzywaj wymiarow DC zrodlowego
+[ ] 15b-10: Usun g_atlas[] i atlas_lookup() - nie potrzebne po poprawce
+[ ] 15b-11: Usun stale DC_BUF_W/H/BYTES/PITCH (lub zostawic jako fallback=0)
+
+---------------------------------------------------------------------------
 ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
 ---------------------------------------------------------------------------
 Cel: SkiFree reaguje na klawiature (kursory steruja narciarzem).

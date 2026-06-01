@@ -1762,8 +1762,8 @@ gdt_vesa:                   ; 0x90 SEL_VESA (32-bit, base=g_lfb_phys, limit=1MB)
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 01001111b, 0x00
 
-gdt_kcb:                    ; 0x98 SEL_KCB (16-bit data, base=g_kcb_phys, limit=255)
-    dw 0x00FF, 0x0000
+gdt_kcb:                    ; 0x98 SEL_KCB (16-bit data, base=g_kcb_phys, limit=511)
+    dw 0x01FF, 0x0000
     db 0x00, 10010010b, 00000000b, 0x00
 
 ; 15 okien VESA (0xA0..0x110)

@@ -109,16 +109,12 @@ typedef unsigned short HDC;
 #define KCB_WND_OX_OFF  208   /* short wnd_ox[8]: abs x per hwnd (indeks hwnd-1) */
 #define KCB_WND_OY_OFF  224   /* short wnd_oy[8]: abs y per hwnd (indeks hwnd-1) */
 #define KCB_WND_W_OFF   240   /* short wnd_w[8]:  szerokosc child window (0=root) */
+#define KCB_WND_H_OFF   256   /* short wnd_h[8]:  wysokosc child window (0=root) */
 #define KCB_MAX_HWNDS   8
 
-/* ETAP 15: pixel buffers dla memDC */
+/* ETAP 15: pixel bufory memDC z dynamicznymi wymiarami (z CreateCompatibleBitmap) */
 #define SEL_GDT_ACCESS  0x120   /* samoodniesienie GDT */
 #define GDYN_MAX_SEL    0x528   /* max selektor dynamiczny */
-#define DC_BUF_W        640     /* szerokosc bufora pikseli (px) */
-#define DC_BUF_H        480     /* wysokosc bufora pikseli (px) */
-#define DC_BUF_PITCH    2560    /* bajty na wiersz (640 * 4 = BGRA) */
-#define DC_BUF_BYTES    1228800UL /* 640*480*4 */
-#define DC_BUF_NWIN     19      /* ceil(1228800/65536) - okna GDT na bufor */
 
 
 #pragma pack(push, 1)
@@ -154,14 +150,22 @@ typedef struct {
 /* DC -> HBITMAP mapping: g_dc_bitmap[hdc] gdzie hdc = 1..15 */
 static unsigned g_dc_bitmap[16] = {0};
 
-/* Selektor GDT bufora pikseli DC2..DC6 (0 = brak bufora) */
+/* Selektor GDT bufora pikseli per DC (0 = brak bufora) */
 static unsigned g_dc_buf_sel[16] = {0};
+/* Wymiary DC (z wybranej bitmapy przez SelectObject) */
+static int g_dc_buf_w[16] = {0};
+static int g_dc_buf_h[16] = {0};
 /* 1 gdy bufor zawiera piksele ze screen (po screen->memDC BitBlt) */
 static unsigned char g_dc_has_bg[16] = {0};
 
-/* FAKE_HBM_BASE: fake handles z CreateCompatibleBitmap/CreateBitmap */
+/* FAKE_HBM_BASE: fake handles z CreateCompatibleBitmap */
 #define FAKE_HBM_BASE  (MAX_BITMAPS + 1)   /* 87 */
+#define FAKE_HBM_MAX   16
 static unsigned g_next_fake_hbm = FAKE_HBM_BASE;
+/* Per-HBM dane dla fake compatible bitmap (indeks = hbm - FAKE_HBM_BASE) */
+static unsigned g_hbm_buf_sel[FAKE_HBM_MAX] = {0};
+static int      g_hbm_w[FAKE_HBM_MAX]       = {0};
+static int      g_hbm_h[FAKE_HBM_MAX]       = {0};
 
 /* ============================================================
  * mini_alloc - alokuje selektor GDT z XMS heapu (KCB bezposrednio)
@@ -392,6 +396,28 @@ static void blit_sprite_hbm(unsigned hbm, int xDst, int yDst, int w, int h,
     }
 }
 
+/* Zeruje bufor XMS o rozmiarze bytes (sel = pierwszy selektor z mini_alloc) */
+static void zero_buf(unsigned sel, unsigned long bytes)
+{
+    unsigned n_win = (bytes <= 65536UL) ? 1u : (unsigned)((bytes + 65535UL) / 65536UL);
+    unsigned ww;
+    for (ww = 0; ww < n_win; ww++) {
+        unsigned char __far *wbuf = (unsigned char __far *)MK_FP(sel + ww * 8u, 0);
+        unsigned long win_start = (unsigned long)ww * 65536UL;
+        unsigned long win_end   = win_start + 65536UL;
+        unsigned long win_bytes;
+        unsigned j;
+        if (win_end > bytes) win_end = bytes;
+        win_bytes = win_end - win_start;
+        if (win_bytes == 65536UL) {
+            for (j = 0; j < 0x8000u; j++) { wbuf[j] = 0; wbuf[j + 0x8000u] = 0; }
+        } else {
+            unsigned sz = (unsigned)win_bytes;
+            for (j = 0; j < sz; j++) wbuf[j] = 0;
+        }
+    }
+}
+
 /* ============================================================
  * ordinal 34: BitBlt
  *
@@ -453,17 +479,20 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         unsigned buf_sel1 = g_dc_buf_sel[hdcDst];
         if (buf_sel1 != 0) {
             int row1, col1;
+            int dc_w1     = g_dc_buf_w[hdcDst];
+            int dc_h1     = g_dc_buf_h[hdcDst];
+            unsigned long dc_pitch1 = (unsigned long)dc_w1 * 4UL;
             for (row1 = 0; row1 < h; row1++) {
                 int by1 = yDst + row1;
-                if (by1 < 0 || by1 >= DC_BUF_H) continue;
+                if (by1 < 0 || by1 >= dc_h1) continue;
                 for (col1 = 0; col1 < w; col1++) {
                     int bx1 = xDst + col1;
                     unsigned long pix1;
                     unsigned long bo1;
-                    if (bx1 < 0 || bx1 >= DC_BUF_W) continue;
+                    if (bx1 < 0 || bx1 >= dc_w1) continue;
                     pix1 = decode_4bpp_pixel(src_hbm, xSrc+col1, ySrc+row1);
                     if (!(pix1 & DECODE_TRANSP)) {
-                        bo1 = (unsigned long)by1 * DC_BUF_PITCH
+                        bo1 = (unsigned long)by1 * dc_pitch1
                             + (unsigned long)bx1 * 4u;
                         draw_dc_pixel(buf_sel1, bo1,
                             (unsigned char)(pix1 >> 16),
@@ -485,25 +514,28 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         unsigned dst_buf = g_dc_buf_sel[hdcDst];
         if (src_buf != 0 && dst_buf != 0) {
             int row2, col2;
+            int src_w = g_dc_buf_w[hdcSrc], src_h = g_dc_buf_h[hdcSrc];
+            int dst_w = g_dc_buf_w[hdcDst], dst_h = g_dc_buf_h[hdcDst];
+            unsigned long src_pitch = (unsigned long)src_w * 4UL;
+            unsigned long dst_pitch = (unsigned long)dst_w * 4UL;
             for (row2 = 0; row2 < h; row2++) {
                 int sy2 = ySrc + row2;
                 int dy2 = yDst + row2;
-                if (sy2 < 0 || sy2 >= DC_BUF_H) continue;
-                if (dy2 < 0 || dy2 >= DC_BUF_H) continue;
+                if (sy2 < 0 || sy2 >= src_h) continue;
+                if (dy2 < 0 || dy2 >= dst_h) continue;
                 for (col2 = 0; col2 < w; col2++) {
                     int sx2 = xSrc + col2;
                     int dx2 = xDst + col2;
                     unsigned long src_off;
                     unsigned char __far *sp;
-                    if (sx2 < 0 || sx2 >= DC_BUF_W) continue;
-                    if (dx2 < 0 || dx2 >= DC_BUF_W) continue;
-                    src_off = (unsigned long)sy2 * DC_BUF_PITCH
-                            + (unsigned long)sx2 * 4u;
+                    if (sx2 < 0 || sx2 >= src_w) continue;
+                    if (dx2 < 0 || dx2 >= dst_w) continue;
+                    src_off = (unsigned long)sy2 * src_pitch + (unsigned long)sx2 * 4u;
                     sp = (unsigned char __far *)MK_FP(
                             src_buf + (unsigned)(src_off >> 16) * 8u,
                             (unsigned)(src_off & 0xFFFFUL));
                     if (sp[3]) {
-                        unsigned long dst_off = (unsigned long)dy2 * DC_BUF_PITCH
+                        unsigned long dst_off = (unsigned long)dy2 * dst_pitch
                                               + (unsigned long)dx2 * 4u;
                         draw_dc_pixel(dst_buf, dst_off, sp[2], sp[1], sp[0]);
                     }
@@ -523,19 +555,22 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         unsigned buf_sel = g_dc_buf_sel[hdcDst];
         if (buf_sel != 0) {
             int row, col;
+            int dc_wA    = g_dc_buf_w[hdcDst];
+            int dc_hA    = g_dc_buf_h[hdcDst];
+            unsigned long dc_pitchA = (unsigned long)dc_wA * 4UL;
             for (row = 0; row < h; row++) {
                 int sy = ySrc + row;
                 int by = yDst + row;
                 if (sy < 0 || sy >= 480) continue;
-                if (by < 0 || by >= DC_BUF_H) continue;
+                if (by < 0 || by >= dc_hA) continue;
                 for (col = 0; col < w; col++) {
                     int sx = xSrc + col;
                     int bx = xDst + col;
                     unsigned char r, g, bv;
                     unsigned long buf_off;
                     if (sx < 0 || sx >= 640) continue;
-                    if (bx < 0 || bx >= DC_BUF_W) continue;
-                    buf_off = (unsigned long)by * DC_BUF_PITCH
+                    if (bx < 0 || bx >= dc_wA) continue;
+                    buf_off = (unsigned long)by * dc_pitchA
                             + (unsigned long)bx * 4u;
                     read_pixel((unsigned long)sy * VESA_PITCH +
                                (unsigned long)sx * VESA_BPP, &r, &g, &bv);
@@ -553,18 +588,21 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         (dwRop == 0x008800C6UL || dwRop == 0x00EE0086UL)) {
         unsigned dst_buf = g_dc_buf_sel[hdcDst];
         if (dst_buf != 0) {
+            int dst_w = g_dc_buf_w[hdcDst];
+            int dst_h = g_dc_buf_h[hdcDst];
+            unsigned long dst_pitch = (unsigned long)dst_w * 4UL;
             if (src_hbm >= 1 && src_hbm <= MAX_BITMAPS) {
                 /* Zrodlo: realny sprite (1..86) */
                 int row, col;
                 if (dwRop == 0x00EE0086UL) {  /* SRCPAINT: zapisz kolor */
                     for (row = 0; row < h; row++) {
                         int by = yDst + row;
-                        if (by < 0 || by >= DC_BUF_H) continue;
+                        if (by < 0 || by >= dst_h) continue;
                         for (col = 0; col < w; col++) {
                             int bx = xDst + col;
                             unsigned long pix, buf_off;
-                            if (bx < 0 || bx >= DC_BUF_W) continue;
-                            buf_off = (unsigned long)by * DC_BUF_PITCH
+                            if (bx < 0 || bx >= dst_w) continue;
+                            buf_off = (unsigned long)by * dst_pitch
                                     + (unsigned long)bx * 4u;
                             pix = decode_4bpp_pixel(src_hbm, xSrc + col, ySrc + row);
                             if (!(pix & DECODE_TRANSP))
@@ -579,12 +617,12 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                 if (dwRop == 0x008800C6UL) {  /* SRCAND: zeruj opaque piksele */
                     for (row = 0; row < h; row++) {
                         int by = yDst + row;
-                        if (by < 0 || by >= DC_BUF_H) continue;
+                        if (by < 0 || by >= dst_h) continue;
                         for (col = 0; col < w; col++) {
                             int bx = xDst + col;
                             unsigned long pix, buf_off;
-                            if (bx < 0 || bx >= DC_BUF_W) continue;
-                            buf_off = (unsigned long)by * DC_BUF_PITCH
+                            if (bx < 0 || bx >= dst_w) continue;
+                            buf_off = (unsigned long)by * dst_pitch
                                     + (unsigned long)bx * 4u;
                             pix = decode_4bpp_pixel(src_hbm, xSrc + col, ySrc + row);
                             if (!(pix & DECODE_TRANSP))
@@ -593,33 +631,32 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                     }
                 }
             } else if (hdcSrc >= 2 && hdcSrc < 16 && dwRop == 0x00EE0086UL) {
-                /* Zrodlo: memDC z buforem pikselowym, tylko SRCPAINT.
-                 * SRCAND z memDC pomijamy: DC6 startuje z alpha=0 (przezroczysty),
-                 * Case C auto-clear zeruje bufor po blit -> SRCAND jest zbedny.
-                 * SRCAND(mask->DC6) zostawialoby czarne piksele (alpha=1) tam gdzie
-                 * sprite jest przezroczysty -> solid rectangle na ekranie. */
+                /* Zrodlo: memDC z buforem pikselowym, tylko SRCPAINT. */
                 unsigned src_buf = g_dc_buf_sel[hdcSrc];
                 if (src_buf != 0) {
                     int row, col;
+                    int src_w = g_dc_buf_w[hdcSrc];
+                    int src_h = g_dc_buf_h[hdcSrc];
+                    unsigned long src_pitch = (unsigned long)src_w * 4UL;
                     for (row = 0; row < h; row++) {
                         int sy = ySrc + row;
                         int dy = yDst + row;
-                        if (sy < 0 || sy >= DC_BUF_H) continue;
-                        if (dy < 0 || dy >= DC_BUF_H) continue;
+                        if (sy < 0 || sy >= src_h) continue;
+                        if (dy < 0 || dy >= dst_h) continue;
                         for (col = 0; col < w; col++) {
                             int sx = xSrc + col;
                             int dx = xDst + col;
                             unsigned long src_off, dst_off;
                             unsigned char __far *sp;
-                            if (sx < 0 || sx >= DC_BUF_W) continue;
-                            if (dx < 0 || dx >= DC_BUF_W) continue;
-                            src_off = (unsigned long)sy * DC_BUF_PITCH
+                            if (sx < 0 || sx >= src_w) continue;
+                            if (dx < 0 || dx >= dst_w) continue;
+                            src_off = (unsigned long)sy * src_pitch
                                     + (unsigned long)sx * 4u;
                             sp = (unsigned char __far *)MK_FP(
                                     src_buf + (unsigned)(src_off >> 16) * 8u,
                                     (unsigned)(src_off & 0xFFFFUL));
                             if (sp[3]) {
-                                dst_off = (unsigned long)dy * DC_BUF_PITCH
+                                dst_off = (unsigned long)dy * dst_pitch
                                         + (unsigned long)dx * 4u;
                                 draw_dc_pixel(dst_buf, dst_off, sp[2], sp[1], sp[0]);
                             }
@@ -639,30 +676,41 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         unsigned buf_sel = g_dc_buf_sel[hdcSrc];
         if (buf_sel != 0 && g_dc_has_bg[hdcSrc]) {
             int row, col;
-            /* Precompute child window x exclusion range (raz przed petla, nie per piksel) */
-            int excl_x1 = -1, excl_x2 = -1;
+            int dc_wC    = g_dc_buf_w[hdcSrc];
+            int dc_hC    = g_dc_buf_h[hdcSrc];
+            unsigned long dc_pitchC = (unsigned long)dc_wC * 4UL;
+            /* Precompute child window exclusion rect (raz przed petla, nie per piksel). */
+            int excl_x1 = -1, excl_x2 = -1, excl_y1 = 0, excl_y2 = 0;
             {
                 int ci;
                 for (ci = 0; ci < KCB_MAX_HWNDS; ci++) {
                     short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
                     short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
-                    if (cw > 0) { excl_x1 = (int)cx; excl_x2 = (int)cx + (int)cw; break; }
+                    short cy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (unsigned)ci*2u);
+                    short ch = *(short __far *)MK_FP(SEL_KCB, KCB_WND_H_OFF  + (unsigned)ci*2u);
+                    if (cw > 0 && ch > 0) {
+                        excl_x1 = (int)cx; excl_x2 = (int)cx + (int)cw;
+                        excl_y1 = (int)cy; excl_y2 = (int)cy + (int)ch;
+                        break;
+                    }
                 }
             }
             for (row = 0; row < h; row++) {
                 int sy = ySrc + row;
                 int dy = yDst + row;
-                if (sy < 0 || sy >= DC_BUF_H) continue;
+                if (sy < 0 || sy >= dc_hC) continue;
                 if (dy < 0 || dy >= 480) continue;
                 for (col = 0; col < w; col++) {
                     int sx = xSrc + col;
                     int dx = xDst + col;
                     unsigned long buf_off;
                     unsigned char __far *bp;
-                    if (sx < 0 || sx >= DC_BUF_W) continue;
+                    if (sx < 0 || sx >= dc_wC) continue;
                     if (dx < 0 || dx >= 640) continue;
-                    if (excl_x1 >= 0 && dx >= excl_x1 && dx < excl_x2) continue;
-                    buf_off = (unsigned long)sy * DC_BUF_PITCH + (unsigned long)sx * 4u;
+                    if (excl_x1 >= 0 &&
+                        dx >= excl_x1 && dx < excl_x2 &&
+                        dy >= excl_y1 && dy < excl_y2) continue;
+                    buf_off = (unsigned long)sy * dc_pitchC + (unsigned long)sx * 4u;
                     bp = (unsigned char __far *)MK_FP(
                             buf_sel + (unsigned)(buf_off >> 16) * 8u,
                             (unsigned)(buf_off & 0xFFFFUL));
@@ -670,7 +718,7 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                         draw_pixel((unsigned long)dy * VESA_PITCH +
                                    (unsigned long)dx * VESA_BPP,
                                    bp[2], bp[1], bp[0]);
-                        bp[3] = 0;  /* auto-clear: bufor gotowy na nastepna klatke */
+                        bp[3] = 0;
                     }
                 }
             }
@@ -690,17 +738,20 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
 
 /* ============================================================
  * clip_screen_x: klipuje zakres x/w omijajac child windows na ekranie (DC=1).
- * Dla kazdego child window z wnd_w[i]>0: jesli ono zaczyna sie w srodku
- * rysowanego prostokata, obcinamy w do jego lewej krawedzi.
+ * Klipuje tylko jezeli wiersz (y,h) zachodzi na child window (sprawdza takze Y).
  * Obsluguje tylko przypadek child window po prawej stronie rysowania.
  * ============================================================ */
-static void clip_screen_x(int *px, int *pw)
+static void clip_screen_x(int *px, int *pw, int y, int h)
 {
     int i;
     for (i = 0; i < KCB_MAX_HWNDS; i++) {
         short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)i * 2u);
         short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)i * 2u);
-        if (cw <= 0) continue;  /* slot pusty (root window) */
+        short cy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (unsigned)i * 2u);
+        short ch = *(short __far *)MK_FP(SEL_KCB, KCB_WND_H_OFF  + (unsigned)i * 2u);
+        if (cw <= 0 || ch <= 0) continue;  /* slot pusty */
+        /* Klipuj x tylko jezeli prostokat y zachodzi na child window */
+        if (y + h <= (int)cy || y >= (int)cy + (int)ch) continue;
         /* child window zajmuje x w zakresie [cx, cx+cw) */
         if (*px < (int)cx && *px + *pw > (int)cx)
             *pw = (int)cx - *px;  /* obetnij prawy bok */
@@ -731,14 +782,17 @@ BOOL __far __pascal PatBlt(HDC hdc, int x, int y, int w, int h,
     if (hdc >= 2 && hdc < 16) {
         unsigned buf_sel_p = g_dc_buf_sel[hdc];
         if (buf_sel_p) {
+            int dc_wp = g_dc_buf_w[hdc];
+            int dc_hp = g_dc_buf_h[hdc];
+            unsigned long dc_pitchp = (unsigned long)dc_wp * 4UL;
             if (x < 0) { w += x; x = 0; }
             if (y < 0) { h += y; y = 0; }
-            if (x + w > DC_BUF_W) w = DC_BUF_W - x;
-            if (y + h > DC_BUF_H) h = DC_BUF_H - y;
+            if (x + w > dc_wp) w = dc_wp - x;
+            if (y + h > dc_hp) h = dc_hp - y;
             if (w > 0 && h > 0) {
                 for (row = 0; row < h; row++)
                     for (col = 0; col < w; col++) {
-                        unsigned long bo = (unsigned long)(y+row) * DC_BUF_PITCH
+                        unsigned long bo = (unsigned long)(y+row) * dc_pitchp
                                          + (unsigned long)(x+col) * 4u;
                         draw_dc_pixel(buf_sel_p, bo, rv, gv, bv);
                     }
@@ -768,7 +822,7 @@ BOOL __far __pascal PatBlt(HDC hdc, int x, int y, int w, int h,
     if (x + w > 640) w = 640 - x;
     if (y + h > 480) h = 480 - y;
     /* Klipuj wokol child windows (DC=1 rysuje caly ekran bez klipowania okien) */
-    if ((unsigned)hdc == 1u) clip_screen_x(&x, &w);
+    if ((unsigned)hdc == 1u) clip_screen_x(&x, &w, y, h);
     if (w <= 0 || h <= 0) return 1;
 
     for (row = 0; row < h; row++) {
@@ -782,8 +836,8 @@ BOOL __far __pascal PatBlt(HDC hdc, int x, int y, int w, int h,
 
 /* ============================================================
  * ordinal 52: CreateCompatibleDC  ordinal 68: DeleteDC
- * ETAP 15: CreateCompatibleDC alokuje bufor pikseli 640x480x4 (BGRA) z XMS.
- *   19 okien GDT, format BGRA: alpha=0 przezroczysty, alpha=1 nieprzezroczysty.
+ * Tworzy pusty DC bez bufora. Bufor przydzielany przez SelectObject
+ * gdy wybrana zostanie bitmapa z CreateCompatibleBitmap.
  * ============================================================ */
 static HDC g_next_hdc = 2;
 HDC __far __pascal CreateCompatibleDC(HDC hdc)
@@ -791,37 +845,14 @@ HDC __far __pascal CreateCompatibleDC(HDC hdc)
     HDC result = g_next_hdc++;
     (void)hdc;
     if (result < 16) {
-        unsigned sel;
         g_dc_bitmap[result] = 0xFFFFu;
-        g_dc_has_bg[result] = 0;
-        /* ETAP 15: alokuj bufor pikseli 640x480x3 z XMS (15 okien GDT) */
-        sel = mini_alloc(DC_BUF_BYTES);
-        g_dc_buf_sel[result] = sel;
-        if (sel) {
-            /* wyzeruj bufor (tlo domyslne = czarne) - iteruj po oknach */
-            unsigned w;
-            for (w = 0; w < DC_BUF_NWIN; w++) {
-                unsigned char __far *wbuf = (unsigned char __far *)MK_FP(sel + w * 8u, 0);
-                unsigned long win_start = (unsigned long)w * 65536UL;
-                unsigned long win_end   = win_start + 65536UL;
-                unsigned long win_bytes;
-                unsigned j;
-                if (win_end > DC_BUF_BYTES) win_end = DC_BUF_BYTES;
-                win_bytes = win_end - win_start; /* 1..65536 */
-                if (win_bytes == 65536UL) {
-                    /* pelne okno 64KB: petla unsigned by przepelnila do 0 */
-                    for (j = 0; j < 0x8000u; j++) { wbuf[j] = 0; wbuf[j + 0x8000u] = 0; }
-                } else {
-                    unsigned sz = (unsigned)win_bytes;
-                    for (j = 0; j < sz; j++) wbuf[j] = 0;
-                }
-            }
-            serial_puts("GDI: CreateCompatDC DC=");
-            serial_puthex16(result);
-            serial_puts(" buf_sel=");
-            serial_puthex16(sel);
-            serial_putc('\n');
-        }
+        g_dc_buf_sel[result] = 0;
+        g_dc_buf_w[result]   = 0;
+        g_dc_buf_h[result]   = 0;
+        g_dc_has_bg[result]  = 0;
+        serial_puts("GDI: CreateCompatDC DC=");
+        serial_puthex16(result);
+        serial_putc('\n');
     }
     return result;
 }
@@ -849,12 +880,27 @@ unsigned __far __pascal CreateBitmap(int w, int h, unsigned planes,
 
 unsigned __far __pascal CreateCompatibleBitmap(HDC hdc, int w, int h)
 {
-    unsigned handle = g_next_fake_hbm++;
-    (void)hdc; (void)w; (void)h;
-    serial_puts("GDI: CreateCompatBitmap -> ");
-    serial_puthex16(handle);
+    unsigned handle = g_next_fake_hbm;
+    unsigned idx    = handle - FAKE_HBM_BASE;
+    unsigned sel    = 0;
+    (void)hdc;
+    if (idx < FAKE_HBM_MAX && w > 0 && h > 0) {
+        unsigned long bytes = (unsigned long)w * (unsigned long)h * 4UL;
+        sel = mini_alloc(bytes);
+        if (sel) {
+            zero_buf(sel, bytes);
+            g_hbm_buf_sel[idx] = sel;
+            g_hbm_w[idx]       = w;
+            g_hbm_h[idx]       = h;
+            g_next_fake_hbm++;
+        }
+    }
+    serial_puts("GDI: CreateCompatBitmap ");
+    serial_putdec(w); serial_putc('x'); serial_putdec(h);
+    serial_puts(" -> "); serial_puthex16(handle);
+    if (!sel) serial_puts(" FAIL");
     serial_putc('\n');
-    return handle;
+    return sel ? handle : 0;
 }
 
 BOOL __far __pascal DeleteObject(unsigned hObject)
@@ -871,8 +917,19 @@ unsigned __far __pascal SelectObject(HDC hdc, unsigned hObject)
     unsigned prev = 0;
     if (hdc >= 1 && hdc < 16) {
         prev = g_dc_bitmap[hdc];
-        if (hObject >= 1 && hObject < 0x8000u)
+        if (hObject >= 1 && hObject < 0x8000u) {
             g_dc_bitmap[hdc] = hObject;
+            /* Jesli to fake compatible bitmap (z CreateCompatibleBitmap):
+             * przypisz jego bufor i wymiary do DC */
+            if (hObject >= FAKE_HBM_BASE) {
+                unsigned idx = hObject - FAKE_HBM_BASE;
+                if (idx < FAKE_HBM_MAX && g_hbm_buf_sel[idx] != 0) {
+                    g_dc_buf_sel[hdc] = g_hbm_buf_sel[idx];
+                    g_dc_buf_w[hdc]   = g_hbm_w[idx];
+                    g_dc_buf_h[hdc]   = g_hbm_h[idx];
+                }
+            }
+        }
     }
     if (g_tc < TC_MAX) {
         g_tc++;

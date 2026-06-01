@@ -212,13 +212,15 @@ typedef struct {
  *   208..223: short wnd_ox[8]  (abs x indeksowane hwnd-1)
  *   224..239: short wnd_oy[8]  (abs y indeksowane hwnd-1)
  *   240..255: short wnd_w[8]   (szerokosc child window; 0 = brak/root)
+ *   256..271: short wnd_h[8]   (wysokosc child window; 0 = brak/root)
  *
- * gdi.c dekoduje origin z HDC w TextOut/PatBlt; uzywa wnd_w do klipowania.
+ * gdi.c dekoduje origin z HDC w TextOut/PatBlt; uzywa wnd_w/wnd_h do klipowania.
  * user.c dekoduje origin z HDC w FillRect/FrameRect.
  * ============================================================ */
 #define KCB_WND_OX_OFF  208
 #define KCB_WND_OY_OFF  224
 #define KCB_WND_W_OFF   240   /* short wnd_w[8]: szerokosc child window (0=root) */
+#define KCB_WND_H_OFF   256   /* short wnd_h[8]: wysokosc child window (0=root) */
 
 static HDC make_hwnd_dc(unsigned hwnd)
 {
@@ -237,6 +239,12 @@ static void kcb_set_wnd_w(unsigned hwnd, unsigned ww)
 {
     short __far *kw = (short __far *)KCB_MK_FP(KCB_WND_W_OFF + (hwnd - 1u) * 2u);
     *kw = (short)ww;
+}
+
+static void kcb_set_wnd_h(unsigned hwnd, unsigned wh)
+{
+    short __far *kh = (short __far *)KCB_MK_FP(KCB_WND_H_OFF + (hwnd - 1u) * 2u);
+    *kh = (short)wh;
 }
 
 static void decode_hwnd_dc(unsigned hwnd, int *ox, int *oy)
@@ -464,10 +472,11 @@ HWND __far __pascal CreateWindow(
         }
     }
 
-    /* Zapisz pozycje i szerokosc okna do KCB (dla GDI - HWND-based DC i klipowanie) */
+    /* Zapisz pozycje i rozmiar okna do KCB (dla GDI - HWND-based DC i klipowanie) */
     if (parent != 0) {
         kcb_set_wnd_pos((unsigned)hwnd, g_windows[wi].x, g_windows[wi].y);
         kcb_set_wnd_w((unsigned)hwnd, g_windows[wi].w);
+        kcb_set_wnd_h((unsigned)hwnd, g_windows[wi].h);
     }
 
     serial_puts("USER: CW raw_x="); serial_hex16((unsigned short)(short)x);
@@ -786,10 +795,11 @@ BOOL __far __pascal MoveWindow(HWND hwnd, int x, int y, int w, int h, BOOL repai
             g_windows[i].y = y;
             if (w > 0) g_windows[i].w = (unsigned)w;
             if (h > 0) g_windows[i].h = (unsigned)h;
-            /* Zaktualizuj tablice pozycji i szerokosci w KCB (dla GDI) */
+            /* Zaktualizuj tablice pozycji i rozmiaru w KCB (dla GDI) */
             if (g_windows[i].parent != 0) {
                 kcb_set_wnd_pos((unsigned)hwnd, x, y);
                 kcb_set_wnd_w((unsigned)hwnd, g_windows[i].w);
+                kcb_set_wnd_h((unsigned)hwnd, g_windows[i].h);
             }
             serial_puts("USER: MoveWindow hwnd="); serial_hex16(hwnd);
             serial_puts(" abs_x="); serial_hex16((unsigned short)(short)g_windows[i].x);
@@ -1108,10 +1118,12 @@ int __far __pascal LibMain(unsigned hInst, unsigned wData,
 {
     unsigned i;
     (void)hInst; (void)wData; (void)cbHeap; (void)cmd;
-    /* Zero-init wnd_w[8] - KCB nie jest zerowane przez DOS, smieci blokuja klipowanie */
+    /* Zero-init wnd_w[8] i wnd_h[8] - KCB nie jest zerowane przez DOS */
     for (i = 0; i < 8u; i++) {
         short __far *kw = (short __far *)KCB_MK_FP(KCB_WND_W_OFF + i * 2u);
+        short __far *kh = (short __far *)KCB_MK_FP(KCB_WND_H_OFF + i * 2u);
         *kw = 0;
+        *kh = 0;
     }
     return 1;
 }
