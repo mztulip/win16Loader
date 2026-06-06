@@ -580,6 +580,7 @@ BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
     vk = kb_dequeue();
     do_cli();
     if (vk) {
+        serial_puts("KEY:0x"); serial_hex16(vk); serial_putc('\n');
         pmsg->hwnd    = g_kb_hwnd ? g_kb_hwnd : 1;
         pmsg->message = WM_KEYDOWN;
         pmsg->wParam  = vk;
