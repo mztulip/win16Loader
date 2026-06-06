@@ -1567,6 +1567,12 @@ int main(int argc, char *argv[])
                               : (heap_phys + GLOBAL_HEAP_SIZE);
         kcb->local_heap_off = 0x1000;            /* 4KB after start of data seg = past BSS */
         kcb->rsc_nblocks    = 0;
+        /* Zeruj bufor klawiatury (head=tail=0, buf=0) */
+        {
+            unsigned char __far *kb = (unsigned char __far *)MK_FP(kcb_seg, 272);
+            int ki;
+            for (ki = 0; ki < 10; ki++) kb[ki] = 0;
+        }
         kprintf("KCB init: hInst=0x%04X dyn_sel=0x%04X heap=0x%06lX..0x%06lX\n",
                 kcb->app_hinstance, kcb->next_dyn_sel,
                 kcb->heap_phys, kcb->heap_end);

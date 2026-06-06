@@ -142,6 +142,9 @@ typedef LRESULT (__far __pascal *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 #define WM_ACTIVATE 0x0006
 #define WM_PAINT    0x000F
 #define WM_QUIT     0x0012
+#define WM_KEYDOWN  0x0100
+#define WM_KEYUP    0x0101
+#define WM_CHAR     0x0102
 
 typedef struct {
     unsigned          style;
@@ -225,6 +228,25 @@ typedef struct {
 #define KCB_WND_OY_OFF  224
 #define KCB_WND_W_OFF   240   /* short wnd_w[8]: szerokosc child window (0=root) */
 #define KCB_WND_H_OFF   256   /* short wnd_h[8]: wysokosc child window (0=root) */
+
+/* Keyboard ring buffer w KCB (zapisywany przez IRQ1 handler w pm_call.asm) */
+#define KCB_KB_HEAD  272   /* BYTE: indeks odczytu */
+#define KCB_KB_TAIL  273   /* BYTE: indeks zapisu */
+#define KCB_KB_BUF   274   /* BYTE[8]: cykliczny bufor VK */
+#define KCB_KB_SZ    8
+
+static HWND g_kb_hwnd = 0;  /* HWND aktywnego okna (ustawiany przez CreateWindow) */
+
+/* Zwraca VK code (0 jesli bufor pusty) */
+static unsigned char kb_dequeue(void)
+{
+    unsigned char __far *kcb = KCB_MK_FP(0);
+    unsigned char head = kcb[KCB_KB_HEAD];
+    unsigned char tail = kcb[KCB_KB_TAIL];
+    if (head == tail) return 0;   /* bufor pusty */
+    kcb[KCB_KB_HEAD] = (unsigned char)((head + 1u) % KCB_KB_SZ);
+    return kcb[KCB_KB_BUF + head];
+}
 
 static HDC make_hwnd_dc(unsigned hwnd)
 {
@@ -492,6 +514,9 @@ HWND __far __pascal CreateWindow(
     serial_puts(" abs_x=");          serial_hex16((unsigned short)(short)g_windows[wi].x);
     serial_puts(" abs_y=");          serial_hex16((unsigned short)(short)g_windows[wi].y);
     serial_putc('\n');
+    if (parent == 0 && g_kb_hwnd == 0)
+        g_kb_hwnd = hwnd;  /* pierwsze top-level okno = aktywne dla klawiatury */
+
     serial_puts("USER: CreateWindow -> WM_CREATE\n");
     SendMessage(hwnd, WM_CREATE, 0, 0L);
     return hwnd;
@@ -519,7 +544,21 @@ void __far __pascal PostQuitMessage(int exitCode)
 BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
                                 UINT msgMin, UINT msgMax)
 {
+    unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
+
+    /* Sprawdz bufor klawiatury przed kolejka komunikatow */
+    do_sti();
+    vk = kb_dequeue();
+    do_cli();
+    if (vk) {
+        pmsg->hwnd    = g_kb_hwnd ? g_kb_hwnd : 1;
+        pmsg->message = WM_KEYDOWN;
+        pmsg->wParam  = vk;
+        pmsg->lParam  = 0L;
+        return 1;
+    }
+
     if (g_msg_count == 0) return 1;   /* kolejka pusta: brak WM_QUIT */
     *pmsg = g_msg_queue[g_msg_head];
     g_msg_head = (g_msg_head + 1) % MSG_QUEUE_SIZE;
@@ -533,25 +572,43 @@ BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
 BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
                                  UINT msgMin, UINT msgMax, UINT wRemoveMsg)
 {
-    /* Gdy kolejka pusta: czekaj az IRQ0 (IDT[0x20], 100Hz) zmieni tick_ms.
-     * STI/CLI potrzebne: thunk INT 3F to interrupt gate (IF=0 przy wejsciu).
-     * IRQ0 jest bezpieczny: PIC przemapowany na INT 0x20, brak konfliktu z wyjatkami. */
+    unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
-    if (g_msg_count == 0) {
+
+    /* Najpierw sprawdz bufor klawiatury (IRQ1 zapisuje VK do KCB) */
+    do_sti();
+    vk = kb_dequeue();
+    do_cli();
+    if (vk) {
+        pmsg->hwnd    = g_kb_hwnd ? g_kb_hwnd : 1;
+        pmsg->message = WM_KEYDOWN;
+        pmsg->wParam  = vk;
+        pmsg->lParam  = 0L;
+        return 1;
+    }
+
+    /* Sprawdz kolejke komunikatow */
+    if (g_msg_count > 0) {
+        *pmsg = g_msg_queue[g_msg_head];
+        if (wRemoveMsg) {
+            g_msg_head = (g_msg_head + 1) % MSG_QUEUE_SIZE;
+            g_msg_count--;
+        }
+        return 1;
+    }
+
+    /* Kolejka pusta i brak klawiszy: czekaj az IRQ0 zmieni tick_ms.
+     * STI/CLI potrzebne: thunk INT 3F to interrupt gate (IF=0 przy wejsciu).
+     * IRQ0 bezpieczny: PIC przemapowany na INT 0x20. */
+    {
         unsigned long __far *tick_p =
             (unsigned long __far *)KCB_MK_FP(28);
         unsigned long t0 = *tick_p;
         do_sti();
-        while (*tick_p == t0) {}   /* czekaj na jeden tik IRQ0 (max 10ms przy 100Hz) */
+        while (*tick_p == t0) {}   /* czekaj na jeden tik IRQ0 (~55ms) */
         do_cli();
-        return 0;
     }
-    *pmsg = g_msg_queue[g_msg_head];
-    if (wRemoveMsg) {
-        g_msg_head = (g_msg_head + 1) % MSG_QUEUE_SIZE;
-        g_msg_count--;
-    }
-    return 1;
+    return 0;
 }
 
 /* ============================================================
@@ -561,8 +618,15 @@ BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
  * ============================================================ */
 BOOL __far __pascal TranslateMessage(const MSG __far *pmsg)
 {
-    (void)pmsg;
-    return 1;
+    /* Generuj WM_CHAR dla klawiszy ASCII (Enter, Space) */
+    if (pmsg->message == WM_KEYDOWN) {
+        WPARAM vk = pmsg->wParam;
+        if (vk == 0x0D || vk == 0x20) {  /* VK_RETURN, VK_SPACE */
+            push_msg(pmsg->hwnd, WM_CHAR, vk, 0L);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 LRESULT __far __pascal DispatchMessage(const MSG __far *pmsg)
