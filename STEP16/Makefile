@@ -33,9 +33,13 @@ serial.obj: serial.c serial.h
 pm_helpers.obj: pm_helpers.c
 	$(WCC) -ml -q $< -fo=$@
 
+# Keyboard IRQ1 handler (C czesc; -ms zeby trafic do _TEXT razem z pm_call.asm)
+keyboard.obj: keyboard.c
+	$(WCC) -ms -q -zl -s $< -fo=$@
+
 # Loader
-loader.exe: loader.c pm_call.obj serial.obj pm_helpers.obj
-	$(WCL) -ml -l=dos -q loader.c pm_call.obj serial.obj pm_helpers.obj -fe=loader.exe
+loader.exe: loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj
+	$(WCL) -ml -l=dos -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj -fe=loader.exe
 
 # -------------------------------------------------------
 # KERNEL.EXE - prawdziwe Win16 ordynaly
@@ -295,6 +299,6 @@ clean:
 	rm -f user.exe user.obj
 	rm -f gdi.exe gdi.obj
 	rm -f loader.exe loader.o
-	rm -f libstubs.obj pm_call.obj serial.obj pm_helpers.obj
+	rm -f libstubs.obj pm_call.obj serial.obj pm_helpers.obj keyboard.obj
 	rm -f panic.bin
 	rm -f boot.img bochs.log qemu.log

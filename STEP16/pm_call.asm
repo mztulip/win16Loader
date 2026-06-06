@@ -75,6 +75,7 @@ global pm_call_app_
 global get_int3f_off_
 global get_int21_off_
 global get_irq0_off_
+global get_irq1_off_
 global get_gpf_off_
 global get_exc00_off_
 global get_exc06_off_
@@ -116,6 +117,7 @@ extern _g_bitmaps_phys
 
 extern patch_gdt_c_     ; C implementation of patch_gdt (pm_helpers.c)
 extern _g_gdt_off_c     ; offset tablicy GDT w segmencie kodu (dla patch_gdt_c_)
+extern irq1_c_          ; C near: irq1_c() w keyboard.c -> symbol 'irq1_c_'
 
 ; =====================================================================
 get_int3f_off_:
@@ -128,6 +130,10 @@ get_int21_off_:
 
 get_irq0_off_:
     mov  ax, irq0_handler
+    ret
+
+get_irq1_off_:
+    mov  ax, irq1_handler
     ret
 
 get_gpf_off_:
@@ -446,7 +452,7 @@ draw_str_32:
     pop  esi
     ret
 
-str_title   db "STEP15: pixel buffers memDC", 0
+str_title   db "STEP16: klawiatura IRQ1", 0
 str_mode    db "SEL_KCB=0x98  SEL_GDT_ACCESS=0x120  SEL_HEAP=0x528 (XMS)", 0
 str_font    db "SEL_BITMAPS=0x128 (86 sprites)  127 dyn slots (0x130..0x527)", 0
 str_low_mem db "WARNING: Low memory (<2MB extended) - GlobalAlloc may fail!", 0
@@ -488,7 +494,7 @@ pm16_call_app:
     mov  al, 0x01       ; ICW4: 8086 mode
     out  0x21, al
     out  0xA1, al
-    mov  al, 0xFE       ; maska master: wlacz tylko IRQ0 (timer)
+    mov  al, 0xFC       ; maska master: wlacz IRQ0 (timer) + IRQ1 (klawiatura)
     out  0x21, al
     mov  al, 0xFF       ; maska slave: wszystkie wylaczone
     out  0xA1, al
@@ -1468,6 +1474,29 @@ irq0_handler:
     iret
 
 ; =====================================================================
+; irq1_handler: IRQ1 (klawiatura) w PM. Wpis wywolywany z int21_handler
+; gdy PIC ISR bit1=1 (hardware keyboard interrupt).
+; Wywoluje irq1_c_ (keyboard.c) do odczytu scan code i zapisu VK do KCB.
+; Wysyla EOI do master PIC.
+; Zapisuje/przywraca: AX, BX, CX, DX, ES (wszystko co moze zepsuc irq1_c_).
+; =====================================================================
+irq1_handler:
+    push ax
+    push bx
+    push cx
+    push dx
+    push es
+    call irq1_c_        ; C: czytaj scan code 0x60, przelicz VK, zapisz do KCB
+    pop  es
+    pop  dx
+    pop  cx
+    pop  bx
+    pop  ax
+    mov  al, 0x20       ; EOI do master PIC
+    out  0x20, al
+    iret
+
+; =====================================================================
 ; INT 21h handler (protected mode)
 ; Handles DOS calls made by Win16 apps from PM:
 ;   AH=0x35: Get Interrupt Vector -> ES=SEL_DATA16, BX=0
@@ -1477,6 +1506,20 @@ irq0_handler:
 ;   others: IRET (ignore)
 ; =====================================================================
 int21_handler:
+    ; Sprawdz czy to hardware IRQ1 (klawiatura) czy software INT 21h (DOS call).
+    ; Odczytaj PIC In-Service Register: jezeli bit 1 ustawiony -> IRQ1 hardware.
+    push ax
+    push dx
+    mov  dx, 0x20
+    mov  al, 0x0B        ; komenda: czytaj ISR
+    out  dx, al
+    in   al, dx          ; AL = PIC ISR
+    test al, 0x02        ; bit 1 = IRQ1
+    pop  dx
+    pop  ax
+    jnz  irq1_handler    ; hardware keyboard -> obsluz i IRET bez debug output
+
+    ; software INT 21h (DOS call z aplikacji)
     push cx
     push ax
     push dx
