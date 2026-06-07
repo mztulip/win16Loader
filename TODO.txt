@@ -708,20 +708,120 @@ Tests (STEP17/):
   run_mouse_test.sh : PASSED (MOUSE: PS/2 init OK, brak CPU reset, WM_PAINT po zdarzeniach)
 
 ---------------------------------------------------------------------------
-ETAP 18 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [TODO]
+ETAP 18 - Ogolny loader zasobow NE (RT_MENU, RT_DIALOG, RT_ICON, RT_ACCEL) [TODO]
+---------------------------------------------------------------------------
+Cel: Zastapic hardcodowany loader zasobow SKI.EXE (load_ski_strings/bitmaps)
+     ogolnym mechanizmem find_ne_resource(type, id) dzialajacym dla dowolnej
+     apki Win16. Zasoby dostepne on-demand przez LoadMenu/LoadAccelerators/DialogBox.
+
+Stan obecny (STEP17):
+  RT_STRING (0x8006): wczytywany do KCB[32..207], max 2 bloki - dziala dla SKI
+  RT_BITMAP (0x8002): wczytywany do SEL_BITMAPS (hardcode 86 spriteow SKI)
+  RT_ICON   (0x8003): LoadIcon() = stub, zwraca 1
+  RT_CURSOR (0x8001): LoadCursor() = stub, zwraca 1
+  RT_MENU   (0x8004): nie istnieje
+  RT_DIALOG (0x8005): nie istnieje
+  RT_ACCEL  (0x8009): nie istnieje
+
+Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
+
+[ ] 18a: find_ne_resource() - generyczny dostep do tablicy zasobow NE
+        Problem: loader.c ma dwa hardcodowane parsery tablicy zasobow (SKI).
+        Rozwiazanie: wydzielic generyczna funkcje:
+
+          int find_ne_resource(unsigned ne_off, unsigned short type_id,
+                               unsigned short res_id,
+                               unsigned long *out_file_off,
+                               unsigned short *out_size);
+            Zwraca 1 jesli znaleziony; out_file_off = offset w pliku (bajty),
+            out_size = rozmiar w bajtach.
+            type_id: 0x8002=RT_BITMAP, 0x8004=RT_MENU, 0x8005=RT_DIALOG,
+                     0x8006=RT_STRING, 0x8009=RT_ACCEL
+            res_id:  numer zasobu (MAKEINTRESOURCE n -> n)
+
+        Format tablicy zasobow NE (ne_rsrctab):
+          rscAlignShift (WORD) - potega 2 dla przeliczania offsetow
+          Bloki typow: rscType(WORD) rscCount(WORD) rscProc(DWORD)
+            rscType == 0 -> koniec tablicy
+            Per zasob: rnOffset(WORD) rnLength(WORD) rnFlags(WORD) rnID(WORD) ...
+            Offset w pliku = rnOffset << rscAlignShift
+            Rozmiar = rnLength << rscAlignShift
+            rnID: bit15=1 -> ID liczbowy (rnID & 0x7FFF); bit15=0 -> offset stringa
+
+        Implementacja: w loader.c jako static funkcja; uzyc do refaktoru
+          load_ski_strings i load_ski_bitmaps (zastapic powielony kod).
+
+[ ] 18b: Bufor zasobow w pamieci - RSC_HEAP
+        Zasoby muszą byc dostepne w runtime (LoadMenu/DialogBox wywoluja sie z PM).
+        Problem: KCB za maly (256B), SEL_BITMAPS zajety przez sprity SKI.
+
+        Nowy segment: RSC_HEAP = GlobalAlloc(max 8KB) alokowany przy starcie loadera.
+          Przechowuje wczytane zasoby z katalogu: {type, id, offset_w_RSC_HEAP, size}
+          Max 16 zasobow (menu + dialog + akcelerator + ikony apki).
+          GDT selector: SEL_RSC = 0x130 (zaraz po dynamicznych slotach GlobalAlloc)
+            lub dynamicznie alokowany przez GlobalAlloc.
+
+        Struktura katalogu zasobow (w loaderze, nie w GDT):
+          static struct { unsigned short type; unsigned short id;
+                          unsigned short off;  unsigned short size; } rsc_dir[16];
+          static unsigned rsc_dir_n;
+          static unsigned char far *rsc_heap_ptr;  /* far ptr do bufora */
+
+        API (C, wywolywane z user.c przez eksportowany thunk lub bezposrednio):
+          unsigned char far *rsc_get(unsigned short type, unsigned short id);
+            Zwraca far ptr do danych zasobu lub NULL.
+
+        Alternatywa uproszczona: zasoby wczytywane na zadanie bezposrednio z pliku
+          (DOS INT 21h read w real mode -> wymaga przejscia RM/PM).
+          Rekomendacja: bufory zasobow w pamieci (prostsze niz RM/PM switch).
+
+[ ] 18c: RT_MENU wczytywanie + LoadMenu/GetMenu stubs
+        Po refaktorze (18a): przy ladowaniu apki wczytaj RT_MENU do RSC_HEAP:
+          - Znajdz wszystkie RT_MENU w tablicy zasobow
+          - Wczytaj surowe bajty do RSC_HEAP
+        USER.EXE: nowe exporty dla user.c (moga byc stubs na poczatek):
+          LoadMenu (USER.157-ish): znajdz RT_MENU id w RSC_HEAP, zwroc fake HMENU
+          DestroyMenu (USER.152): no-op
+        Pelne parsowanie RT_MENU i rysowanie menu bar: patrz ETAP 19g.
+
+[ ] 18d: RT_DIALOG wczytywanie
+        Wczytaj RT_DIALOG do RSC_HEAP przy ladowaniu apki.
+        Dostep przez rsc_get(RT_DIALOG, id) w DialogBox (ETAP 19h).
+
+[ ] 18e: RT_ACCELERATOR wczytywanie + LoadAccelerators stub
+        Wczytaj RT_ACCELERATOR do RSC_HEAP.
+        LoadAccelerators (USER.177): znajdz w RSC_HEAP, zwroc HACCEL
+          (na razie: same stubs; faktyczne TranslateAccelerator w ETAP 19g).
+
+[ ] 18f: RT_ICON + RT_STRING refaktor
+        RT_ICON: wczytaj 1. ikone aplikacji do RSC_HEAP.
+          LoadIcon(hInst, MAKEINTRESOURCE(n)): zwroc ptr do danych icon (nie rysuj jeszcze).
+        RT_STRING: zachowac w KCB (jak dotychczas) ale uzyc find_ne_resource().
+          Refaktor load_ski_strings(): zastapic powielony parser.
+        RT_BITMAP: zachowac w SEL_BITMAPS (kompatybilnosc SKI); refaktor parsera.
+
+[ ] 18g: Test - Win16App.exe laduje sie i wchodzi w WinMain
+        Przetestuj loader z Win16App.exe (bez zasobow graficznych SKI):
+          - Zaladuj Win16App.exe z STEP19/win16_example_app/Win1App.exe
+          - Sprawdz serial: InitTask OK, zasoby wczytane (RT_MENU, RT_DIALOG, RT_ACCEL)
+          - WinMain wywolany (nowy log: "WinMain hInst=... nCmdShow=...")
+        Test automatyczny: run_win16app.sh - sprawdz serial log.
+
+---------------------------------------------------------------------------
+ETAP 19 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [TODO]
 ---------------------------------------------------------------------------
 Cel: Win16 app zbudowana z Watcom clibs (WinMain + WS_OVERLAPPEDWINDOW) uruchamia
      sie i pokazuje okno z paskiem tytulu, przyciskami min/max/zamknij, ramka.
      Przyciski dzialaja (zamknij konczy program). About dialog jako bonus.
 
-Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
+Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
   Kluczowe API uzywane przez te aplikacje:
     WinMain (zamiast app_entry), WS_OVERLAPPEDWINDOW, CreateWindowEx,
     GetSystemMenu, AppendMenu/InsertMenu, LoadAccelerators, TranslateAccelerator,
     WM_SYSCOMMAND (SC_CLOSE/SC_MINIMIZE/SC_MAXIMIZE), WM_GETMINMAXINFO,
     WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_CLOSE, DialogBox, EndDialog.
 
-[ ] 18a: WinMain - weryfikacja i fix startu Watcom clibs
+[ ] 19a: WinMain - weryfikacja i fix startu Watcom clibs
         Watcom 'system windows' uzyw startupa C0W.obj ktory:
           1. Wywoluje InitTask(KERNEL.91) - zwraca AX=cx, BX=heap, DI=hInst, SI=hPrevInst
           2. Wywoluje WaitEvent(KERNEL.30) - zwraca 0
@@ -741,7 +841,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
           [ ] Sprawdz czy clibs uruchamia WinMain po InitTask i WaitEvent
           [ ] Ewentualnie: wstrzyknac stub GetCommandLine (KERNEL.83) jesli clibs go woła
 
-[ ] 18b: Rozszerzenie danych okna - styl, tytul, stan
+[ ] 19b: Rozszerzenie danych okna - styl, tytul, stan
         Aktualnie g_windows[] nie przechowuje: style, title, state.
         GetClientRect zwraca raw w/h bez odjecia NC area.
 
@@ -779,7 +879,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
         CreateWindowEx (USER.452): jak CreateWindow ale z dwExStyle jako 1. param.
           Stub: ignoruj dwExStyle, wywolaj CreateWindow.
 
-[ ] 18c: Rysowanie chrome okna (WM_NCPAINT)
+[ ] 19c: Rysowanie chrome okna (WM_NCPAINT)
         Win3.1 styl (bez 3D shadow z Win95):
           - Zewnetrzna ramka: 1px czarna (0x000000)
           - Wewnetrzna ramka (WS_THICKFRAME): 3px szara (0xC0C0C0)
@@ -812,7 +912,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
         Uwaga: draw_window_chrome pisze do LFB przez far pointer (32-bit).
           Offset w LFB: flat_off = (abs_y * pitch) + abs_x * 3  (24bpp, pitch=1920).
 
-[ ] 18d: Mouse NC hit testing + interakcja
+[ ] 19d: Mouse NC hit testing + interakcja
         WM_NCHITTEST (0x0084): wParam=0, lParam=MAKELONG(screen_x, screen_y)
           Odpowiedz: HTCLIENT=1, HTCAPTION=2, HTCLOSE=20, HTMINBUTTON=8, HTMAXBUTTON=9,
             HTSYSMENU=3, HTBORDER=18, HTLEFT=10, HTRIGHT=11, HTTOP=12, HTBOTTOM=15, etc.
@@ -832,7 +932,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
             HTCLOSE     -> PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0)
             HTMINBUTTON -> PostMessage(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0)
             HTMAXBUTTON -> PostMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0)
-            HTCAPTION   -> [patrz 18e] drag move (uproszczenie: pomiń ruch)
+            HTCAPTION   -> [patrz 19e] drag move (uproszczenie: pomiń ruch)
             HTSYSMENU   -> pomiń (brak prawdziwego menu popup)
 
         Generowanie NC mouse events z IRQ12:
@@ -841,7 +941,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
             - jezeli HT != HTCLIENT: generuj WM_NCHITTEST + WM_NCLBUTTONDOWN/UP
             - jezeli HT == HTCLIENT: generuj WM_MOUSEMOVE jak dotychczas
 
-[ ] 18e: SC_CLOSE + WM_CLOSE + SC_MINIMIZE + SC_MAXIMIZE w DefWindowProc
+[ ] 19e: SC_CLOSE + WM_CLOSE + SC_MINIMIZE + SC_MAXIMIZE w DefWindowProc
         DefWindowProc WM_SYSCOMMAND:
           SC_CLOSE (0xF060):
             SendMessage(hwnd, WM_CLOSE, 0, 0)
@@ -864,7 +964,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
         DestroyWindow -> WM_DESTROY -> wyczyscic g_windows[] entry ->
           Przerysuj obszar ekranu (PatBlt czarnym lub wzorem tla).
 
-[ ] 18f: GetSystemMenu + AppendMenu/InsertMenu + menu stubs
+[ ] 19f: GetSystemMenu + AppendMenu/InsertMenu + menu stubs
         Cel: te API musza istniec (Win1App je wywoluje) ale nie musi byc pelny system menu.
 
         Nowe exporty USER.EXE:
@@ -880,7 +980,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
         Bonus (opcjonalnie): prosta implementacja systemu menu popup (uproszczona).
           Priorytetu niska - wazniejszy jest button zamknij.
 
-[ ] 18g: LoadAccelerators + TranslateAccelerator (stubs)
+[ ] 19g: LoadAccelerators + TranslateAccelerator (stubs)
         Nowe exporty USER.EXE:
           LoadAccelerators  (USER.177): zwroc fake HACCEL (np. 0xACC0 | uID_low)
           TranslateAccelerator (USER.99): zawsze zwroc FALSE (brak dopasowania)
@@ -890,7 +990,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
         Jezeli zwracamy FALSE -> TM/DM dziala normalnie. Klawiatura Ctrl+A nie wywola
         ID_HELP_ABOUT, ale okno normalnie zamknie sie przez inne mechanizmy.
 
-[ ] 18h: DialogBox + EndDialog (minimalny modal dialog)
+[ ] 19h: DialogBox + EndDialog (minimalny modal dialog)
         Win1App/Win16App uzywaja DialogBox dla "About" dialog.
         Bez tego: apka dziala (pomija About), ale nie pokazuje dialogu po Ctrl+A.
 
@@ -921,7 +1021,7 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
           i czekac na EndDialog. Tworzy widoczny czarny prostokat.
         Pelne rysowanie kontrolek (static text, buttons): osobny podkrok.
 
-[ ] 18i: Pelne menu (RT_MENU) - opcjonalne / ETAP 19
+[ ] 19i: Pelne menu (RT_MENU) - opcjonalne / ETAP 20
         Parsowanie zasobu RT_MENU (type=4):
           Menu template: mtOption(WORD) mtID(WORD, 0 for popup) mtString(string)
           MF_END (0x80) = ostatni element.
@@ -936,15 +1036,14 @@ Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
           GetMenuItemCount (USER.263)
 
 Kolejnosc priorytetow do uruchomienia Win1App.exe z oknem i przyciskiem zamknij:
-  1. 18a (WinMain startup) - bez tego nic nie dziala
-  2. 18b (styl+tytul+NC metryki) - podstawa dla rysowania
-  3. 18c (rysowanie chrome) - wizualne okno
-  4. 18d (NC hit testing) + 18e (SC_CLOSE) - klikanie przyciskow
-  5. 18f (GetSystemMenu/AppendMenu stubs) - bez tego Win1App crashuje na GetSystemMenu
-  6. 18g (LoadAccelerators/TranslateAccelerator stubs) - bez tego crash w petli
+  1. 19a (WinMain startup) - bez tego nic nie dziala
+  2. 19b (styl+tytul+NC metryki) - podstawa dla rysowania
+  3. 19c (rysowanie chrome) - wizualne okno
+  4. 19d (NC hit testing) + 19e (SC_CLOSE) - klikanie przyciskow
+  5. 19f (GetSystemMenu/AppendMenu stubs) - bez tego Win1App crashuje na GetSystemMenu
+  6. 19g (LoadAccelerators/TranslateAccelerator stubs) - bez tego crash w petli
 
-Porownanie API STEP17 vs STEP18 (nowe exporty USER.EXE):
-  Ordinal | Funkcja              | Status STEP17
+Porownanie API STEP18 vs STEP19 (nowe exporty USER.EXE):
   --------+----------------------+----------------
   25      | GetSystemMenu        | BRAK
   87      | DialogBox            | BRAK
