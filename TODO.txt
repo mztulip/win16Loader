@@ -607,23 +607,55 @@ Plan implementacji:
 [ ] 15b-11: Usun stale DC_BUF_W/H/BYTES/PITCH (lub zostawic jako fallback=0)
 
 ---------------------------------------------------------------------------
-ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [TODO]
+ETAP 16 - Klawiatura: WM_KEYDOWN/WM_KEYUP                        [DONE]
 ---------------------------------------------------------------------------
 Cel: SkiFree reaguje na klawiature (kursory steruja narciarzem).
 Stan: SKI.EXE obsluguje WM_KEYDOWN w WndProc (case 0x0100 w 0x4C9A).
   VK_LEFT/VK_RIGHT zmieniaja kierunek narciarza.
   VK_F1..F3: zmiana trybu gry.
-  WM_CHAR (0x0102): klawisze literowe (F=full screen itp).
-  Bez handlera IRQ1 gra nie reaguje na wejscie.
 
-[ ] 16a: IRQ1 handler w PM (scan codes -> Virtual Keys -> PostMessage)
-        Tablica scancode -> VK (VK_LEFT=0x25, VK_RIGHT=0x27, VK_UP=0x26,
-          VK_DOWN=0x28, VK_ESCAPE=0x1B, VK_F1..F12=0x70..0x7B)
-        Handler w pm_call.asm: INT 1 -> odczyt port 0x60, konwersja,
-          PostMessage(g_active_hwnd, WM_KEYDOWN, vk, 0)
-        EOI: outb(0x20, 0x20)
+[x] 16a: IRQ1 handler w C (keyboard.c) + asm stub w pm_call.asm
+        keyboard.c: kompilowany z -ms (kod laduje do _TEXT = NEAR call z asm).
+        Brak dostepu do DGROUP - tylko far pointery i zmienne na stosie.
+        Tablica scancode -> VK: Up/Down/Left/Right/Esc/F1-F8/Enter/Space.
+        KCB keyboard buffer: head=KCB[272], tail=KCB[273], buf[8]=KCB[274..281].
+        Zapis VK do bufora jesli nie pelny (circular buffer, size=8).
 
-[ ] 16b: TranslateMessage (USER.113): generuj WM_CHAR z WM_KEYDOWN dla ASCII
+        pm_call.asm:
+        - KLUCZOWY: IRQ1 i INT 21h (DOS) trafiaja na ten sam IDT[0x21] po remap PIC.
+          Rozroznienie: odczyt PIC ISR (port 0x20, cmd 0x0B); bit 1 = hardware IRQ1.
+          Jesli bit 1 set -> skocz do irq1_handler; inaczej -> DOS handling.
+        - irq1_handler: push AX/BX/CX/DX/ES, NEAR call irq1_c_, pop, EOI, IRET.
+        - PIC mask: 0xFE -> 0xFC (odblokowuje IRQ0 + IRQ1).
+        - get_irq1_off_: eksportuje offset irq1_handler (nie uzywany na razie).
+
+        Konwencja nazw Watcom C (potwierdzona):
+          near C `foo` -> symbol `foo_`; NASM extern foo_ pasuje.
+          __far C `foo` -> symbol takze `foo_` (nie foo_w jak sugerowala dokumentacja).
+          Win16 app entry: void __far app_entry(void), link option start=app_entry_.
+          hInstance: #pragma aux get_ds = "mov ax, ds" value [ax] modify [ax];
+
+[x] 16b: TranslateMessage (USER.113): generuj WM_CHAR z WM_KEYDOWN dla ASCII
+        Generuje WM_CHAR (0x0102) dla Enter (VK=0x0D) i Space (VK=0x20).
+
+[x] user.c: PeekMessage/GetMessage czyta bufor KCB przed oczekiwaniem na IRQ0.
+        kb_dequeue(): zwraca VK z bufora (0 jesli pusty); STI/CLI wokol odczytu.
+        Jesli VK != 0: zwraca MSG z msg=WM_KEYDOWN, wParam=VK dla g_kb_hwnd.
+        g_kb_hwnd: pierwsze top-level okno (z CreateWindow parent=0).
+
+[x] loader.c: zeruje bufor klawiatury w KCB (bajty 272..281) po alokacji.
+
+[x] kbd_test.c: testowa apka Win16 (STEP16/kbd_test.exe)
+        WM_KEYDOWN -> OutputDebugString("KBDT VK=0xXX (NAME)\r\n")
+        Wychodzi po Esc lub 20 klawiszach. Uzywa app_entry + get_ds() dla hInst.
+
+[x] run_kbd_test.sh: automatyczny test klawiatury
+        QEMU headless, monitor TCP port 55556, sendkey 6 klawiszy,
+        weryfikacja 6 VK-kodow na serialu. Uruchomienie: bash run_kbd_test.sh
+
+[x] run_skitest.sh: automatyczny test renderingu gondoli
+        Czeka na WM_PAINT (msg=000F), weryfikuje 8 markerow pipeline GDI.
+        Uruchomienie: bash run_skitest.sh
 
 ---------------------------------------------------------------------------
 ETAP 17 - Mysz: WM_MOUSEMOVE + WM_LBUTTONDOWN                    [TODO]
@@ -675,10 +707,24 @@ MAPA GDT (STEP15 - po KCB + GDT_ACCESS + SEL_BITMAPS + huge selectors)
 0x80  SEL_DLL_DATA(3) (wolny slot)
 0x88  SEL_THUNK       thunki INT 3F (base=g_thunk_phys, 16-bit code)
 0x90  SEL_VESA        32-bit 1MB alias (base=LFB, limit=1MB) - stary, nieuzywany w GDI
-0x98  SEL_KCB         Kernel Control Block (base=g_kcb_phys, limit=255B, 16-bit data)
-                       Layout: hinstance(2) next_dyn_sel(2) heap_phys(4) heap_next(4)
-                         heap_end(4) local_heap_off(2) rsc_nblocks(1) pad(1)
-                         rsc_block_ids[2](4) rsc_block_sizes[2](4) rsc_data[228]
+0x98  SEL_KCB         Kernel Control Block (base=g_kcb_phys, limit=511B, 16-bit data)
+                       Layout (bajty):
+                         0-1:   hinstance (app DS selector)
+                         2-3:   next_dyn_sel
+                         4-7:   heap_phys
+                         8-11:  heap_next
+                         12-15: heap_end
+                         16-17: local_heap_off
+                         18:    rsc_nblocks
+                         19:    pad
+                         20-23: rsc_block_ids[2]
+                         24-27: rsc_block_sizes[2]
+                         28-207: rsc_data (RT_STRING, max 176B)
+                         208-223: wnd_ox[8] (X offset per HWND dla child windows)
+                         224-239: wnd_oy[8] (Y offset per HWND dla child windows)
+                         272:   kb_head (nastepny klawisz do odczytu)
+                         273:   kb_tail (nastepna pozycja zapisu)
+                         274-281: kb_buf[8] (circular buffer VK kodow)
 0xA0  SEL_VESA_WIN(0)  LFB okno 0:  base=LFB+0*65536,   limit=65535 (wiersze  0-33)
 0xA8  SEL_VESA_WIN(1)  LFB okno 1:  base=LFB+1*65536,   limit=65535 (wiersze 34-67)
 0xB0  SEL_VESA_WIN(2)  LFB okno 2:  base=LFB+2*65536,   limit=65535
