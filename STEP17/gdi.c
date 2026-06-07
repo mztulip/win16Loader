@@ -110,6 +110,7 @@ typedef unsigned short HDC;
 
 /* KCB - tablica pozycji okien (zsynchronizowana przez USER.EXE) */
 #define SEL_KCB         ((unsigned short)0x98)
+#define KCB_TICK_OFF    28    /* unsigned long tick_ms (inkrementowany przez IRQ0) */
 #define KCB_WND_OX_OFF  208   /* short wnd_ox[8]: abs x per hwnd (indeks hwnd-1) */
 #define KCB_WND_OY_OFF  224   /* short wnd_oy[8]: abs y per hwnd (indeks hwnd-1) */
 #define KCB_WND_W_OFF   240   /* short wnd_w[8]:  szerokosc child window (0=root) */
@@ -170,6 +171,7 @@ static unsigned g_next_fake_hbm = FAKE_HBM_BASE;
 static unsigned g_hbm_buf_sel[FAKE_HBM_MAX] = {0};
 static int      g_hbm_w[FAKE_HBM_MAX]       = {0};
 static int      g_hbm_h[FAKE_HBM_MAX]       = {0};
+
 
 /* ============================================================
  * mini_alloc - alokuje selektor GDT z XMS heapu (KCB bezposrednio)
@@ -313,7 +315,9 @@ static void draw_char_gdi(unsigned char ch, unsigned x, unsigned y,
         unsigned long edi = row_base + (unsigned long)row * VESA_PITCH;
         for (bit = 8; bit-- > 0; ) {
             if (fbyte & (1 << bit))
-                draw_pixel(edi, br, bg, bb);
+                draw_pixel(edi, br, bg, bb);        /* foreground */
+            else
+                draw_pixel(edi, 0xFF, 0xFF, 0xFF);  /* background = bialy (OPAQUE) */
             edi += VESA_BPP;
         }
     }
