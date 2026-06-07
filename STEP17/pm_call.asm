@@ -504,7 +504,7 @@ pm16_call_app:
     mov  al, 0x01       ; ICW4: 8086 mode
     out  0x21, al
     out  0xA1, al
-    mov  al, 0xFC       ; maska master: wlacz IRQ0 (timer) + IRQ1 (klawiatura)
+    mov  al, 0xF8       ; maska master: wlacz IRQ0+IRQ1+IRQ2(cascade->slave PIC)
     out  0x21, al
     mov  al, 0xEF       ; maska slave: wlacz IRQ12 (mysz PS/2, bit 4=0)
     out  0xA1, al
