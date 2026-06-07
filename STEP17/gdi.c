@@ -303,6 +303,37 @@ static void draw_dc_pixel(unsigned buf_sel, unsigned long flat_off,
 }
 
 
+/* Zwraca liste prostokatow exclusion dla child windows (z KCB).
+ * Klip: nie rysuj na screenDC pikseli nalezacych do okien potomnych.
+ * Maks. KCB_MAX_HWNDS prostokatow; zwraca liczbe wypelnionych.
+ * Uzywane przez: PatBlt(screen), blit_sprite_hbm, CaseC. */
+typedef struct { int x1, y1, x2, y2; } ExclRect;
+static int get_child_excl(ExclRect *out, int max_out)
+{
+    int ci, n = 0;
+    for (ci = 0; ci < KCB_MAX_HWNDS && n < max_out; ci++) {
+        short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
+        short cy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (unsigned)ci*2u);
+        short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
+        short ch = *(short __far *)MK_FP(SEL_KCB, KCB_WND_H_OFF  + (unsigned)ci*2u);
+        if (cw > 0 && ch > 0) {
+            out[n].x1 = (int)cx;         out[n].y1 = (int)cy;
+            out[n].x2 = (int)cx+(int)cw; out[n].y2 = (int)cy+(int)ch;
+            n++;
+        }
+    }
+    return n;
+}
+
+static int excl_contains(const ExclRect *excl, int n, int x, int y)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        if (x >= excl[i].x1 && x < excl[i].x2 &&
+            y >= excl[i].y1 && y < excl[i].y2) return 1;
+    return 0;
+}
+
 static void draw_char_gdi(unsigned char ch, unsigned x, unsigned y,
                            unsigned char br, unsigned char bg, unsigned char bb)
 {
@@ -384,22 +415,26 @@ static void blit_sprite_hbm(unsigned hbm, int xDst, int yDst, int w, int h,
     if (yDst + h > 480) h = 480 - yDst;
     if (w <= 0 || h <= 0) return;
 
-    for (r = 0; r < h; r++) {
-        unsigned short dib_row = (unsigned short)((int)bh - 1 - ySrc - r);
-        unsigned short row_off = (unsigned short)(bmp_off + 40u + 64u +
-                                  (unsigned long)dib_row * row_bytes);
-        int dst_y = yDst + r;
-        for (c = 0; c < w; c++) {
-            int sx = xSrc + c;
-            unsigned char byte_val = *(bmp_buf + row_off + (unsigned)(sx >> 1));
-            unsigned char idx = (sx & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
-            unsigned char __far *rgb;
-            unsigned long flat_off;
-            if (idx == TRANSP_IDX) continue;
-            rgb = pal_b + (unsigned)idx * 4u;
-            flat_off = (unsigned long)dst_y * VESA_PITCH +
-                       (unsigned long)(xDst + c) * VESA_BPP;
-            draw_pixel(flat_off, rgb[2], rgb[1], rgb[0]);
+    {
+        ExclRect excl[KCB_MAX_HWNDS]; int nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
+        for (r = 0; r < h; r++) {
+            unsigned short dib_row = (unsigned short)((int)bh - 1 - ySrc - r);
+            unsigned short row_off = (unsigned short)(bmp_off + 40u + 64u +
+                                      (unsigned long)dib_row * row_bytes);
+            int dst_y = yDst + r;
+            for (c = 0; c < w; c++) {
+                int sx = xSrc + c;
+                int dst_x = xDst + c;
+                unsigned char byte_val, idx;
+                unsigned char __far *rgb;
+                if (excl_contains(excl, nexcl, dst_x, dst_y)) continue;
+                byte_val = *(bmp_buf + row_off + (unsigned)(sx >> 1));
+                idx = (sx & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
+                if (idx == TRANSP_IDX) continue;
+                rgb = pal_b + (unsigned)idx * 4u;
+                draw_pixel((unsigned long)dst_y * VESA_PITCH +
+                           (unsigned long)dst_x * VESA_BPP, rgb[2], rgb[1], rgb[0]);
+            }
         }
     }
 }
@@ -450,14 +485,19 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         if (hdcDst == 1) {
             unsigned char rv = (dwRop == 0x00FF0062UL) ? 0xFF : 0;
             int row, col, cx = xDst, cy = yDst, cw = w, ch = h;
+            ExclRect excl[KCB_MAX_HWNDS]; int nexcl;
             if (cx < 0) { cw += cx; cx = 0; }
             if (cy < 0) { ch += cy; cy = 0; }
             if (cx + cw > 640) cw = 640 - cx;
             if (cy + ch > 480) ch = 480 - cy;
+            nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
             for (row = 0; row < ch; row++)
-                for (col = 0; col < cw; col++)
-                    draw_pixel((unsigned long)(cy + row) * VESA_PITCH +
-                               (unsigned long)(cx + col) * VESA_BPP, rv, rv, rv);
+                for (col = 0; col < cw; col++) {
+                    int dx = cx + col, dy = cy + row;
+                    if (excl_contains(excl, nexcl, dx, dy)) continue;
+                    draw_pixel((unsigned long)dy * VESA_PITCH +
+                               (unsigned long)dx * VESA_BPP, rv, rv, rv);
+                }
         }
         return 1;
     }
@@ -756,22 +796,8 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
             int dc_wC    = g_dc_buf_w[hdcSrc];
             int dc_hC    = g_dc_buf_h[hdcSrc];
             unsigned long dc_pitchC = (unsigned long)dc_wC * 4UL;
-            /* Precompute child window exclusion rect (raz przed petla, nie per piksel). */
-            int excl_x1 = -1, excl_x2 = -1, excl_y1 = 0, excl_y2 = 0;
-            {
-                int ci;
-                for (ci = 0; ci < KCB_MAX_HWNDS; ci++) {
-                    short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
-                    short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
-                    short cy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (unsigned)ci*2u);
-                    short ch = *(short __far *)MK_FP(SEL_KCB, KCB_WND_H_OFF  + (unsigned)ci*2u);
-                    if (cw > 0 && ch > 0) {
-                        excl_x1 = (int)cx; excl_x2 = (int)cx + (int)cw;
-                        excl_y1 = (int)cy; excl_y2 = (int)cy + (int)ch;
-                        break;
-                    }
-                }
-            }
+            /* Wyklucz child windows (status bar) ze screen blit */
+            ExclRect excl[KCB_MAX_HWNDS]; int nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
             for (row = 0; row < h; row++) {
                 int sy = ySrc + row;
                 int dy = yDst + row;
@@ -784,9 +810,7 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                     unsigned char __far *bp;
                     if (sx < 0 || sx >= dc_wC) continue;
                     if (dx < 0 || dx >= 640) continue;
-                    if (excl_x1 >= 0 &&
-                        dx >= excl_x1 && dx < excl_x2 &&
-                        dy >= excl_y1 && dy < excl_y2) continue;
+                    if (excl_contains(excl, nexcl, dx, dy)) continue;
                     buf_off = (unsigned long)sy * dc_pitchC + (unsigned long)sx * 4u;
                     bp = (unsigned char __far *)MK_FP(
                             buf_sel + (unsigned)(buf_off >> 16) * 8u,
