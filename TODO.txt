@@ -670,9 +670,38 @@ SKI.EXE: WM_MOUSEMOVE -> oblicza kat ruchu wzgledem srodka okna.
 [DONE] 17a: Inicjalizacja myszy PS/2 w loaderze (real mode, przed PM)
         Implementacja: loader.c init_mouse_ps2() z ps2_wait_write() i ps2_read_byte().
         Sekwencja: 0xD4+0xFF (reset) -> ACK+0xAA+0x00, 0xD4+0xF4 (enable streaming) -> ACK.
-        PIC slave mask: 0xEF (bit 4=0 = IRQ12 odblokowany), IDT[0x2C] = irq12_handler.
-        KCB zerowane: 19 bajtow (272..290 = 10 klawiatura + 9 mysz).
-        Uwaga: CCB read/write (0x64←0x20/0x60) powoduje hang w QEMU - zostawic domyslne.
+        IDT[0x2C] = irq12_handler, loader zeruje KCB bajty 272..290.
+
+        BUG: klawiatura przestawala dzialac gdy mysz wchodzila w okno QEMU.
+        Przyczyna: trzy warunki musza byc spelnionia jednoczesnie zeby IRQ12 docieralo do CPU:
+          (1) PIC master IRQ2 odblokowany (cascade do slave PIC)
+          (2) PIC slave IRQ12 odblokowany
+          (3) PS/2 CCB bit1=1 (AUX IRQ enable)
+        Bez (1): slave PIC odciety od CPU -> IRQ12 nigdy nie dociera.
+        Bez (3): kontroler PS/2 produkuje bajty myszy ale nie generuje przerwania.
+        Efekt: bufor PS/2 (1 bajt) zapelniany przez pakiety myszy -> klawiatura nie moze
+          wstawic danych -> IRQ1 przestaje strzelic -> keyboard martwy.
+
+        Naprawka PIC master mask: 0xFC -> 0xF8 (odblokowuje IRQ2 cascade do slave).
+          0xFC = 11111100b - bit2=1 blokowal IRQ2 (cascade).
+          0xF8 = 11111000b - bit0=IRQ0, bit1=IRQ1, bit2=IRQ2/cascade - wszystkie on.
+
+        Naprawka CCB (AUX IRQ enable):
+          Dlaczego nie w real mode (loader.c init_mouse_ps2):
+            - Wariant read-modify-write (0x64<-0x20, odczyt, 0x64<-0x60, zapis):
+              BIOS INT9 (handler IRQ1) zjada bajt odpowiedzi komendy 0x20 zanim nasz
+              kod zdazy go odczytac -> ps2_read_byte() czeka w nieskonczonosc.
+            - Wariant direct write (0x64<-0x60, 0x60<-0x47) w real mode:
+              Mysz jest juz w streaming mode (po 0xF4) -> natychmiast flood IRQ12 ->
+              BIOS INT 74h (domyslnie IRET lub niezainicjalizowany) nie obsługuje danych
+              -> hang.
+          Rozwiazanie: zapis CCB=0x47 w pm_call.asm po konfiguracji PIC+IDT, przed STI.
+            W tym momencie IF=0 -> zadne IRQ12 nie dociera zanim irq12_handler gotowy.
+            0x47 = 01000111b: bit0=kbd_irq, bit1=aux_irq, bit2=self_test, bit6=translate.
+            Po STI naglowadzone pakiety myszy obsluzone natychmiast przez irq12_handler.
+
+        keyboard.c guard: sprawdza bit5 portu 0x64 (AUXDATA) przed odczytem 0x60 -
+          zapobiega interpretacji danych myszy jako scancode przy sporadycznym IRQ1.
 
 [DONE] 17b: mouse.c - IRQ12 handler w C (wzorem keyboard.c)
         Kompilacja: wcc -ms -q -zl -s mouse.c (kod w _TEXT, NEAR call z asm).
@@ -705,7 +734,11 @@ SKI.EXE: WM_MOUSEMOVE -> oblicza kat ruchu wzgledem srodka okna.
 
 Tests (STEP17/):
   run_skitest.sh    : PASSED (rendering pipeline, WM_PAINT)
-  run_mouse_test.sh : PASSED (MOUSE: PS/2 init OK, brak CPU reset, WM_PAINT po zdarzeniach)
+  run_kbd_test.sh   : PASSED (6 VK: Up/Down/Left/Right/F1/Esc)
+  run_mouse_test.sh : PASSED (15 zdarzen przeplatanych mysz+klawiatura, MOUSE init OK,
+                               brak CPU reset - weryfikuje koegzystencje IRQ1+IRQ12)
+  Uwaga: QEMU -display none: mouse_move nie generuje PS/2 IRQ12 (headless ograniczenie).
+         sendkey DZIALA headless. Test interaktywny (SDL): mysz i klawiatura dzialaja razem.
 
 ---------------------------------------------------------------------------
 ETAP 18 - Ogolny loader zasobow NE (RT_MENU, RT_DIALOG, RT_ICON, RT_ACCEL) [TODO]
