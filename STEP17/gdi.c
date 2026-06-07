@@ -335,7 +335,8 @@ static int excl_contains(const ExclRect *excl, int n, int x, int y)
 }
 
 static void draw_char_gdi(unsigned char ch, unsigned x, unsigned y,
-                           unsigned char br, unsigned char bg, unsigned char bb)
+                           unsigned char br, unsigned char bg, unsigned char bb,
+                           const ExclRect *excl, int nexcl)
 {
     unsigned row, bit;
     unsigned long row_base = (unsigned long)y * VESA_PITCH
@@ -344,11 +345,15 @@ static void draw_char_gdi(unsigned char ch, unsigned x, unsigned y,
         unsigned char fbyte = *((unsigned char __far *)
             MK_FP(SEL_FONT, (unsigned)ch * FONT_H + row));
         unsigned long edi = row_base + (unsigned long)row * VESA_PITCH;
+        int dy = (int)y + (int)row;
         for (bit = 8; bit-- > 0; ) {
-            if (fbyte & (1 << bit))
-                draw_pixel(edi, br, bg, bb);        /* foreground */
-            else
-                draw_pixel(edi, 0xFF, 0xFF, 0xFF);  /* background = bialy (OPAQUE) */
+            int dx = (int)x + (int)(8u - 1u - bit);
+            if (!excl_contains(excl, nexcl, dx, dy)) {
+                if (fbyte & (1 << bit))
+                    draw_pixel(edi, br, bg, bb);        /* foreground */
+                else
+                    draw_pixel(edi, 0xFF, 0xFF, 0xFF);  /* background = bialy (OPAQUE) */
+            }
             edi += VESA_BPP;
         }
     }
@@ -361,6 +366,7 @@ BOOL __far __pascal TextOut(HDC hdc, int x, int y,
                              const char __far *s, int len)
 {
     int i;
+    ExclRect excl[KCB_MAX_HWNDS]; int nexcl;
     { static unsigned char s_to = 0; if (!s_to) { serial_puts("TO!\n"); s_to=1; } }
     /* Dekoduj origin z HDC (inline - near ptr na stos nie dziala gdy DS!=SS) */
     if ((unsigned)hdc & 0x4000u) {
@@ -369,14 +375,19 @@ BOOL __far __pascal TextOut(HDC hdc, int x, int y,
         short __far *koy = (short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (hwnd_v-1u)*2u);
         x += *kox;
         y += *koy;
+        nexcl = 0;  /* HWND DC rysuje wewnatrz swojego okna - bez exclusion */
     } else if ((unsigned)hdc & 0x8000u) {
         x += (int)(((unsigned)hdc >> 7) & 0xFFu) * 4;
         y += (int)((unsigned)hdc & 0x7Fu) * 4;
+        nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
+    } else {
+        nexcl = get_child_excl(excl, KCB_MAX_HWNDS);  /* screenDC: chron child windows */
     }
     for (i = 0; i < len; i++)
         draw_char_gdi((unsigned char)s[i],
                       (unsigned)(x + i * FONT_W), (unsigned)y,
-                      0x00, 0x00, 0x00);  /* czarny tekst */
+                      0x00, 0x00, 0x00,
+                      excl, nexcl);
     return 1;
 }
 
