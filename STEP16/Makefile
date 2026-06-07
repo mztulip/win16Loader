@@ -294,6 +294,39 @@ run-qemu: boot.img
 run: boot.img
 	bochs -f bochsrc -q
 
+# -------------------------------------------------------
+# KBD_TEST.EXE - test klawiatury (WM_KEYDOWN -> OutputDebugString)
+# -------------------------------------------------------
+kbd_test.obj: kbd_test.c
+	$(WCC) -ms -q -zl -s $< -fo=$@
+
+kbd_test.exe: kbd_test.obj libstubs.obj
+	$(WLINK) system windows name $@ file kbd_test.obj,libstubs.obj \
+	    import OUTPUTDEBUGSTRING KERNEL.115 \
+	    import REGISTERCLASS     USER.57 \
+	    import CREATEWINDOW      USER.41 \
+	    import SHOWWINDOW        USER.42 \
+	    import UPDATEWINDOW      USER.124 \
+	    import PEEKMESSAGE       USER.109 \
+	    import GETMESSAGE        USER.108 \
+	    import TRANSLATEMESSAGE  USER.113 \
+	    import DISPATCHMESSAGE   USER.114 \
+	    import DEFWINDOWPROC     USER.107 \
+	    import POSTQUITMESSAGE   USER.6 \
+	    option nodefaultlibs option start=app_entry_ option quiet
+
+boot_kbd.img: kernel.exe user.exe gdi.exe loader.exe kbd_test.exe fdconfig.sys $(FDBOOT)
+	cp $(FDBOOT) boot_kbd.img
+	mcopy -i boot_kbd.img -o fdconfig.sys          ::fdconfig.sys
+	mdel  -i boot_kbd.img ::fdauto.bat 2>/dev/null || true
+	printf '@echo off\r\nLOADER.EXE KBD_TEST.EXE\r\n' | mcopy -i boot_kbd.img - ::fdauto.bat
+	mcopy -i boot_kbd.img kernel.exe               ::kernel.exe
+	mcopy -i boot_kbd.img user.exe                 ::user.exe
+	mcopy -i boot_kbd.img gdi.exe                  ::gdi.exe
+	mcopy -i boot_kbd.img kbd_test.exe             ::kbd_test.exe
+	mcopy -i boot_kbd.img loader.exe               ::loader.exe
+	@echo "[OK] boot_kbd.img gotowy"
+
 clean:
 	rm -f kernel.exe kernel.obj
 	rm -f user.exe user.obj
