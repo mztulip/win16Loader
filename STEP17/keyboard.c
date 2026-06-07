@@ -36,6 +36,9 @@ void irq1_c(void)
     unsigned char __far *kcb;
     unsigned char head, tail, next_tail;
 
+    /* bit 5 statusu (AUXDATA): bajt w 0x60 pochodzi od myszy, nie klawiatury */
+    if (io_inb(0x64) & 0x20) return;
+
     scancode = io_inb(0x60);
     if (scancode & 0x80) return;   /* key release - ignoruj */
 
