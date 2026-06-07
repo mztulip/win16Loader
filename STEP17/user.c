@@ -689,8 +689,17 @@ BOOL __far __pascal UpdateWindow(HWND hwnd)
 
 BOOL __far __pascal InvalidateRect(HWND hwnd, const RECT __far *lpRect, BOOL bErase)
 {
+    int i;
     (void)lpRect; (void)bErase;
     push_msg(hwnd, WM_PAINT, 0, 0L);
+    /* Jesli lpRect==NULL (cale okno): przekaz WM_PAINT do wszystkich dzieci.
+     * Windows 3.1: InvalidateRect rodzica invaliduje zachodzace okna potomne. */
+    if (!lpRect) {
+        for (i = 0; i < MAX_WINDOWS; i++) {
+            if (g_windows[i].used && g_windows[i].parent == hwnd)
+                push_msg(g_windows[i].hwnd, WM_PAINT, 0, 0L);
+        }
+    }
     return 1;
 }
 
