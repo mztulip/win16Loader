@@ -725,14 +725,44 @@ Stan obecny (STEP17):
 
 Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
 
-[ ] 18a: find_ne_resource() - generyczny dostep do tablicy zasobow NE
-        Problem: loader.c ma dwa hardcodowane parsery tablicy zasobow (SKI).
-        Rozwiazanie: wydzielic generyczna funkcje:
+Plik implementacji: rc_loader.c
+        Caly kod loadera zasobow NE bedzie w osobnym pliku rc_loader.c,
+        kompilowanym razem z loader.exe (wcc -ml -q rc_loader.c -fo=rc_loader.obj).
+        Nie modyfikujemy loader.c poza wywolaniami rc_loader API.
 
-          int find_ne_resource(unsigned ne_off, unsigned short type_id,
-                               unsigned short res_id,
-                               unsigned long *out_file_off,
-                               unsigned short *out_size);
+        Publiczne API rc_loader.c (wywolywane z loader.c):
+          void     rc_init(int fhandle, unsigned ne_off);
+            Inicjalizacja: zapamietuje uchwyt pliku i offset NE w pliku.
+          int      rc_load_all(void);
+            Wczytuje wszystkie obsługiwane typy zasobow do RSC_HEAP.
+            Wywolywane raz po otwarciu pliku apki, przed wejsciem w PM.
+          unsigned char __far *rc_get(unsigned short type, unsigned short id);
+            Zwraca far ptr do danych zasobu lub NULL (wywolywane z PM przez user.c).
+          unsigned short rc_size(unsigned short type, unsigned short id);
+            Zwraca rozmiar danych zasobu w bajtach (0 = nie znaleziony).
+
+        Wewnetrzne (static w rc_loader.c):
+          static int find_ne_resource(...)  - parser tablicy zasobow NE
+          static struct rsc_dir_entry rsc_dir[16] - katalog wczytanych zasobow
+          static unsigned char __far *rsc_heap - far ptr do bufora zasobow
+
+        Makefile STEP18:
+          rc_loader.obj: rc_loader.c rc_loader.h
+              $(WCC) -ml -q $< -fo=$@
+          loader.exe: loader.c pm_call.obj serial.obj pm_helpers.obj \
+                      keyboard.obj mouse.obj rc_loader.obj
+              $(WCL) -ml -l=dos -q ... rc_loader.obj -fe=loader.exe
+
+        rc_loader.h: naglowek z deklaracjami rc_init, rc_load_all, rc_get, rc_size.
+          Includowany przez loader.c i user.c (user.c uzywa rc_get przez thunk).
+
+[ ] 18a: rc_loader.c - find_ne_resource() - generyczny dostep do tablicy zasobow NE
+        Problem: loader.c ma dwa hardcodowane parsery tablicy zasobow (SKI).
+        Rozwiazanie: wydzielic do rc_loader.c generyczna funkcje:
+
+          static int find_ne_resource(unsigned short type_id, unsigned short res_id,
+                                      unsigned long *out_file_off,
+                                      unsigned short *out_size);
             Zwraca 1 jesli znaleziony; out_file_off = offset w pliku (bajty),
             out_size = rozmiar w bajtach.
             type_id: 0x8002=RT_BITMAP, 0x8004=RT_MENU, 0x8005=RT_DIALOG,
@@ -748,34 +778,40 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
             Rozmiar = rnLength << rscAlignShift
             rnID: bit15=1 -> ID liczbowy (rnID & 0x7FFF); bit15=0 -> offset stringa
 
-        Implementacja: w loader.c jako static funkcja; uzyc do refaktoru
-          load_ski_strings i load_ski_bitmaps (zastapic powielony kod).
+        Uzyc do refaktoru load_ski_strings i load_ski_bitmaps w loader.c:
+          zastapic powielony parser wywolaniem find_ne_resource().
 
-[ ] 18b: Bufor zasobow w pamieci - RSC_HEAP
+[ ] 18b: rc_loader.c - RSC_HEAP - bufor zasobow w pamieci
         Zasoby muszą byc dostepne w runtime (LoadMenu/DialogBox wywoluja sie z PM).
         Problem: KCB za maly (256B), SEL_BITMAPS zajety przez sprity SKI.
 
-        Nowy segment: RSC_HEAP = GlobalAlloc(max 8KB) alokowany przy starcie loadera.
+        Nowy segment: RSC_HEAP = _dos_allocmem(512 paragrafy = 8KB).
           Przechowuje wczytane zasoby z katalogu: {type, id, offset_w_RSC_HEAP, size}
           Max 16 zasobow (menu + dialog + akcelerator + ikony apki).
-          GDT selector: SEL_RSC = 0x130 (zaraz po dynamicznych slotach GlobalAlloc)
-            lub dynamicznie alokowany przez GlobalAlloc.
+          GDT selector: SEL_RSC - nowy wpis, patchowany przez patch_gdt_c()
+            lub alokowany przez GlobalAlloc przy starcie.
 
-        Struktura katalogu zasobow (w loaderze, nie w GDT):
-          static struct { unsigned short type; unsigned short id;
-                          unsigned short off;  unsigned short size; } rsc_dir[16];
-          static unsigned rsc_dir_n;
-          static unsigned char far *rsc_heap_ptr;  /* far ptr do bufora */
+        Struktura katalogu (static w rc_loader.c):
+          #define RSC_DIR_MAX 16
+          static struct {
+              unsigned short type;
+              unsigned short id;
+              unsigned short off;   /* offset w RSC_HEAP */
+              unsigned short size;
+          } rsc_dir[RSC_DIR_MAX];
+          static unsigned      rsc_dir_n = 0;
+          static unsigned char __far *rsc_heap = NULL;  /* far ptr: SEL_RSC:0 */
 
-        API (C, wywolywane z user.c przez eksportowany thunk lub bezposrednio):
-          unsigned char far *rsc_get(unsigned short type, unsigned short id);
+        API publiczne (deklarowane w rc_loader.h):
+          unsigned char __far *rc_get(unsigned short type, unsigned short id);
             Zwraca far ptr do danych zasobu lub NULL.
+          unsigned short rc_size(unsigned short type, unsigned short id);
 
         Alternatywa uproszczona: zasoby wczytywane na zadanie bezposrednio z pliku
           (DOS INT 21h read w real mode -> wymaga przejscia RM/PM).
           Rekomendacja: bufory zasobow w pamieci (prostsze niz RM/PM switch).
 
-[ ] 18c: RT_MENU wczytywanie + LoadMenu/GetMenu stubs
+[ ] 18c: rc_loader.c - RT_MENU wczytywanie + LoadMenu/GetMenu stubs
         Po refaktorze (18a): przy ladowaniu apki wczytaj RT_MENU do RSC_HEAP:
           - Znajdz wszystkie RT_MENU w tablicy zasobow
           - Wczytaj surowe bajty do RSC_HEAP
@@ -784,16 +820,16 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
           DestroyMenu (USER.152): no-op
         Pelne parsowanie RT_MENU i rysowanie menu bar: patrz ETAP 19g.
 
-[ ] 18d: RT_DIALOG wczytywanie
+[ ] 18d: rc_loader.c - RT_DIALOG wczytywanie
         Wczytaj RT_DIALOG do RSC_HEAP przy ladowaniu apki.
         Dostep przez rsc_get(RT_DIALOG, id) w DialogBox (ETAP 19h).
 
-[ ] 18e: RT_ACCELERATOR wczytywanie + LoadAccelerators stub
+[ ] 18e: rc_loader.c - RT_ACCELERATOR wczytywanie + LoadAccelerators stub
         Wczytaj RT_ACCELERATOR do RSC_HEAP.
         LoadAccelerators (USER.177): znajdz w RSC_HEAP, zwroc HACCEL
           (na razie: same stubs; faktyczne TranslateAccelerator w ETAP 19g).
 
-[ ] 18f: RT_ICON + RT_STRING refaktor
+[ ] 18f: rc_loader.c - RT_ICON + RT_STRING refaktor
         RT_ICON: wczytaj 1. ikone aplikacji do RSC_HEAP.
           LoadIcon(hInst, MAKEINTRESOURCE(n)): zwroc ptr do danych icon (nie rysuj jeszcze).
         RT_STRING: zachowac w KCB (jak dotychczas) ale uzyc find_ne_resource().
