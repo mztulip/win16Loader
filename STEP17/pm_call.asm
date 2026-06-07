@@ -508,6 +508,22 @@ pm16_call_app:
     out  0x21, al
     mov  al, 0xEF       ; maska slave: wlacz IRQ12 (mysz PS/2, bit 4=0)
     out  0xA1, al
+    ; Ustaw CCB kontrolera PS/2: bit0=kbd_irq, bit1=aux_irq, bit6=translate.
+    ; Robimy to po IDT (irq12_handler gotowy) i przed STI - bez odczytu CCB
+    ; (unikamy problemu gdy BIOS INT9 zjada bajt odpowiedzi komendy Read CCB 0x20).
+    ; 0x47 = 01000111b: kbd_irq(0) | aux_irq(1) | self_test(2) | translate(6)
+.ccb_wait1:
+    in   al, 0x64
+    test al, 0x02       ; IBF: czekaj az bufor wejscia pusty
+    jnz  .ccb_wait1
+    mov  al, 0x60       ; Write CCB
+    out  0x64, al
+.ccb_wait2:
+    in   al, 0x64
+    test al, 0x02
+    jnz  .ccb_wait2
+    mov  al, 0x47       ; kbd_irq | aux_irq | translate
+    out  0x60, al
     ; PIT: pozostaje domyslny 18.2 Hz (divisor=65536 -> ~55ms/tick)
     ; Przeprogramowanie do wyzszej czestotliwosci powoduje overflow w SKI.EXE.
     sti                 ; wlacz przerwania: IRQ0 -> IDT[0x20] -> irq0_handler
