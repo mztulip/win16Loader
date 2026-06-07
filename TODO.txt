@@ -707,6 +707,261 @@ Tests (STEP17/):
   run_skitest.sh    : PASSED (rendering pipeline, WM_PAINT)
   run_mouse_test.sh : PASSED (MOUSE: PS/2 init OK, brak CPU reset, WM_PAINT po zdarzeniach)
 
+---------------------------------------------------------------------------
+ETAP 18 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [TODO]
+---------------------------------------------------------------------------
+Cel: Win16 app zbudowana z Watcom clibs (WinMain + WS_OVERLAPPEDWINDOW) uruchamia
+     sie i pokazuje okno z paskiem tytulu, przyciskami min/max/zamknij, ramka.
+     Przyciski dzialaja (zamknij konczy program). About dialog jako bonus.
+
+Referencja: STEP18/win16_example_app/ i STEP18/win16_example_app2/
+  Kluczowe API uzywane przez te aplikacje:
+    WinMain (zamiast app_entry), WS_OVERLAPPEDWINDOW, CreateWindowEx,
+    GetSystemMenu, AppendMenu/InsertMenu, LoadAccelerators, TranslateAccelerator,
+    WM_SYSCOMMAND (SC_CLOSE/SC_MINIMIZE/SC_MAXIMIZE), WM_GETMINMAXINFO,
+    WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_CLOSE, DialogBox, EndDialog.
+
+[ ] 18a: WinMain - weryfikacja i fix startu Watcom clibs
+        Watcom 'system windows' uzyw startupa C0W.obj ktory:
+          1. Wywoluje InitTask(KERNEL.91) - zwraca AX=cx, BX=heap, DI=hInst, SI=hPrevInst
+          2. Wywoluje WaitEvent(KERNEL.30) - zwraca 0
+          3. Odpakuje nCmdShow z InitTask result
+          4. Wywoluje WinMain(hInst, hPrevInst, lpCmdLine, nCmdShow)
+        Roznica wzgledem app_entry: STEP17 apps uzywa custom app_entry_, nie WinMain.
+        Win1App/Win16App uzywaja WinMain - clibs przekazuje sterowanie do WinMain
+        automatycznie po InitTask. To wymaga:
+          - InitTask (KERNEL.91) zwraca poprawne wartosci w rejestrach (juz zrobiony w libstubs.asm)
+          - WaitEvent (KERNEL.30) zwraca 0 (juz zrobiony)
+          - Watcom clibs szuka '__WinMain' w kodzie aplikacji (symbol z exportu NE)
+        Krok: zaladuj Win1App.exe bez zmian, sprawdz serial log czy WinMain jest wywolany.
+        Jezeli brak WinMain: sprawdz NE entry point (seg:off) i czy InitTask odpowiada ABI.
+        TODO szczegolowy:
+          [ ] Zidentyfikuj NE entry point Win1App.exe (ne_hdr.ne_csip - seg:off startupa)
+          [ ] Sprawdz czy InitTask zwraca DI=hInstance (SEL_APP_DATA = 0x40)
+          [ ] Sprawdz czy clibs uruchamia WinMain po InitTask i WaitEvent
+          [ ] Ewentualnie: wstrzyknac stub GetCommandLine (KERNEL.83) jesli clibs go woła
+
+[ ] 18b: Rozszerzenie danych okna - styl, tytul, stan
+        Aktualnie g_windows[] nie przechowuje: style, title, state.
+        GetClientRect zwraca raw w/h bez odjecia NC area.
+
+        Dodac do struct g_windows[]:
+          unsigned long style;           /* WS_OVERLAPPEDWINDOW etc. */
+          char title[64];               /* tytul okna (z CreateWindow lpWindowName) */
+          unsigned char state;          /* 0=normal, 1=minimized, 2=maximized */
+
+        NC metryki (stale, Windows 3.1 styl):
+          CAPTION_H = 20    /* px: wysokosc paska tytulu */
+          BORDER_W  = 4     /* px: szerokosc ramki (WS_THICKFRAME) */
+          BORDER_W_THIN = 1 /* px: ramka bez WS_THICKFRAME */
+          BTN_W = 18        /* px: szerokosc przycisku min/max */
+          SYSMENU_W = 18    /* px: szerokosc przycisku sysmenu */
+
+        Dla okna z WS_CAPTION: client area = window minus NC:
+          client_x = window_x + BORDER_W + SYSMENU_W (... + inne) ? NIE - standard:
+          client origin X = window_x + BORDER_W
+          client origin Y = window_y + BORDER_W + CAPTION_H
+          client W = window_w - 2*BORDER_W
+          client H = window_h - 2*BORDER_W - CAPTION_H
+
+        GetClientRect: jezeli (style & WS_CAPTION) -> zwroc client W/H (nie window W/H).
+        KCB wnd_ox/wnd_oy: wskazuja client origin (window + NC offset).
+
+        WM_NCCREATE (0x0081): wysylany przez CreateWindow PRZED WM_CREATE.
+          DefWindowProc musi obslugiwac (ustawic tytul w window entry).
+        WM_NCCALCSIZE (0x0083): wysylany po WM_NCCREATE, apka moze zmodyfikowac client rect.
+          DefWindowProc zwraca default (NC area = CAPTION_H + BORDER_W*2).
+
+        CW_USEDEFAULT (0x8000 lub (int)0x8000): pozycja/rozmiar domyslny.
+          Jezeli x==CW_USEDEFAULT: uzyj x=10, y=10 (kaskada lub stale).
+          Jezeli w==CW_USEDEFAULT: uzyj w=320, h=200.
+
+        CreateWindowEx (USER.452): jak CreateWindow ale z dwExStyle jako 1. param.
+          Stub: ignoruj dwExStyle, wywolaj CreateWindow.
+
+[ ] 18c: Rysowanie chrome okna (WM_NCPAINT)
+        Win3.1 styl (bez 3D shadow z Win95):
+          - Zewnetrzna ramka: 1px czarna (0x000000)
+          - Wewnetrzna ramka (WS_THICKFRAME): 3px szara (0xC0C0C0)
+          - Pasek tytulu: prostokat (CAPTION_H px) w kolorze aktywnym (0x000080 navy)
+            lub nieaktywnym (0x808080 gray) - uproszczenie: zawsze aktywny
+          - Tytul okna: bialy tekst (0xFFFFFF), PSF font 8x16, wycentrowany pionowo
+          - Przycisk sysmenu (lewy): 18x18, szary (0xC0C0C0), z "-" lub "=" glyph
+          - Przycisk minimize (prawy): 18x18, szary, z "_" glyph
+          - Przycisk maximize (prawy-1): 18x18, szary, z "^" lub "[]" glyph
+            (Win3.1 ma min i max jako trojkaty - u nas "_" i "^" z fontu)
+
+        Implementacja:
+          Dodac do gdi.c funkcje (wywolywane z user.c, nie eksportowane):
+            void draw_window_chrome(HWND hwnd);
+              - rysuje bezposrednio do LFB (SEL_VESA) w window rect
+              - nie uzywa DC/thunkow - bezposredni zapis do framebuffera
+
+          Alternatywnie: rysowac przez screen DC (HDC=1) z PatBlt/TextOut w gdi.c.
+          Rekomendacja: funkcja draw_window_chrome() w gdi.c eksportowana dla user.c.
+
+        WM_NCPAINT (0x0085): DefWindowProc wywoluje draw_window_chrome.
+          ShowWindow → InvalidateRect → GetMessage → WM_PAINT → BeginPaint →
+          (WM_NCPAINT wywolywany przez BeginPaint lub ShowWindow).
+
+        Kolejnosc zdarzen przy ShowWindow:
+          1. ShowWindow wywoluje draw_window_chrome (NC area)
+          2. Wysyla WM_PAINT do apki
+          3. Apka rysuje tresc w client area
+
+        Uwaga: draw_window_chrome pisze do LFB przez far pointer (32-bit).
+          Offset w LFB: flat_off = (abs_y * pitch) + abs_x * 3  (24bpp, pitch=1920).
+
+[ ] 18d: Mouse NC hit testing + interakcja
+        WM_NCHITTEST (0x0084): wParam=0, lParam=MAKELONG(screen_x, screen_y)
+          Odpowiedz: HTCLIENT=1, HTCAPTION=2, HTCLOSE=20, HTMINBUTTON=8, HTMAXBUTTON=9,
+            HTSYSMENU=3, HTBORDER=18, HTLEFT=10, HTRIGHT=11, HTTOP=12, HTBOTTOM=15, etc.
+
+        DefWindowProc musi obslugiwac WM_NCHITTEST:
+          Dla (style & WS_CAPTION):
+            - (x,y) w pasku tytulu -> HTCAPTION
+            - (x,y) na przycisku zamknij (prawy gorny rog caption) -> HTCLOSE
+            - (x,y) na przycisku minimize -> HTMINBUTTON
+            - (x,y) na przycisku maximize -> HTMAXBUTTON
+            - (x,y) w sysmenu button (lewy caption) -> HTSYSMENU
+          Jezeli (x,y) w client area -> HTCLIENT
+          Ramka (WS_THICKFRAME) -> HTLEFT/HTRIGHT/HTTOP/HTBOTTOM (resize)
+
+        WM_NCLBUTTONDOWN (0x00A1): lParam=MAKELONG(screen_x, screen_y), wParam=HT_CODE
+          DefWindowProc obsluguje:
+            HTCLOSE     -> PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0)
+            HTMINBUTTON -> PostMessage(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0)
+            HTMAXBUTTON -> PostMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0)
+            HTCAPTION   -> [patrz 18e] drag move (uproszczenie: pomiń ruch)
+            HTSYSMENU   -> pomiń (brak prawdziwego menu popup)
+
+        Generowanie NC mouse events z IRQ12:
+          PeekMessage/GetMessage: po sprawdzeniu mouse_poll():
+            - jesli mouse_changed -> oblicz HT code przez hittest(abs_x, abs_y)
+            - jezeli HT != HTCLIENT: generuj WM_NCHITTEST + WM_NCLBUTTONDOWN/UP
+            - jezeli HT == HTCLIENT: generuj WM_MOUSEMOVE jak dotychczas
+
+[ ] 18e: SC_CLOSE + WM_CLOSE + SC_MINIMIZE + SC_MAXIMIZE w DefWindowProc
+        DefWindowProc WM_SYSCOMMAND:
+          SC_CLOSE (0xF060):
+            SendMessage(hwnd, WM_CLOSE, 0, 0)
+          WM_CLOSE (0x0010) w DefWindowProc:
+            DestroyWindow(hwnd)
+          SC_MINIMIZE (0xF020):
+            g_windows[].state = 1 (zminimalizowane)
+            Ukryj tresc okna (narysuj ikone lub pust obszar)
+            Narysuj ikone (uproszczenie: maly prostokat 160x24 na dole ekranu z tytulem)
+          SC_MAXIMIZE (0xF030):
+            g_windows[].state = 2
+            Zapisz poprzedni x,y,w,h do restore_rect
+            Rozsuń do pelnego ekranu: x=0,y=0,w=640,h=480
+            Przerysuj okno
+          SC_RESTORE (0xF120):
+            g_windows[].state = 0
+            Przywroc restore_rect
+            Przerysuj
+
+        DestroyWindow -> WM_DESTROY -> wyczyscic g_windows[] entry ->
+          Przerysuj obszar ekranu (PatBlt czarnym lub wzorem tla).
+
+[ ] 18f: GetSystemMenu + AppendMenu/InsertMenu + menu stubs
+        Cel: te API musza istniec (Win1App je wywoluje) ale nie musi byc pelny system menu.
+
+        Nowe exporty USER.EXE:
+          GetSystemMenu  (USER.25):  zwraca fake HMENU = (0xF000 | hwnd)
+          AppendMenu     (USER.411): no-op (zwroc TRUE)
+          InsertMenu     (USER.406): no-op (zwroc TRUE)
+          CheckMenuItem  (USER.154): no-op
+          EnableMenuItem (USER.155): no-op
+
+        Jezeli WM_SYSCOMMAND z ID_HELP_ABOUT (200) - apka obsluguje to sama.
+        My musimy tylko dostarczyc SC_CLOSE z przycisku zamknij.
+
+        Bonus (opcjonalnie): prosta implementacja systemu menu popup (uproszczona).
+          Priorytetu niska - wazniejszy jest button zamknij.
+
+[ ] 18g: LoadAccelerators + TranslateAccelerator (stubs)
+        Nowe exporty USER.EXE:
+          LoadAccelerators  (USER.177): zwroc fake HACCEL (np. 0xACC0 | uID_low)
+          TranslateAccelerator (USER.99): zawsze zwroc FALSE (brak dopasowania)
+
+        Win1App wywoluje TranslateAccelerator w petli głównej:
+          if (!TranslateAccelerator(hWnd, hAccel, &msg)) { TranslateMessage; DispatchMessage }
+        Jezeli zwracamy FALSE -> TM/DM dziala normalnie. Klawiatura Ctrl+A nie wywola
+        ID_HELP_ABOUT, ale okno normalnie zamknie sie przez inne mechanizmy.
+
+[ ] 18h: DialogBox + EndDialog (minimalny modal dialog)
+        Win1App/Win16App uzywaja DialogBox dla "About" dialog.
+        Bez tego: apka dziala (pomija About), ale nie pokazuje dialogu po Ctrl+A.
+
+        Nowe exporty USER.EXE:
+          DialogBox (USER.87): tworzy modal dialog, zwraca kod zakonczenia
+          EndDialog (USER.88): ustawia flage konca dialogu, zwraca do DialogBox
+
+        Minimal implementation:
+          DialogBox:
+            1. Znajdz RT_DIALOG (type=5) w zasobach apki o danym ID
+            2. Sparsuj dialog template: x,y,w,h, DlgProc style, tytul, controls
+            3. Przydziel HWND dla dialogu (parent ma jego okno zablokowane)
+            4. Wywolaj DlgProc(hwnd, WM_INITDIALOG, 0, 0)
+            5. Uruchom nested GetMessage loop (dopoki g_dialog_result == -1)
+            6. Zniszcz dialog, zwroc g_dialog_result
+          EndDialog(hwndDlg, retCode):
+            Ustaw g_dialog_result = retCode -> wyjdz z nested loop
+
+        Dialog template format (Win16):
+          Naglowek: dtStyle(DWORD) dtItemCount(BYTE) dtX dtY dtCX dtCY (WORD each)
+          Tytul: null-terminated string
+          Font (jesli DS_SETFONT): pointsize(WORD) + name(string)
+          Kontrolki: dla kazdego:
+            dtilStyle(DWORD) dtilX dtilY dtilCX dtilCY(WORD) dtilID(WORD)
+            dtilClass(string lub atom) dtilText(string) dtilInfo(BYTE)
+
+        Na poczatek: bez rysowania kontrolek - tylko wywolac DlgProc z WM_INITDIALOG
+          i czekac na EndDialog. Tworzy widoczny czarny prostokat.
+        Pelne rysowanie kontrolek (static text, buttons): osobny podkrok.
+
+[ ] 18i: Pelne menu (RT_MENU) - opcjonalne / ETAP 19
+        Parsowanie zasobu RT_MENU (type=4):
+          Menu template: mtOption(WORD) mtID(WORD, 0 for popup) mtString(string)
+          MF_END (0x80) = ostatni element.
+        Rysowanie menu bar pod paskiem tytulu.
+        Klikniecie menu bar -> popup z itemami.
+        WM_COMMAND(id) do WndProc po wyborze item.
+        Bez tego: apka nie pokazuje menu (File/Help), ale dziala przez system.
+
+        Win16 USER ordinals dla menu:
+          CreateMenu (USER.151), DestroyMenu (USER.152), GetMenu (USER.157)
+          DrawMenuBar (USER.160), HiliteMenuItem (USER.162)
+          GetMenuItemCount (USER.263)
+
+Kolejnosc priorytetow do uruchomienia Win1App.exe z oknem i przyciskiem zamknij:
+  1. 18a (WinMain startup) - bez tego nic nie dziala
+  2. 18b (styl+tytul+NC metryki) - podstawa dla rysowania
+  3. 18c (rysowanie chrome) - wizualne okno
+  4. 18d (NC hit testing) + 18e (SC_CLOSE) - klikanie przyciskow
+  5. 18f (GetSystemMenu/AppendMenu stubs) - bez tego Win1App crashuje na GetSystemMenu
+  6. 18g (LoadAccelerators/TranslateAccelerator stubs) - bez tego crash w petli
+
+Porownanie API STEP17 vs STEP18 (nowe exporty USER.EXE):
+  Ordinal | Funkcja              | Status STEP17
+  --------+----------------------+----------------
+  25      | GetSystemMenu        | BRAK
+  87      | DialogBox            | BRAK
+  88      | EndDialog            | BRAK
+  99      | TranslateAccelerator | BRAK
+  154     | CheckMenuItem        | BRAK
+  155     | EnableMenuItem       | BRAK
+  157     | GetMenu              | BRAK (lub stub)
+  177     | LoadAccelerators     | BRAK
+  406     | InsertMenu           | BRAK
+  411     | AppendMenu           | BRAK
+  452     | CreateWindowEx       | BRAK
+
+  Nowe KERNEL.EXE exporty (jezeli clibs ich potrzebuje):
+  83      | GetCommandLine?      | sprawdzic
+  GetModuleHandle?               | sprawdzic z NE import table
+
 NARZEDZIA
 ---------
 - Open Watcom (wcl, wlink)  - kompilacja i linkowanie Win16 / NE
