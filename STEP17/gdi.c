@@ -848,27 +848,6 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
     return 1;
 }
 
-/* ============================================================
- * clip_screen_x: klipuje zakres x/w omijajac child windows na ekranie (DC=1).
- * Klipuje tylko jezeli wiersz (y,h) zachodzi na child window (sprawdza takze Y).
- * Obsluguje tylko przypadek child window po prawej stronie rysowania.
- * ============================================================ */
-static void clip_screen_x(int *px, int *pw, int y, int h)
-{
-    int i;
-    for (i = 0; i < KCB_MAX_HWNDS; i++) {
-        short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)i * 2u);
-        short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)i * 2u);
-        short cy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (unsigned)i * 2u);
-        short ch = *(short __far *)MK_FP(SEL_KCB, KCB_WND_H_OFF  + (unsigned)i * 2u);
-        if (cw <= 0 || ch <= 0) continue;  /* slot pusty */
-        /* Klipuj x tylko jezeli prostokat y zachodzi na child window */
-        if (y + h <= (int)cy || y >= (int)cy + (int)ch) continue;
-        /* child window zajmuje x w zakresie [cx, cx+cw) */
-        if (*px < (int)cx && *px + *pw > (int)cx)
-            *pw = (int)cx - *px;  /* obetnij prawy bok */
-    }
-}
 
 /* ============================================================
  * ordinal 29: PatBlt - wypelnienie prostokata
@@ -934,14 +913,20 @@ BOOL __far __pascal PatBlt(HDC hdc, int x, int y, int w, int h,
     if (y < 0) { h += y; y = 0; }
     if (x + w > 640) w = 640 - x;
     if (y + h > 480) h = 480 - y;
-    /* Klipuj wokol child windows (DC=1 rysuje caly ekran bez klipowania okien) */
-    if ((unsigned)hdc == 1u) clip_screen_x(&x, &w, y, h);
     if (w <= 0 || h <= 0) return 1;
 
-    for (row = 0; row < h; row++) {
-        for (col = 0; col < w; col++) {
-            draw_pixel((unsigned long)(y + row) * VESA_PITCH +
-                       (unsigned long)(x + col) * VESA_BPP, rv, gv, bv);
+    {
+        ExclRect excl[KCB_MAX_HWNDS]; int nexcl = 0;
+        /* screen DC: chron child windows przed nadpisaniem (per-pixel, obsluguje tez x>=cx) */
+        if ((unsigned)hdc == 1u)
+            nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
+        for (row = 0; row < h; row++) {
+            for (col = 0; col < w; col++) {
+                int dx = x + col, dy = y + row;
+                if (excl_contains(excl, nexcl, dx, dy)) continue;
+                draw_pixel((unsigned long)dy * VESA_PITCH +
+                           (unsigned long)dx * VESA_BPP, rv, gv, bv);
+            }
         }
     }
     return 1;
