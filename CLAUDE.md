@@ -111,7 +111,7 @@ Win16 uses **cooperative** multitasking — tasks yield only via `GetMessage`/`P
 | `STEP17/user.c` | USER.EXE: okna, kolejka komunikatów, BeginPaint/EndPaint, DispatchMessage |
 | `STEP17/loader.c` | Ładowanie NE, inicjalizacja PM, IDT, PS/2 |
 | `STEP17/pm_call.asm` | Thunk INT 3Fh, IRQ1 (keyboard), IRQ12 (mouse), PIC maski |
-| `STEP15/skifree_graphics_analysis.txt` | **Pełna analiza** stosu graficznego SKI.EXE: DC map, trace gondola/skoczek, atlas 86 spriteów, adresy kluczowych funkcji |
+| `SKIFREE/skifree_graphics_analysis.txt` | **Pełna analiza** stosu graficznego SKI.EXE: DC map, trace gondola/skoczek, atlas 86 spriteów, adresy kluczowych funkcji |
 
 ### GDI BitBlt — przypadki (gdi.c)
 
