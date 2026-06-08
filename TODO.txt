@@ -740,6 +740,28 @@ Tests (STEP17/):
   Uwaga: QEMU -display none: mouse_move nie generuje PS/2 IRQ12 (headless ograniczenie).
          sendkey DZIALA headless. Test interaktywny (SDL): mysz i klawiatura dzialaja razem.
 
+Poprawki GDI/USER post-DONE (status bar rendering):
+
+[x] TextOut OPAQUE mode (Windows 3.1 default):
+      draw_char_gdi rysuje biale tlo dla pikseli nienalezacych do znaku.
+      Poprzednio: tylko foreground -> napisy na ekranie sie nakladaly (trail effect).
+      Poprawka: draw_pixel(0xFF,0xFF,0xFF) dla bit==0 (background = bialy).
+
+[x] InvalidateRect propagacja do child windows:
+      Po F2 (reset gry) SKI.EXE wywoluje InvalidateRect(hwnd_main, NULL).
+      Poprzednio: WM_PAINT trafialo tylko do hwnd_main, status bar nie byl
+        przerysowywany -> etykiety "Time:" znikaly po resecie.
+      Poprawka: gdy lpRect==NULL, user.c pushe WM_PAINT rowniez do wszystkich
+        child windows (g_windows[i].parent == hwnd).
+
+[x] PatBlt screenDC nadpisuje child window (status bar):
+      clip_screen_x chronila tylko przypadek: x_patblt < x_child i rect wykracza poza.
+      Gdy SKI.EXE kasonwalo stara pozycje sprite'a przy x>=500 (wewnatrz status bar),
+      warunek *px < cx byl falszywy -> brak klipowania -> ramka/tekst status bar
+      nadpisywany bielym wypelnieniem.
+      Poprawka: zamiast clip_screen_x - per-pixel excl_contains() (tak jak CaseC i
+        blit_sprite_hbm). clip_screen_x usuniete.
+
 ---------------------------------------------------------------------------
 ETAP 18 - Ogolny loader zasobow NE (RT_MENU, RT_DIALOG, RT_ICON, RT_ACCEL) [TODO]
 ---------------------------------------------------------------------------
