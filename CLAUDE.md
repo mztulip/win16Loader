@@ -100,3 +100,59 @@ Each segment entry: offset (in file alignment units), size, flags, min_alloc. Mu
 ## Multitasking model
 
 Win16 uses **cooperative** multitasking — tasks yield only via `GetMessage`/`PeekMessage`/`WaitMessage`. No preemptive timer switches between apps (unlike the 13ring3 kernel which uses IRQ0 round-robin).
+
+## GDI / Graphics stack (STEP15+, aktywny w STEP17)
+
+### Kluczowe pliki
+
+| Plik | Rola |
+|------|------|
+| `STEP17/gdi.c` | GDI.EXE: PatBlt, BitBlt, TextOut, CreateCompatibleDC, SelectObject |
+| `STEP17/user.c` | USER.EXE: okna, kolejka komunikatów, BeginPaint/EndPaint, DispatchMessage |
+| `STEP17/loader.c` | Ładowanie NE, inicjalizacja PM, IDT, PS/2 |
+| `STEP17/pm_call.asm` | Thunk INT 3Fh, IRQ1 (keyboard), IRQ12 (mouse), PIC maski |
+| `STEP15/skifree_graphics_analysis.txt` | **Pełna analiza** stosu graficznego SKI.EXE: DC map, trace gondola/skoczek, atlas 86 spriteów, adresy kluczowych funkcji |
+
+### GDI BitBlt — przypadki (gdi.c)
+
+| Przypadek | Warunek | Opis |
+|-----------|---------|------|
+| 1 | sprite(1..86) → memDC, SRCCOPY | decode_4bpp → bufor BGRA; transparent = alpha=0 (pominięty) |
+| 1b | sprite → memDC, NOTSRCCOPY | maska odwrotna do DC3/DC5 |
+| 2B | memDC → memDC, SRCCOPY | kopiuj bufor; transparent src = pomiń dst |
+| B | SRCAND/SRCPAINT memDC→memDC | compositing (maska+kolor) |
+| C | memDC → screen(1), SRCCOPY | alpha=1 → LFB; alpha zerowane po odczycie (auto-clear) |
+| 4 | sprite(1..86) → screen(1) | blit_sprite_hbm bezpośrednio na LFB |
+
+### Child window exclusion (status bar x=500..640, y=0..68)
+
+Wszystkie ścieżki do LFB chronią child windows przez **per-pixel `excl_contains()`**:
+- `PatBlt(screenDC)` — per-pixel exclusion (zastąpiło `clip_screen_x`)
+- `CaseC` — per-pixel exclusion
+- `blit_sprite_hbm` (Case 4) — per-pixel exclusion
+- `draw_char_gdi` (TextOut screenDC/windowDC) — per-pixel exclusion
+- `ExclRect get_child_excl()` / `excl_contains()` — helpery w gdi.c
+
+KCB layout dla child windows (SEL_KCB=0x98): `wnd_ox[8]`@208, `wnd_oy[8]`@224, `wnd_w[8]`@240, `wnd_h[8]`@256.
+
+### TextOut — tryb OPAQUE (Windows 3.1 default)
+
+`draw_char_gdi`: bit fontu=0 → `draw_pixel(0xFF,0xFF,0xFF)` (białe tło), bit=1 → kolor fg.
+Eliminuje nawarstwianie napisów (trail effect).
+
+### Znane zachowanie SKI.EXE (z trace)
+
+- **NIGDY** nie wywołuje `PatBlt(hdc=1)` bezpośrednio na screenDC
+- **NIGDY** nie wywołuje `DispatchMessage` (game loop bezpośrednio przez SendMessage/WndProc)
+- Rendering przez DC6 (intermediate memDC): `PatBlt(DC6,white)` → `Case2B(atlas→DC6)` → `CaseC(DC6→screen)`
+- `BeginPaint` może nie być wywoływany — SKI.EXE używa prawdopodobnie `GetDC`
+- DC map: DC2=small sprites, DC3=small masks, DC4=large sprites, DC5=large masks, DC6=intermediate
+
+### Dirty sprite background (WIP)
+
+Skoczek zmienia sprite przy zmianie kierunku. Gdy nowy sprite jest mniejszy niż poprzedni,
+piksele starego sprite'a poza nowym bounding boxem zostają na ekranie.
+
+Windows 3.1 rozwiązanie: `WM_ERASEBKGND` (WHITE_BRUSH) przed każdym `WM_PAINT`.
+Problem: SKI.EXE nie używa `DispatchMessage` → `WM_ERASEBKGND` w `DispatchMessage` nie odpala.
+Następny krok: znaleźć gdzie/jak SKI.EXE dispatchuje WM_PAINT (prawdopodobnie bezpośrednio przez pętlę GetMessage → WndProc call).

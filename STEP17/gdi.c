@@ -799,7 +799,9 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
 
     /* ---- Przypadek C (15c): memDC -> screen(1), SRCCOPY: blit z bufora ----
      * Piksele z alpha=1 kopiowane na ekran; alpha zerowane po odczycie (auto-clear).
-     * Przezroczyste piksele bufora (alpha=0) nie nadpisuja tla ekranu. */
+     * Przezroczyste piksele bufora (alpha=0) nie nadpisuja tla ekranu.
+     * Tlo ekranu jest czyszczone przez WM_ERASEBKGND (user.c BeginPaint) przed kazda
+     * klatka gry - brak potrzeby per-DC sledzenia poprzednich prostokatow. */
     if (hdcDst == 1 && hdcSrc >= 2 && hdcSrc < 16 && dwRop == 0x00CC0020UL) {
         unsigned buf_sel = g_dc_buf_sel[hdcSrc];
         if (buf_sel != 0 && g_dc_has_bg[hdcSrc]) {

@@ -140,8 +140,9 @@ typedef LRESULT (__far __pascal *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 #define WM_DESTROY  0x0002
 #define WM_SIZE     0x0005
 #define WM_ACTIVATE 0x0006
-#define WM_PAINT    0x000F
-#define WM_QUIT     0x0012
+#define WM_PAINT        0x000F
+#define WM_QUIT         0x0012
+#define WM_ERASEBKGND   0x0014
 #define WM_KEYDOWN  0x0100
 #define WM_KEYUP    0x0101
 #define WM_CHAR     0x0102
@@ -645,12 +646,45 @@ BOOL __far __pascal TranslateMessage(const MSG __far *pmsg)
 
 LRESULT __far __pascal DispatchMessage(const MSG __far *pmsg)
 {
+    /* Windows 3.1: przed WM_PAINT glownego okna wyslij WM_ERASEBKGND.
+     * Robimy to tu (nie w BeginPaint) bo SKI.EXE moze uzyc GetDC zamiast BeginPaint. */
+    if (pmsg->message == WM_PAINT) {
+        int ci;
+        int is_main = 0;
+        for (ci = 0; ci < MAX_WINDOWS; ci++) {
+            if (g_windows[ci].used && g_windows[ci].hwnd == pmsg->hwnd
+                    && g_windows[ci].parent == 0) {
+                is_main = 1;
+                break;
+            }
+        }
+        if (is_main) {
+            serial_puts("ERASE\n");
+            SendMessage(pmsg->hwnd, WM_ERASEBKGND,
+                        (WPARAM)(unsigned)1 /*screenDC*/, 0L);
+        }
+    }
     return SendMessage(pmsg->hwnd, pmsg->message, pmsg->wParam, pmsg->lParam);
 }
 
 LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    (void)hwnd; (void)msg; (void)wp; (void)lp;
+    (void)wp; (void)lp;
+    if (msg == WM_ERASEBKGND) {
+        int ci;
+        /* Wypelnij cale tlo okna bialym (jak Windows 3.1 WHITE_BRUSH w DefWindowProc).
+         * Dziala jak PatBlt(hdc, 0,0,640,480, WHITENESS) ale bezposrednio przez VESA
+         * (nie mozemy tu wywolac GDI PatBlt - jestesmy w USER.EXE). */
+        vesa_fill_rect(0, 0, 640, 480, 0xFF, 0xFF, 0xFF);
+        /* Natychmiast przerysuj okna potomne synchronicznie (SendMessage, nie push_msg)
+         * zeby status bar nie migal - jego tresc jest widoczna zanim gra narysuje sprity. */
+        for (ci = 0; ci < MAX_WINDOWS; ci++) {
+            if (g_windows[ci].used && g_windows[ci].parent == hwnd)
+                SendMessage(g_windows[ci].hwnd, WM_PAINT, 0, 0L);
+        }
+        return 1;  /* tlo zostalo wymazane */
+    }
+    (void)hwnd;
     return 0;
 }
 
