@@ -379,13 +379,14 @@ test_rc.obj: test_rc.c
 test_rc.exe: test_rc.obj serial.obj rc_loader.obj
 	$(WCL) -ml -l=dos -q test_rc.obj serial.obj rc_loader.obj -fe=test_rc.exe
 
-boot_test_rc.img: test_rc.exe TESTRES.NE fdauto_test_rc.bat fdconfig.sys $(FDBOOT)
+boot_test_rc.img: test_rc.exe TESTRES.NE win16test/w16test.exe fdauto_test_rc.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot_test_rc.img
 	mcopy -i boot_test_rc.img -o fdconfig.sys      ::fdconfig.sys
 	mdel  -i boot_test_rc.img ::fdauto.bat 2>/dev/null || true
 	mcopy -i boot_test_rc.img fdauto_test_rc.bat   ::fdauto.bat
 	mcopy -i boot_test_rc.img test_rc.exe          ::test_rc.exe
 	mcopy -i boot_test_rc.img TESTRES.NE           ::testres.ne
+	mcopy -i boot_test_rc.img win16test/w16test.exe ::w16test.exe
 	@echo "[OK] boot_test_rc.img gotowy"
 
 run-test-rc: boot_test_rc.img

@@ -1,8 +1,9 @@
 /* test_rc.c - ETAP 18: testy jednostkowe rc_loader
  *
  * Uruchamiany bezposrednio pod FreeDOS (bez PM / Win16 DLL).
- * Sprawdza poprawnosc danych wczytanych przez rc_init + rc_load_all
- * z pliku TESTRES.NE wygenerowanego przez gen_testres.py.
+ * Dwie fazy testow:
+ *   Faza 1 (TESTRES.NE): syntetyczne zasoby generowane przez gen_testres.py.
+ *   Faza 2 (W16TEST.EXE): prawdziwe zasoby wrc (RT_MENU/DIALOG/ACCEL).
  *
  * Kompilacja:
  *   wcc -ml -q test_rc.c -fo=test_rc.obj
@@ -262,6 +263,139 @@ int main(void)
     CHECK("RT_MENU id=99 == NULL",  rc_get(RT_MENU, 99)  == NULL);
     CHECK("RT_ACCEL id=2 == NULL",  rc_get(RT_ACCEL, 2)  == NULL);
     CHECK("rc_size brakujacy == 0", rc_size(RT_MENU, 99) == 0);
+
+    /* ======================================================
+     * Faza 2: prawdziwe zasoby wrc z W16TEST.EXE
+     *
+     * W16TEST.EXE (STEP18/win16test/w16test.exe) zawiera:
+     *   RT_MENU   id=101 size=38  - MENUITEMTEMPLATEHEADER + "File/Exit, Help/About"
+     *   RT_DIALOG id=103 size=72  - DLGTEMPLATE "About" (2 items, 160x60)
+     *   RT_ACCEL  id=102 size=10  - 2 akceleratory: ^A(ID=201), ^Q(ID=200)
+     *
+     * --- Struktura binarnych szablonow Win16 ---
+     *
+     * RT_MENU (MENUITEMTEMPLATEHEADER + MENUITEMTEMPLATE):
+     *   bytes[0..3] = {0,0,0,0}   MENUITEMTEMPLATEHEADER: versionNumber=0, offset=0
+     *   bytes[4..5] = {0x10,0x00} mtOption = MF_POPUP (0x10) = popup "File"
+     *   bytes[6..10]= "File\0"
+     *   bytes[11..12]={0x80,0x00} MF_END (ostatni element popupu)
+     *   bytes[13..14]={200,0}     mtID = 200 = ID_FILE_EXIT
+     *   bytes[15..19]="Exit\0"
+     *   bytes[20..]: drugi popup "Help" z "About" (id=201)
+     *
+     * RT_DIALOG (DLGTEMPLATE Win16):
+     *   bytes[0..3]  = {0x00,0x00,0xC8,0x80}  dtStyle=WS_POPUP|WS_CAPTION|WS_SYSMENU
+     *   byte[4]      = 2                        dtItemCount=2 (LTEXT+DEFPUSHBUTTON)
+     *   bytes[5..6]  = {0,0}                   dtX=0
+     *   bytes[7..8]  = {0,0}                   dtY=0
+     *   bytes[9..10] = {160,0}                 dtCX=160
+     *   bytes[11..12]= {60,0}                  dtCY=60
+     *   byte[13]     = 0                        dtMenuName="" (brak)
+     *   byte[14]     = 0                        dtClassName="" (domyslna)
+     *   bytes[15..19]= "About"                  dtCaptionText
+     *
+     * RT_ACCEL (5 bajtow na wpis: fVirt(B) + key(W) + cmd(W)):
+     *   bytes[0]    = 0x02         fVirt = NOINVERT
+     *   bytes[1..2] = {1,0}        key   = 1 = ^A (ASCII)
+     *   bytes[3..4] = {201,0}      cmd   = 201 = ID_HELP_ABOUT
+     *   bytes[5]    = 0x82         fVirt = FLASTKEY(0x80)|NOINVERT(0x02)
+     *   bytes[6..7] = {17,0}       key   = 17 = ^Q (ASCII)
+     *   bytes[8..9] = {200,0}      cmd   = 200 = ID_FILE_EXIT
+     * ============================================================ */
+    tprintf("\n=== Faza 2: W16TEST.EXE (prawdziwe zasoby wrc) ===\n");
+
+    /* --- find_ne_resource w W16TEST.EXE --- */
+    tprintf("\n-- W16TEST find_ne_resource --\n");
+    far_zero(kcb, 256u);
+    rc_init("W16TEST.EXE");
+    {
+        long off;
+        unsigned short sz;
+        int r;
+        r = find_ne_resource(RT_MENU, 101, &off, &sz);
+        CHECK("W16TEST find RT_MENU id=101",   r  == 1);
+        CHECK("W16TEST RT_MENU size==38",       sz == 38);
+        r = find_ne_resource(RT_DIALOG, 103, &off, &sz);
+        CHECK("W16TEST find RT_DIALOG id=103", r  == 1);
+        CHECK("W16TEST RT_DIALOG size==72",     sz == 72);
+        r = find_ne_resource(RT_ACCEL, 102, &off, &sz);
+        CHECK("W16TEST find RT_ACCEL id=102",  r  == 1);
+        CHECK("W16TEST RT_ACCEL size==10",      sz == 10);
+    }
+
+    /* --- rc_load_all na W16TEST.EXE --- */
+    tprintf("\n-- W16TEST rc_load_all --\n");
+    far_zero(kcb, 256u);
+    rc_init("W16TEST.EXE");
+    rc_load_all(kcb_phys, bmp_phys);
+
+    /* Brak RT_STRING w W16TEST */
+    CHECK("W16TEST rsc_nblocks==0", kcb[KCB_OFF_RSC_NBLOCKS] == 0);
+
+    /* --- RT_MENU: szablon MENUITEMTEMPLATEHEADER --- */
+    tprintf("\n-- W16TEST RT_MENU (wrc template) --\n");
+    {
+        unsigned char __far *m  = rc_get(RT_MENU, 101);
+        unsigned short       sz = rc_size(RT_MENU, 101);
+        CHECK("W16TEST RT_MENU != NULL",        m  != NULL);
+        CHECK("W16TEST RT_MENU size==38",        sz == 38);
+        if (m) {
+            /* MENUITEMTEMPLATEHEADER: versionNumber=0, offset=0 */
+            CHECK("W16TEST menu[0]==0 (ver lo)", m[0] == 0x00);
+            CHECK("W16TEST menu[1]==0 (ver hi)", m[1] == 0x00);
+            CHECK("W16TEST menu[2]==0 (off lo)", m[2] == 0x00);
+            CHECK("W16TEST menu[3]==0 (off hi)", m[3] == 0x00);
+            /* Pierwszy MENUITEMTEMPLATE: mtOption=MF_POPUP(0x10) dla "File" */
+            CHECK("W16TEST menu[4]==0x10 (MF_POPUP)", m[4] == 0x10);
+            /* mtString = "File\0": bytes[6..10] */
+            CHECK("W16TEST menu 'F'ile",  m[6]  == 'F');
+            CHECK("W16TEST menu 'E'xit",  m[15] == 'E');
+        } else { g_fail += 7; }
+    }
+
+    /* --- RT_DIALOG: DLGTEMPLATE Win16 --- */
+    tprintf("\n-- W16TEST RT_DIALOG (wrc template) --\n");
+    {
+        unsigned char __far *dlg = rc_get(RT_DIALOG, 103);
+        unsigned short       sz  = rc_size(RT_DIALOG, 103);
+        CHECK("W16TEST RT_DIALOG != NULL",       dlg != NULL);
+        CHECK("W16TEST RT_DIALOG size==72",       sz  == 72);
+        if (dlg) {
+            /* dtStyle = WS_POPUP|WS_CAPTION|WS_SYSMENU = 0x80C80000
+             * LE bytes: 0x00, 0x00, 0xC8, 0x80 */
+            CHECK("W16TEST dlg style[2]==0xC8",  dlg[2] == 0xC8);
+            CHECK("W16TEST dlg style[3]==0x80",  dlg[3] == 0x80);
+            /* dtItemCount = 2 (LTEXT + DEFPUSHBUTTON) */
+            CHECK("W16TEST dlg dtItemCount==2",   dlg[4] == 2);
+            /* dtCX = 160 (szerokosc dialogu) */
+            CHECK("W16TEST dlg dtCX==160",        RD16(dlg, 9)  == 160);
+            /* dtCY = 60 (wysokosc dialogu) */
+            CHECK("W16TEST dlg dtCY==60",         RD16(dlg, 11) == 60);
+            /* dtCaptionText = "About..." (byte[15]='A') */
+            CHECK("W16TEST dlg caption[0]=='A'",  dlg[15] == 'A');
+        } else { g_fail += 6; }
+    }
+
+    /* --- RT_ACCEL: tabela akceleratorow Win16 ---
+     * Format: fVirt(1B) + key(2B) + cmd(2B) = 5 bajtow na wpis
+     * Ostatni wpis: fVirt & 0x80 (FLASTKEY) */
+    tprintf("\n-- W16TEST RT_ACCEL (wrc template) --\n");
+    {
+        unsigned char __far *acc = rc_get(RT_ACCEL, 102);
+        unsigned short       sz  = rc_size(RT_ACCEL, 102);
+        CHECK("W16TEST RT_ACCEL != NULL",        acc != NULL);
+        CHECK("W16TEST RT_ACCEL size==10",        sz  == 10);
+        if (acc) {
+            /* Wpis 1: fVirt=NOINVERT(0x02), key=1(^A), cmd=201(ID_HELP_ABOUT) */
+            CHECK("W16TEST accel[0]==0x02 (NOINVERT)", acc[0] == 0x02);
+            CHECK("W16TEST accel key1==1 (^A)",         RD16(acc, 1) == 1);
+            CHECK("W16TEST accel cmd1==201",             RD16(acc, 3) == 201);
+            /* Wpis 2: fVirt=FLASTKEY|NOINVERT(0x82), key=17(^Q), cmd=200(ID_FILE_EXIT) */
+            CHECK("W16TEST accel[5]==0x82 (FLASTKEY)", acc[5] == 0x82);
+            CHECK("W16TEST accel key2==17 (^Q)",        RD16(acc, 6) == 17);
+            CHECK("W16TEST accel cmd2==200",             RD16(acc, 8) == 200);
+        } else { g_fail += 7; }
+    }
 
     /* ======================================================
      * Podsumowanie
