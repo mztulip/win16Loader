@@ -189,27 +189,52 @@ int main(void)
      */
     tprintf("\n-- RT_STRING blok 1 --\n");
     blk1 = kcb + KCB_RSC_DATA;
-    CHECK("blok1: str0 pusta",         blk1[0]  == 0x00);
-    CHECK("blok1: str1 len==10",       blk1[1]  == 10);
-    CHECK("blok1: str1[0]=='H'",       blk1[2]  == 'H');
-    CHECK("blok1: str1[4]=='o'",       blk1[6]  == 'o');
-    CHECK("blok1: str1[9]=='t'",       blk1[11] == 't');
-    CHECK("blok1: str2 pusta",         blk1[12] == 0x00);
-    CHECK("blok1: str3 len==8",        blk1[13] == 8);
-    CHECK("blok1: str3[0]=='W'",       blk1[14] == 'W');
-    CHECK("blok1: str3[7]=='C'",       blk1[21] == 'C');
+    {
+        /* Oczekiwane 48 bajtow bloku 1 (stringi ID 0..15):
+         * [0]     = 0x00         str0: pusta
+         * [1]     = 0x0A         str1: len=10
+         * [2..11] = "Hello Test"
+         * [12]    = 0x00         str2: pusta
+         * [13]    = 0x08         str3: len=8
+         * [14..21]= "World RC"
+         * [22..47]= 0x00 * 26   str4..str15: puste
+         */
+        static const unsigned char expected_blk1[48] = {
+            0x00,                                           /* str0: pusta */
+            0x0A,'H','e','l','l','o',' ','T','e','s','t',  /* str1: "Hello Test" */
+            0x00,                                           /* str2: pusta */
+            0x08,'W','o','r','l','d',' ','R','C',           /* str3: "World RC" */
+            /* str4..str15: puste (26 bajtow) */
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        };
+        unsigned i;
+        int all_ok = 1;
+        for (i = 0; i < 48u; i++)
+            if (blk1[i] != expected_blk1[i]) { all_ok = 0; break; }
+        CHECK("blok1: wszystkie 48B poprawne", all_ok);
+    }
 
     /* --- RT_STRING blok 2: stringi 16..31 ---
-     * blok2[0]   = 0x00 (str16: pusta)
-     * blok2[1]   = 0x05 (str17: len=5)
+     * blok2[0]   = 0x00         str16: pusta
+     * blok2[1]   = 0x05         str17: len=5
      * blok2[2..6]= "ABCDE"
+     * blok2[7..31]= 0x00 * 25  str18..str31: puste
      */
     tprintf("\n-- RT_STRING blok 2 --\n");
     blk2 = kcb + KCB_RSC_DATA + 48u;   /* po bloku 1 */
-    CHECK("blok2: str16 pusta",        blk2[0] == 0x00);
-    CHECK("blok2: str17 len==5",       blk2[1] == 5);
-    CHECK("blok2: str17[0]=='A'",      blk2[2] == 'A');
-    CHECK("blok2: str17[4]=='E'",      blk2[6] == 'E');
+    {
+        static const unsigned char expected_blk2[32] = {
+            0x00,                           /* str16: pusta */
+            0x05,'A','B','C','D','E',        /* str17: "ABCDE" */
+            /* str18..str31: puste (25 bajtow) */
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        };
+        unsigned i;
+        int all_ok = 1;
+        for (i = 0; i < 32u; i++)
+            if (blk2[i] != expected_blk2[i]) { all_ok = 0; break; }
+        CHECK("blok2: wszystkie 32B poprawne", all_ok);
+    }
 
     /* --- RT_BITMAP ---
      * bmp[0..1]: liczba bitmap
@@ -217,45 +242,52 @@ int main(void)
      * bmp[176..191]: dane bitmap1
      */
     tprintf("\n-- RT_BITMAP --\n");
-    CHECK("bmp count == 1",           RD16(bmp, 0) == 1);
-    CHECK("bmp offset[0] == 176",     RD16(bmp, 4) == BMP_BUF_HDR);
-    CHECK("bitmap1[0]==0xDE",         bmp[BMP_BUF_HDR + 0] == 0xDE);
-    CHECK("bitmap1[1]==0xAD",         bmp[BMP_BUF_HDR + 1] == 0xAD);
-    CHECK("bitmap1[2]==0xBE",         bmp[BMP_BUF_HDR + 2] == 0xBE);
-    CHECK("bitmap1[3]==0xEF",         bmp[BMP_BUF_HDR + 3] == 0xEF);
-    CHECK("bitmap1[7]==0x04",         bmp[BMP_BUF_HDR + 7] == 0x04);
-    CHECK("bitmap1[15]==0x0C",        bmp[BMP_BUF_HDR + 15] == 0x0C);
+    {
+        /* oczekiwana zawartosc: DE AD BE EF 01 02 03 04 05 06 07 08 09 0A 0B 0C */
+        static const unsigned char expected_bmp[16] = {
+            0xDE,0xAD,0xBE,0xEF, 0x01,0x02,0x03,0x04,
+            0x05,0x06,0x07,0x08, 0x09,0x0A,0x0B,0x0C
+        };
+        unsigned char __far *p = bmp + BMP_BUF_HDR;
+        unsigned i;
+        int all_ok = 1;
+        CHECK("bmp count == 1",       RD16(bmp, 0) == 1);
+        CHECK("bmp offset[0] == 176", RD16(bmp, 4) == BMP_BUF_HDR);
+        for (i = 0; i < 16u; i++)
+            if (p[i] != expected_bmp[i]) { all_ok = 0; break; }
+        CHECK("bitmap1 wszystkie 16B (DE AD BE EF 01..0C)", all_ok);
+    }
 
-    /* --- RT_MENU (RSC_HEAP) --- */
+    /* --- RT_MENU (RSC_HEAP) - weryfikacja wszystkich 16 bajtow --- */
     tprintf("\n-- RT_MENU (RSC_HEAP) --\n");
     {
         unsigned char __far *m  = rc_get(RT_MENU, 1);
         unsigned short       sz = rc_size(RT_MENU, 1);
-        CHECK("RT_MENU id=1 != NULL", m  != NULL);
+        unsigned             i;
+        int                  all_ok = 1;
+        CHECK("RT_MENU id=1 != NULL",  m  != NULL);
         CHECK("RT_MENU id=1 size==16", sz == 16);
         if (m) {
-            CHECK("menu1[0]==0x10",   m[0]  == 0x10);
-            CHECK("menu1[7]==0x17",   m[7]  == 0x17);
-            CHECK("menu1[15]==0x1F",  m[15] == 0x1F);
-        } else {
-            g_fail += 3;
-        }
+            for (i = 0; i < 16u; i++)
+                if (m[i] != (unsigned char)(0x10u + i)) { all_ok = 0; break; }
+            CHECK("RT_MENU wszystkie 16B (0x10..0x1F)", all_ok);
+        } else { g_fail++; }
     }
 
-    /* --- RT_ACCEL (RSC_HEAP) --- */
+    /* --- RT_ACCEL (RSC_HEAP) - weryfikacja wszystkich 16 bajtow --- */
     tprintf("\n-- RT_ACCEL (RSC_HEAP) --\n");
     {
         unsigned char __far *a  = rc_get(RT_ACCEL, 1);
         unsigned short       sz = rc_size(RT_ACCEL, 1);
+        unsigned             i;
+        int                  all_ok = 1;
         CHECK("RT_ACCEL id=1 != NULL",  a  != NULL);
         CHECK("RT_ACCEL id=1 size==16", sz == 16);
         if (a) {
-            CHECK("accel1[0]==0x20",   a[0]  == 0x20);
-            CHECK("accel1[7]==0x27",   a[7]  == 0x27);
-            CHECK("accel1[15]==0x2F",  a[15] == 0x2F);
-        } else {
-            g_fail += 3;
-        }
+            for (i = 0; i < 16u; i++)
+                if (a[i] != (unsigned char)(0x20u + i)) { all_ok = 0; break; }
+            CHECK("RT_ACCEL wszystkie 16B (0x20..0x2F)", all_ok);
+        } else { g_fail++; }
     }
 
     /* --- rc_get dla nieznanego zasobu --- */
@@ -281,7 +313,8 @@ int main(void)
      *   bytes[11..12]={0x80,0x00} MF_END (ostatni element popupu)
      *   bytes[13..14]={200,0}     mtID = 200 = ID_FILE_EXIT
      *   bytes[15..19]="Exit\0"
-     *   bytes[20..]: drugi popup "Help" z "About" (id=201)
+     *   bytes[20..21]={0x90,0x00} MF_POPUP|MF_END (ostatni na top-level)
+ *   bytes[22..26]= "Help\0"
      *
      * RT_DIALOG (DLGTEMPLATE Win16):
      *   bytes[0..3]  = {0x00,0x00,0xC8,0x80}  dtStyle=WS_POPUP|WS_CAPTION|WS_SYSMENU
@@ -376,25 +409,75 @@ int main(void)
         } else { g_fail += 6; }
     }
 
-    /* --- RT_ACCEL: tabela akceleratorow Win16 ---
+    /* --- RT_DIALOG: dodatkowe sprawdzenie napisu "Win16 Test App" w itemach ---
+     * Po naglowku DLGTEMPLATE i stringach (caption "About\0") nastepuje
+     * pierwsza pozycja DLGITEMTEMPLATE: tekst "Win16 Test App" gdzies w danych. */
+    tprintf("\n-- W16TEST RT_DIALOG: szukanie tekstu w itemach --\n");
+    {
+        unsigned char __far *dlg = rc_get(RT_DIALOG, 103);
+        unsigned             i;
+        int found = 0;
+        if (dlg) {
+            /* Szukaj "Win16" gdziekolwiek w szablonie (szybsze niz parsowanie itemow) */
+            for (i = 0; i + 4u < 72u; i++) {
+                if (dlg[i]=='W' && dlg[i+1]=='i' && dlg[i+2]=='n' &&
+                    dlg[i+3]=='1' && dlg[i+4]=='6') { found = 1; break; }
+            }
+            CHECK("W16TEST dlg zawiera tekst 'Win16'", found);
+            /* Szukaj "OK" (DEFPUSHBUTTON caption) */
+            found = 0;
+            for (i = 0; i + 1u < 72u; i++) {
+                if (dlg[i]=='O' && dlg[i+1]=='K') { found = 1; break; }
+            }
+            CHECK("W16TEST dlg zawiera tekst 'OK'", found);
+        } else { g_fail += 2; }
+    }
+
+    /* --- RT_ACCEL: weryfikacja wszystkich 10 bajtow ---
      * Format: fVirt(1B) + key(2B) + cmd(2B) = 5 bajtow na wpis
-     * Ostatni wpis: fVirt & 0x80 (FLASTKEY) */
+     * Ostatni wpis: fVirt & 0x80 (FLASTKEY)
+     * Oczekiwane: 02 01 00 C9 00  82 11 00 C8 00 */
     tprintf("\n-- W16TEST RT_ACCEL (wrc template) --\n");
     {
+        static const unsigned char expected_accel[10] = {
+            0x02, 0x01, 0x00, 0xC9, 0x00,   /* ^A, ID=201=0xC9 */
+            0x82, 0x11, 0x00, 0xC8, 0x00    /* ^Q, ID=200=0xC8, FLASTKEY */
+        };
         unsigned char __far *acc = rc_get(RT_ACCEL, 102);
         unsigned short       sz  = rc_size(RT_ACCEL, 102);
-        CHECK("W16TEST RT_ACCEL != NULL",        acc != NULL);
-        CHECK("W16TEST RT_ACCEL size==10",        sz  == 10);
+        unsigned             i;
+        int                  all_ok = 1;
+        CHECK("W16TEST RT_ACCEL != NULL",  acc != NULL);
+        CHECK("W16TEST RT_ACCEL size==10", sz  == 10);
         if (acc) {
-            /* Wpis 1: fVirt=NOINVERT(0x02), key=1(^A), cmd=201(ID_HELP_ABOUT) */
-            CHECK("W16TEST accel[0]==0x02 (NOINVERT)", acc[0] == 0x02);
-            CHECK("W16TEST accel key1==1 (^A)",         RD16(acc, 1) == 1);
-            CHECK("W16TEST accel cmd1==201",             RD16(acc, 3) == 201);
-            /* Wpis 2: fVirt=FLASTKEY|NOINVERT(0x82), key=17(^Q), cmd=200(ID_FILE_EXIT) */
-            CHECK("W16TEST accel[5]==0x82 (FLASTKEY)", acc[5] == 0x82);
-            CHECK("W16TEST accel key2==17 (^Q)",        RD16(acc, 6) == 17);
-            CHECK("W16TEST accel cmd2==200",             RD16(acc, 8) == 200);
-        } else { g_fail += 7; }
+            for (i = 0; i < 10u; i++)
+                if (acc[i] != expected_accel[i]) { all_ok = 0; break; }
+            CHECK("W16TEST accel wszystkie 10B poprawne", all_ok);
+            /* Semantyczne: fVirt, key, cmd wpis 1 */
+            CHECK("W16TEST accel[0]==NOINVERT(0x02)", acc[0] == 0x02);
+            CHECK("W16TEST accel key1==1 (^A)",        RD16(acc, 1) == 1);
+            CHECK("W16TEST accel cmd1==201",            RD16(acc, 3) == 201);
+            /* Semantyczne: fVirt, key, cmd wpis 2 */
+            CHECK("W16TEST accel[5]==FLASTKEY(0x82)", acc[5] == 0x82);
+            CHECK("W16TEST accel key2==17 (^Q)",       RD16(acc, 6) == 17);
+            CHECK("W16TEST accel cmd2==200",            RD16(acc, 8) == 200);
+        } else { g_fail += 8; }
+    }
+
+    /* --- RT_MENU: weryfikacja napisow "File", "Exit", "Help", "About" --- */
+    tprintf("\n-- W16TEST RT_MENU: nazwy pozycji --\n");
+    {
+        unsigned char __far *m = rc_get(RT_MENU, 101);
+        if (m) {
+            /* "File\0" zaczyna sie od bajtu[6] */
+            CHECK("W16TEST menu popup1='F'ile",  m[6]=='F' && m[7]=='i' && m[8]=='l' && m[9]=='e' && m[10]==0);
+            /* "Exit\0": mtID=200 w bytes[13..14], string od bajtu[15] */
+            CHECK("W16TEST menu item 'E'xit",    m[15]=='E' && m[16]=='x' && m[17]=='i' && m[18]=='t' && m[19]==0);
+            /* Drugi popup "Help" zaczyna sie od bajtu[20]: mtOption=MF_POPUP|MF_END=0x90
+             * (MF_END=0x80 bo ostatni element na poziomie top-level) */
+            CHECK("W16TEST menu popup2 MF_POPUP|MF_END", (m[20] & 0x10) && m[21]==0x00);
+            CHECK("W16TEST menu popup2='H'elp",  m[22]=='H' && m[23]=='e' && m[24]=='l' && m[25]=='p' && m[26]==0);
+        } else { g_fail += 4; }
     }
 
     /* ======================================================
