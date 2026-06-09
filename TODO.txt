@@ -883,6 +883,20 @@ Plik implementacji: rc_loader.c
         RT_BITMAP: przeniesiony do rc_loader.c (rc_load_all -> SEL_BITMAPS) - DONE.
         RT_ICON: nie wczytywany (planowane ETAP 20e dla shell ikon).
 
+[x] 18h: Test jednostkowy rc_loader (test_rc.c + TESTRES.NE)
+        test_rc.exe: uruchamiany pod FreeDOS (bez PM/Win16), testuje rc_loader in-process.
+        TESTRES.NE: minimalne NE z RT_STRING (2 bloki), RT_BITMAP, RT_MENU, RT_ACCEL.
+          Weryfikuje:
+            - find_ne_resource: RT_BITMAP/STRING/MENU/ACCEL lookup, id=99 not found
+            - KCB po rc_load_all: rsc_nblocks, block_ids, block_sizes
+            - RT_STRING blok1: "Hello Test" (ID1), "World RC" (ID3)
+            - RT_STRING blok2: "ABCDE" (ID17)
+            - RT_BITMAP: count, offset, surowe bajty (DE AD BE EF...)
+            - RT_MENU/RT_ACCEL: rc_get != NULL, rc_size, surowe bajty
+            - rc_get/rc_size dla brakujacych zasobow
+          Budowa: gen_testres.py -> TESTRES.NE; make test_rc.exe + boot_test_rc.img
+          Uruchomienie: make run-test-rc -> serial: PASS/FAIL + podsumowanie
+
 [ ] 18g: Test - Win16App.exe laduje sie i wchodzi w WinMain  [TODO - ETAP 19a]
         Przetestuj loader z Win16App.exe (bez zasobow graficznych SKI):
           - Zaladuj Win16App.exe z STEP19/win16_example_app/Win1App.exe

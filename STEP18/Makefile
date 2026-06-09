@@ -339,11 +339,43 @@ boot_kbd.img: kernel.exe user.exe gdi.exe loader.exe kbd_test.exe fdconfig.sys $
 	mcopy -i boot_kbd.img loader.exe               ::loader.exe
 	@echo "[OK] boot_kbd.img gotowy"
 
+# -------------------------------------------------------
+# TESTRES.NE - zasob testowy dla test_rc.exe (gen_testres.py)
+# -------------------------------------------------------
+TESTRES.NE: gen_testres.py
+	python3 gen_testres.py
+
+# -------------------------------------------------------
+# TEST_RC.EXE - test jednostkowy rc_loader (ETAP 18h)
+# -------------------------------------------------------
+test_rc.obj: test_rc.c
+	$(WCC) -ml -q $< -fo=$@
+
+test_rc.exe: test_rc.obj serial.obj rc_loader.obj
+	$(WCL) -ml -l=dos -q test_rc.obj serial.obj rc_loader.obj -fe=test_rc.exe
+
+boot_test_rc.img: test_rc.exe TESTRES.NE fdauto_test_rc.bat fdconfig.sys $(FDBOOT)
+	cp $(FDBOOT) boot_test_rc.img
+	mcopy -i boot_test_rc.img -o fdconfig.sys      ::fdconfig.sys
+	mdel  -i boot_test_rc.img ::fdauto.bat 2>/dev/null || true
+	mcopy -i boot_test_rc.img fdauto_test_rc.bat   ::fdauto.bat
+	mcopy -i boot_test_rc.img test_rc.exe          ::test_rc.exe
+	mcopy -i boot_test_rc.img TESTRES.NE           ::testres.ne
+	@echo "[OK] boot_test_rc.img gotowy"
+
+run-test-rc: boot_test_rc.img
+	qemu-system-i386 -fda boot_test_rc.img -boot a -m 16 \
+	    -no-reboot -no-shutdown \
+	    -serial stdio \
+	    -display none \
+	    -d cpu_reset,guest_errors -D qemu.log 2>/dev/null
+
 clean:
 	rm -f kernel.exe kernel.obj
 	rm -f user.exe user.obj
 	rm -f gdi.exe gdi.obj
 	rm -f loader.exe loader.o
 	rm -f libstubs.obj pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj mouse_msg.obj rc_loader.obj
+	rm -f test_rc.exe test_rc.obj TESTRES.NE
 	rm -f panic.bin
-	rm -f boot.img bochs.log qemu.log
+	rm -f boot.img boot_test_rc.img bochs.log qemu.log
