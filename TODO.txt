@@ -897,12 +897,18 @@ Plik implementacji: rc_loader.c
           Budowa: gen_testres.py -> TESTRES.NE; make test_rc.exe + boot_test_rc.img
           Uruchomienie: make run-test-rc -> serial: PASS/FAIL + podsumowanie
 
-[ ] 18g: Test - Win16App.exe laduje sie i wchodzi w WinMain  [TODO - ETAP 19a]
-        Przetestuj loader z Win16App.exe (bez zasobow graficznych SKI):
-          - Zaladuj Win16App.exe z STEP19/win16_example_app/Win1App.exe
-          - Sprawdz serial: InitTask OK, zasoby wczytane (RT_MENU, RT_DIALOG, RT_ACCEL)
-          - WinMain wywolany (nowy log: "WinMain hInst=... nCmdShow=...")
-        Test automatyczny: run_win16app.sh - sprawdz serial log.
+[x] 18g: Test - Win16App wchodzi w WinMain (STEP18/win16test/)
+        Bazuje na projekcie STEP19/win16_example_app (skopiowane, uproszczone).
+        win16test/w16test.exe: Watcom clibs startup, zasoby: RT_MENU, RT_DIALOG, RT_ACCEL.
+        WinMain: OutputDebugString("WIN16TEST: WinMain entered") + PostQuitMessage(0).
+        Wynik QEMU (serial):
+          --- Ladowanie zasobow NE: W16TEST.EXE ---   <- rc_load_all wywolany
+          IK                                           <- InitTask OK
+          #30                                          <- WaitEvent
+          WIN16TEST: WinMain entered                   <- WinMain osiagniety
+          USER: PostQuitMessage
+          #4C !00                                      <- czysty exit
+        Budowa: make boot_win16test.img; run: make run-win16test.
 
 ---------------------------------------------------------------------------
 ETAP 19 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [TODO]

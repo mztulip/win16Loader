@@ -1,0 +1,2 @@
+@echo off
+LOADER.EXE W16TEST.EXE
