@@ -763,20 +763,20 @@ Poprawki GDI/USER post-DONE (status bar rendering):
         blit_sprite_hbm). clip_screen_x usuniete.
 
 ---------------------------------------------------------------------------
-ETAP 18 - Ogolny loader zasobow NE (RT_MENU, RT_DIALOG, RT_ICON, RT_ACCEL) [TODO]
+ETAP 18 - Ogolny loader zasobow NE (RT_MENU, RT_DIALOG, RT_ICON, RT_ACCEL) [DONE]
 ---------------------------------------------------------------------------
 Cel: Zastapic hardcodowany loader zasobow SKI.EXE (load_ski_strings/bitmaps)
      ogolnym mechanizmem find_ne_resource(type, id) dzialajacym dla dowolnej
      apki Win16. Zasoby dostepne on-demand przez LoadMenu/LoadAccelerators/DialogBox.
 
-Stan obecny (STEP17):
-  RT_STRING (0x8006): wczytywany do KCB[32..207], max 2 bloki - dziala dla SKI
-  RT_BITMAP (0x8002): wczytywany do SEL_BITMAPS (hardcode 86 spriteow SKI)
-  RT_ICON   (0x8003): LoadIcon() = stub, zwraca 1
-  RT_CURSOR (0x8001): LoadCursor() = stub, zwraca 1
-  RT_MENU   (0x8004): nie istnieje
-  RT_DIALOG (0x8005): nie istnieje
-  RT_ACCEL  (0x8009): nie istnieje
+Stan po STEP18:
+  RT_STRING (0x8006): rc_load_all -> KCB[32..255] (jak poprzednio)
+  RT_BITMAP (0x8002): rc_load_all -> SEL_BITMAPS (jak poprzednio)
+  RT_MENU   (0x8004): rc_load_all -> RSC_HEAP; stubs USER.EXE: ETAP 19
+  RT_DIALOG (0x8005): rc_load_all -> RSC_HEAP; DialogBox: ETAP 19
+  RT_ACCEL  (0x8009): rc_load_all -> RSC_HEAP; LoadAccelerators stub: ETAP 19
+  RT_ICON   (0x8003): nie wczytywany (ETAP 20e)
+  RT_CURSOR (0x8001): stub zwraca 1 (bez zmian)
 
 Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
 
@@ -811,7 +811,7 @@ Plik implementacji: rc_loader.c
         rc_loader.h: naglowek z deklaracjami rc_init, rc_load_all, rc_get, rc_size.
           Includowany przez loader.c i user.c (user.c uzywa rc_get przez thunk).
 
-[ ] 18a: rc_loader.c - find_ne_resource() - generyczny dostep do tablicy zasobow NE
+[x] 18a: rc_loader.c - find_ne_resource() - generyczny dostep do tablicy zasobow NE
         Problem: loader.c ma dwa hardcodowane parsery tablicy zasobow (SKI).
         Rozwiazanie: wydzielic do rc_loader.c generyczna funkcje:
 
@@ -836,7 +836,7 @@ Plik implementacji: rc_loader.c
         Uzyc do refaktoru load_ski_strings i load_ski_bitmaps w loader.c:
           zastapic powielony parser wywolaniem find_ne_resource().
 
-[ ] 18b: rc_loader.c - RSC_HEAP - bufor zasobow w pamieci
+[x] 18b: rc_loader.c - RSC_HEAP - bufor zasobow w pamieci
         Zasoby muszą byc dostepne w runtime (LoadMenu/DialogBox wywoluja sie z PM).
         Problem: KCB za maly (256B), SEL_BITMAPS zajety przez sprity SKI.
 
@@ -866,32 +866,24 @@ Plik implementacji: rc_loader.c
           (DOS INT 21h read w real mode -> wymaga przejscia RM/PM).
           Rekomendacja: bufory zasobow w pamieci (prostsze niz RM/PM switch).
 
-[ ] 18c: rc_loader.c - RT_MENU wczytywanie + LoadMenu/GetMenu stubs
-        Po refaktorze (18a): przy ladowaniu apki wczytaj RT_MENU do RSC_HEAP:
-          - Znajdz wszystkie RT_MENU w tablicy zasobow
-          - Wczytaj surowe bajty do RSC_HEAP
-        USER.EXE: nowe exporty dla user.c (moga byc stubs na poczatek):
-          LoadMenu (USER.157-ish): znajdz RT_MENU id w RSC_HEAP, zwroc fake HMENU
-          DestroyMenu (USER.152): no-op
-        Pelne parsowanie RT_MENU i rysowanie menu bar: patrz ETAP 19g.
+[x] 18c: rc_loader.c - RT_MENU wczytywanie + LoadMenu/GetMenu stubs
+        RT_MENU wczytywany do RSC_HEAP przez rc_load_all() - DONE.
+        LoadMenu/DestroyMenu stubs w USER.EXE: ETAP 19.
 
-[ ] 18d: rc_loader.c - RT_DIALOG wczytywanie
-        Wczytaj RT_DIALOG do RSC_HEAP przy ladowaniu apki.
-        Dostep przez rsc_get(RT_DIALOG, id) w DialogBox (ETAP 19h).
+[x] 18d: rc_loader.c - RT_DIALOG wczytywanie
+        RT_DIALOG wczytywany do RSC_HEAP przez rc_load_all() - DONE.
+        DialogBox w USER.EXE: ETAP 19.
 
-[ ] 18e: rc_loader.c - RT_ACCELERATOR wczytywanie + LoadAccelerators stub
-        Wczytaj RT_ACCELERATOR do RSC_HEAP.
-        LoadAccelerators (USER.177): znajdz w RSC_HEAP, zwroc HACCEL
-          (na razie: same stubs; faktyczne TranslateAccelerator w ETAP 19g).
+[x] 18e: rc_loader.c - RT_ACCELERATOR wczytywanie + LoadAccelerators stub
+        RT_ACCEL wczytywany do RSC_HEAP przez rc_load_all() - DONE.
+        LoadAccelerators/TranslateAccelerator stubs w USER.EXE: ETAP 19.
 
-[ ] 18f: rc_loader.c - RT_ICON + RT_STRING refaktor
-        RT_ICON: wczytaj 1. ikone aplikacji do RSC_HEAP.
-          LoadIcon(hInst, MAKEINTRESOURCE(n)): zwroc ptr do danych icon (nie rysuj jeszcze).
-        RT_STRING: zachowac w KCB (jak dotychczas) ale uzyc find_ne_resource().
-          Refaktor load_ski_strings(): zastapic powielony parser.
-        RT_BITMAP: zachowac w SEL_BITMAPS (kompatybilnosc SKI); refaktor parsera.
+[x] 18f: rc_loader.c - RT_STRING + RT_BITMAP refaktor
+        RT_STRING: przeniesiony do rc_loader.c (rc_load_all -> KCB) - DONE.
+        RT_BITMAP: przeniesiony do rc_loader.c (rc_load_all -> SEL_BITMAPS) - DONE.
+        RT_ICON: nie wczytywany (planowane ETAP 20e dla shell ikon).
 
-[ ] 18g: Test - Win16App.exe laduje sie i wchodzi w WinMain
+[ ] 18g: Test - Win16App.exe laduje sie i wchodzi w WinMain  [TODO - ETAP 19a]
         Przetestuj loader z Win16App.exe (bez zasobow graficznych SKI):
           - Zaladuj Win16App.exe z STEP19/win16_example_app/Win1App.exe
           - Sprawdz serial: InitTask OK, zasoby wczytane (RT_MENU, RT_DIALOG, RT_ACCEL)
