@@ -340,6 +340,31 @@ boot_kbd.img: kernel.exe user.exe gdi.exe loader.exe kbd_test.exe fdconfig.sys $
 	@echo "[OK] boot_kbd.img gotowy"
 
 # -------------------------------------------------------
+# WIN16TEST.EXE - test ETAP 18g: WinMain + zasoby (RT_MENU/DIALOG/ACCEL)
+# -------------------------------------------------------
+win16test/w16test.exe:
+	$(MAKE) -C win16test
+
+boot_win16test.img: kernel.exe user.exe gdi.exe loader.exe win16test/w16test.exe fdauto_win16test.bat fdconfig.sys $(FDBOOT)
+	cp $(FDBOOT) boot_win16test.img
+	mcopy -i boot_win16test.img -o fdconfig.sys         ::fdconfig.sys
+	mdel  -i boot_win16test.img ::fdauto.bat 2>/dev/null || true
+	mcopy -i boot_win16test.img fdauto_win16test.bat    ::fdauto.bat
+	mcopy -i boot_win16test.img kernel.exe              ::kernel.exe
+	mcopy -i boot_win16test.img user.exe                ::user.exe
+	mcopy -i boot_win16test.img gdi.exe                 ::gdi.exe
+	mcopy -i boot_win16test.img loader.exe              ::loader.exe
+	mcopy -i boot_win16test.img win16test/w16test.exe   ::w16test.exe
+	@echo "[OK] boot_win16test.img gotowy"
+
+run-win16test: boot_win16test.img
+	qemu-system-i386 -fda boot_win16test.img -boot a -m 16 \
+	    -no-reboot -no-shutdown \
+	    -serial stdio \
+	    -display none \
+	    -d cpu_reset,guest_errors -D qemu.log 2>/dev/null
+
+# -------------------------------------------------------
 # TESTRES.NE - zasob testowy dla test_rc.exe (gen_testres.py)
 # -------------------------------------------------------
 TESTRES.NE: gen_testres.py
@@ -378,4 +403,5 @@ clean:
 	rm -f libstubs.obj pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj mouse_msg.obj rc_loader.obj
 	rm -f test_rc.exe test_rc.obj TESTRES.NE
 	rm -f panic.bin
-	rm -f boot.img boot_test_rc.img bochs.log qemu.log
+	rm -f boot.img boot_test_rc.img boot_win16test.img bochs.log qemu.log
+	$(MAKE) -C win16test clean

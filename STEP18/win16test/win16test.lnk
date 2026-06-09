@@ -1,0 +1,7 @@
+system windows
+name w16test.exe
+file WinMain.obj
+library clibs
+option quiet
+option modname=WIN16TEST
+option description 'Win16 rc_loader test app (ETAP 18g)'
