@@ -148,11 +148,17 @@ Eliminuje nawarstwianie napisów (trail effect).
 - `BeginPaint` może nie być wywoływany — SKI.EXE używa prawdopodobnie `GetDC`
 - DC map: DC2=small sprites, DC3=small masks, DC4=large sprites, DC5=large masks, DC6=intermediate
 
-### Dirty sprite background (WIP)
+### DC6 lifecycle (sub_09B3 w SKI.EXE)
 
-Skoczek zmienia sprite przy zmianie kierunku. Gdy nowy sprite jest mniejszy niż poprzedni,
-piksele starego sprite'a poza nowym bounding boxem zostają na ekranie.
+`sub_09B3` wywoływana przed każdym entity. Zachowanie:
+- Jeśli DC6 bitmap wystarczająco duży → **reuse bez zerowania** (skok do 0xa64)
+- Jeśli za mały → `CreateCompatibleBitmap` (nowy, zerowany) + `SelectObject(DC6, new_hbm)`
+- Rozmiary zaokrąglane do granicy 64: `(dim & 0xC0) + 0x40`
 
-Windows 3.1 rozwiązanie: `WM_ERASEBKGND` (WHITE_BRUSH) przed każdym `WM_PAINT`.
-Problem: SKI.EXE nie używa `DispatchMessage` → `WM_ERASEBKGND` w `DispatchMessage` nie odpala.
-Następny krok: znaleźć gdzie/jak SKI.EXE dispatchuje WM_PAINT (prawdopodobnie bezpośrednio przez pętlę GetMessage → WndProc call).
+**Bug**: po reuse DC6 ma stale `alpha=1` piksele z poprzedniego entity.
+Case2B (atlas→DC6) kopiuje tylko opaque piksele, pomija transparent → stale alpha=1 zostaje
+→ Case C zapisuje je na ekran → flag/NPC widoczny przez przezroczyste obszary skoczka.
+
+**Fix (gdi.c, Case2B)**: dla transparent src (`sp[3]==0`) jawnie zeruj `dp[3]=0` w dst.
+Dzięki temu Case C poprawnie pomija te piksele. Prawdziwa przezroczystość (gondola) działa
+dalej — przezroczyste obszary pokazują to co było na ekranie (tło z FillRect = biel).

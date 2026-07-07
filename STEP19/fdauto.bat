@@ -1,0 +1,2 @@
+@echo off
+LOADER.EXE WIN1APP.EXE
