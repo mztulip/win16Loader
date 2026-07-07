@@ -1120,27 +1120,8 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
           i czekac na EndDialog. Tworzy widoczny czarny prostokat.
         Pelne rysowanie kontrolek (static text, buttons): osobny podkrok.
 
-[ ] 19i: Pelne menu (RT_MENU) - opcjonalne / ETAP 20
-        Parsowanie zasobu RT_MENU (type=4):
-          Menu template: mtOption(WORD) mtID(WORD, 0 for popup) mtString(string)
-          MF_END (0x80) = ostatni element.
-        Rysowanie menu bar pod paskiem tytulu.
-        Klikniecie menu bar -> popup z itemami.
-        WM_COMMAND(id) do WndProc po wyborze item.
-        Bez tego: apka nie pokazuje menu (File/Help), ale dziala przez system.
-
-        Win16 USER ordinals dla menu:
-          CreateMenu (USER.151), DestroyMenu (USER.152), GetMenu (USER.157)
-          DrawMenuBar (USER.160), HiliteMenuItem (USER.162)
-          GetMenuItemCount (USER.263)
-
-Kolejnosc priorytetow do uruchomienia Win1App.exe z oknem i przyciskiem zamknij:
-  1. 19a (WinMain startup) - bez tego nic nie dziala
-  2. 19b (styl+tytul+NC metryki) - podstawa dla rysowania
-  3. 19c (rysowanie chrome) - wizualne okno
-  4. 19d (NC hit testing) + 19e (SC_CLOSE) - klikanie przyciskow
-  5. 19f (GetSystemMenu/AppendMenu stubs) - bez tego Win1App crashuje na GetSystemMenu
-  6. 19g (LoadAccelerators/TranslateAccelerator stubs) - bez tego crash w petli
+Kolejnosc realizacji (wszystkie [x]):
+  19a -> 19b -> 19c -> 19d+19e -> 19f -> 19g -> 19h
 
 Porownanie API STEP18 vs STEP19 (nowe exporty USER.EXE):
   --------+----------------------+----------------
@@ -1156,27 +1137,38 @@ Porownanie API STEP18 vs STEP19 (nowe exporty USER.EXE):
   411     | AppendMenu           | BRAK
   452     | CreateWindowEx       | BRAK
 
-  Nowe KERNEL.EXE exporty (jezeli clibs ich potrzebuje):
-  83      | GetCommandLine?      | sprawdzic
-  GetModuleHandle?               | sprawdzic z NE import table
+  KERNEL.EXE - sprawdzone (NE import table Win1App.exe):
+  Importowane: 3 (GetCurrentTask), 30 (WaitEvent), 49 (GetModuleFileName),
+               91 (InitTask), 113 (stub) - wszystkie zaimplementowane.
+  GetCommandLine (83): NIE importowane przez Win1App - nie potrzebne.
+  GetModuleHandle: NIE importowane przez Win1App - nie potrzebne.
 
 ---------------------------------------------------------------------------
-ETAP 20 - Shell / przeglądarka plikow z ikonami i uruchamianiem           [TODO]
+ETAP 20 - Menu bar + Shell / przeglądarka plikow z ikonami               [TODO]
 ---------------------------------------------------------------------------
-Cel: Loader po starcie pokazuje liste plikow EXE z dysku (dyskietki).
-     Kazdy plik ma ikone (domyslna lub wczytana z zasobow NE).
-     Pojedyncze klikniecie myszą = zaznaczenie.
-     Podwojne klikniecie = uruchomienie wybranego pliku EXE.
+Cel: (1) Pelne menu bar w oknie Win16 (RT_MENU, WM_COMMAND).
+     (2) Loader shell: lista plikow EXE z dysku, pojedyncze/podwojne klikniecie.
 
 Wymagania wstepne:
   - ETAP 17 (mysz PS/2 IRQ12) - juz gotowy
-  - ETAP 18 (rc_loader.c)     - potrzebny dla prawdziwych ikon (20e)
-  - Proste GDI (PatBlt, TextOut, BitBlt) - dostepne od STEP15
+  - ETAP 18 (rc_loader.c)     - potrzebny dla prawdziwych ikon (20f)
+  - ETAP 19 (chrome, NC)      - juz gotowy
 
-Wygladem zblizone do Windows 3.1 Program Manager lub prostego File Managera:
-  Szare tlo, ikonki w siatce lub lista pionowa, zaznaczenie = kolor wyroznienia.
+[ ] 20a: Pelne menu bar (RT_MENU)
+        Parsowanie zasobu RT_MENU (type=4):
+          Menu template: mtOption(WORD) mtID(WORD, 0 for popup) mtString(string)
+          MF_END (0x80) = ostatni element.
+        Rysowanie menu bar pod paskiem tytulu.
+        Klikniecie menu bar -> popup z itemami.
+        WM_COMMAND(id) do WndProc po wyborze item.
+        Bez tego: apka nie pokazuje menu (File/Help), ale dziala przez system.
 
-[ ] 20a: Skanowanie katalogu - lista plikow EXE (real mode, przed PM)
+        Win16 USER ordinals dla menu:
+          CreateMenu (USER.151), DestroyMenu (USER.152), GetMenu (USER.157)
+          DrawMenuBar (USER.160), HiliteMenuItem (USER.162)
+          GetMenuItemCount (USER.263)
+
+[ ] 20b: Skanowanie katalogu - lista plikow EXE (real mode, przed PM)
         Przed wejsciem w PM loader skanuje root directory dyskietki DOS:
           Uzyc INT 21h AH=4Eh (Find First) + AH=4Fh (Find Next) z maska *.EXE
           Zbierac nazwy plikow do statycznej tablicy (max 16 pozycji):
@@ -1189,7 +1181,7 @@ Wygladem zblizone do Windows 3.1 Program Manager lub prostego File Managera:
         Przechowac tablice w statycznej pamieci loadera (dostepna po wejsciu w PM
         przez far pointer z SEL_DATASEG lub przez KCB/RSC_HEAP).
 
-[ ] 20b: Rysowanie listy plikow na ekranie (loader shell screen)
+[ ] 20c: Rysowanie listy plikow na ekranie (loader shell screen)
         Przed uruchomieniem apki loader wchodzi w PM i rysuje shell screen:
           Tlo: PatBlt(screenDC, 0,0,640,480) z kolorem szarym (0xC0C0C0)
           Naglowek: "Win16 Shell - wybierz aplikacje" - bialy pasek u gory (28px)
@@ -1211,7 +1203,7 @@ Wygladem zblizone do Windows 3.1 Program Manager lub prostego File Managera:
           Rysowac przez bezposredni zapis do LFB (jak draw_window_chrome w ETAP 19c)
           albo przez PatBlt/TextOut przez GDI DC.
 
-[ ] 20c: Pojedyncze klikniecie - zaznaczenie wpisu
+[ ] 20d: Pojedyncze klikniecie - zaznaczenie wpisu
         Detekcja klikniecia w obszar wpisu:
           W petli mouse_poll(): sprawdz WM_LBUTTONDOWN
           Dla kazdego wpisu i: jezeli abs_y in [40+i*40 .. 40+i*40+32]
@@ -1221,7 +1213,7 @@ Wygladem zblizone do Windows 3.1 Program Manager lub prostego File Managera:
             Pozostale: tlo szare
           Serial log: "SHELL: selected=%d name=%s\n"
 
-[ ] 20d: Podwojne klikniecie - uruchomienie aplikacji
+[ ] 20e: Podwojne klikniecie - uruchomienie aplikacji
         Detekcja double-click:
           Zapamietaj czas i HWND/index ostatniego klikniecia:
             static unsigned long last_click_tick;
@@ -1242,7 +1234,7 @@ Wygladem zblizone do Windows 3.1 Program Manager lub prostego File Managera:
           Uwaga: wymaga zresetowania stanu GDI/USER po zamknieciu apki
             (wyczyscic g_windows[], g_classes[], DC-e itp.).
 
-[ ] 20e: Prawdziwa ikona z zasobow NE (wymaga ETAP 18 rc_loader.c)
+[ ] 20f: Prawdziwa ikona z zasobow NE (wymaga ETAP 18 rc_loader.c)
         Format ikony Win16 w NE:
           RT_GROUP_ICON (0x800E): katalog ikon - GRPICONDIR + GRPICONDIRENTRY[]
             GRPICONDIR: idReserved(2) idType(2) idCount(2)
@@ -1271,7 +1263,7 @@ Wygladem zblizone do Windows 3.1 Program Manager lub prostego File Managera:
         Nowy plik: shell_icon.c lub jako czesc rc_loader.c
           render_icon_32(unsigned char far *icon_data, int screen_x, int screen_y);
 
-[ ] 20f: Integracja z loaderem - fdauto.bat bez argumentu = shell
+[ ] 20g: Integracja z loaderem - fdauto.bat bez argumentu = shell
         Zmiana zachowania loadera:
           Aktualnie: loader.exe SKITEST.EXE (argument z linii polecen)
           Po zmianie: loader.exe bez argumentu -> uruchom shell
