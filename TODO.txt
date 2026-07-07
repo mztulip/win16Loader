@@ -911,7 +911,7 @@ Plik implementacji: rc_loader.c
         Budowa: make boot_win16test.img; run: make run-win16test.
 
 ---------------------------------------------------------------------------
-ETAP 19 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [TODO]
+ETAP 19 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [DONE]
 ---------------------------------------------------------------------------
 Cel: Win16 app zbudowana z Watcom clibs (WinMain + WS_OVERLAPPEDWINDOW) uruchamia
      sie i pokazuje okno z paskiem tytulu, przyciskami min/max/zamknij, ramka.
@@ -924,27 +924,23 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
     WM_SYSCOMMAND (SC_CLOSE/SC_MINIMIZE/SC_MAXIMIZE), WM_GETMINMAXINFO,
     WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_CLOSE, DialogBox, EndDialog.
 
-[ ] 19a: WinMain - weryfikacja i fix startu Watcom clibs
-        Watcom 'system windows' uzyw startupa C0W.obj ktory:
-          1. Wywoluje InitTask(KERNEL.91) - zwraca AX=cx, BX=heap, DI=hInst, SI=hPrevInst
-          2. Wywoluje WaitEvent(KERNEL.30) - zwraca 0
-          3. Odpakuje nCmdShow z InitTask result
-          4. Wywoluje WinMain(hInst, hPrevInst, lpCmdLine, nCmdShow)
-        Roznica wzgledem app_entry: STEP17 apps uzywa custom app_entry_, nie WinMain.
-        Win1App/Win16App uzywaja WinMain - clibs przekazuje sterowanie do WinMain
-        automatycznie po InitTask. To wymaga:
-          - InitTask (KERNEL.91) zwraca poprawne wartosci w rejestrach (juz zrobiony w libstubs.asm)
-          - WaitEvent (KERNEL.30) zwraca 0 (juz zrobiony)
-          - Watcom clibs szuka '__WinMain' w kodzie aplikacji (symbol z exportu NE)
-        Krok: zaladuj Win1App.exe bez zmian, sprawdz serial log czy WinMain jest wywolany.
-        Jezeli brak WinMain: sprawdz NE entry point (seg:off) i czy InitTask odpowiada ABI.
-        TODO szczegolowy:
-          [ ] Zidentyfikuj NE entry point Win1App.exe (ne_hdr.ne_csip - seg:off startupa)
-          [ ] Sprawdz czy InitTask zwraca DI=hInstance (SEL_APP_DATA = 0x40)
-          [ ] Sprawdz czy clibs uruchamia WinMain po InitTask i WaitEvent
-          [ ] Ewentualnie: wstrzyknac stub GetCommandLine (KERNEL.83) jesli clibs go woła
+[x] 19a: WinMain - weryfikacja i fix startu Watcom clibs
+        DONE. Trzy bledy ABI w stdlib wywolaniach przed WinMain:
+          1. USER.5=InitApp: Watcom pushuje 2 args (hInst x2), nasz stub mial 1 arg
+             -> [bp+0xa]=cmdSeg=SEL_PSP=0x38 zamiast hPrevInst=0 -> cmp jnz skipRC
+             FIX: InitApp(hInst, hPrevInst) 2 args (retf 4)
+          2. KERNEL.3=GetCurrentTask: 0 args, nasz KernelStub3 mial 1 arg (retf 2)
+             -> zjadal 1 word ze stosu WinMain args
+             FIX: GetCurrentTask(void) 0 args (retf 0)
+          3. KERNEL.49=GetModuleFileName: Watcom pushuje 3 words (hMod=DS, nearOff, nSize),
+             nasz stub mial far ptr (4 words, retf 8) -> zjadal 1 dodatkowy word
+             FIX: GetModuleFileName(hMod, nearBuf, nSize) 3 words (retf 6)
+          4. GetMessage: zwracal 1 natychmiast przy pustej kolejce -> tight loop -> crash
+             FIX: do_hlt() (sti+hlt+cli) gdy kolejka pusta; pmsg=WM_NULL
+        Wynik: Win1App.exe uruchamia sie, RegisterClass/CreateWindow/WM_PAINT OK,
+               message loop poprawnie blokuje na HLT.
 
-[ ] 19b: Rozszerzenie danych okna - styl, tytul, stan
+[x] 19b: Rozszerzenie danych okna - styl, tytul, stan
         Aktualnie g_windows[] nie przechowuje: style, title, state.
         GetClientRect zwraca raw w/h bez odjecia NC area.
 
@@ -982,7 +978,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
         CreateWindowEx (USER.452): jak CreateWindow ale z dwExStyle jako 1. param.
           Stub: ignoruj dwExStyle, wywolaj CreateWindow.
 
-[ ] 19c: Rysowanie chrome okna (WM_NCPAINT)
+[x] 19c: Rysowanie chrome okna (WM_NCPAINT)
         Win3.1 styl (bez 3D shadow z Win95):
           - Zewnetrzna ramka: 1px czarna (0x000000)
           - Wewnetrzna ramka (WS_THICKFRAME): 3px szara (0xC0C0C0)
@@ -1015,7 +1011,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
         Uwaga: draw_window_chrome pisze do LFB przez far pointer (32-bit).
           Offset w LFB: flat_off = (abs_y * pitch) + abs_x * 3  (24bpp, pitch=1920).
 
-[ ] 19d: Mouse NC hit testing + interakcja
+[x] 19d: Mouse NC hit testing + interakcja
         WM_NCHITTEST (0x0084): wParam=0, lParam=MAKELONG(screen_x, screen_y)
           Odpowiedz: HTCLIENT=1, HTCAPTION=2, HTCLOSE=20, HTMINBUTTON=8, HTMAXBUTTON=9,
             HTSYSMENU=3, HTBORDER=18, HTLEFT=10, HTRIGHT=11, HTTOP=12, HTBOTTOM=15, etc.
@@ -1044,7 +1040,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
             - jezeli HT != HTCLIENT: generuj WM_NCHITTEST + WM_NCLBUTTONDOWN/UP
             - jezeli HT == HTCLIENT: generuj WM_MOUSEMOVE jak dotychczas
 
-[ ] 19e: SC_CLOSE + WM_CLOSE + SC_MINIMIZE + SC_MAXIMIZE w DefWindowProc
+[x] 19e: SC_CLOSE + WM_CLOSE + SC_MINIMIZE + SC_MAXIMIZE w DefWindowProc
         DefWindowProc WM_SYSCOMMAND:
           SC_CLOSE (0xF060):
             SendMessage(hwnd, WM_CLOSE, 0, 0)
@@ -1067,7 +1063,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
         DestroyWindow -> WM_DESTROY -> wyczyscic g_windows[] entry ->
           Przerysuj obszar ekranu (PatBlt czarnym lub wzorem tla).
 
-[ ] 19f: GetSystemMenu + AppendMenu/InsertMenu + menu stubs
+[x] 19f: GetSystemMenu + AppendMenu/InsertMenu + menu stubs
         Cel: te API musza istniec (Win1App je wywoluje) ale nie musi byc pelny system menu.
 
         Nowe exporty USER.EXE:
@@ -1083,7 +1079,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
         Bonus (opcjonalnie): prosta implementacja systemu menu popup (uproszczona).
           Priorytetu niska - wazniejszy jest button zamknij.
 
-[ ] 19g: LoadAccelerators + TranslateAccelerator (stubs)
+[x] 19g: LoadAccelerators + TranslateAccelerator (stubs)
         Nowe exporty USER.EXE:
           LoadAccelerators  (USER.177): zwroc fake HACCEL (np. 0xACC0 | uID_low)
           TranslateAccelerator (USER.99): zawsze zwroc FALSE (brak dopasowania)
@@ -1093,7 +1089,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
         Jezeli zwracamy FALSE -> TM/DM dziala normalnie. Klawiatura Ctrl+A nie wywola
         ID_HELP_ABOUT, ale okno normalnie zamknie sie przez inne mechanizmy.
 
-[ ] 19h: DialogBox + EndDialog (minimalny modal dialog)
+[x] 19h: DialogBox + EndDialog (minimalny modal dialog stub)
         Win1App/Win16App uzywaja DialogBox dla "About" dialog.
         Bez tego: apka dziala (pomija About), ale nie pokazuje dialogu po Ctrl+A.
 
