@@ -1154,7 +1154,7 @@ Wymagania wstepne:
   - ETAP 18 (rc_loader.c)     - potrzebny dla prawdziwych ikon (20f)
   - ETAP 19 (chrome, NC)      - juz gotowy
 
-[ ] 20a: Pelne menu bar (RT_MENU)
+[x] 20a: Pelne menu bar (RT_MENU)
         Parsowanie zasobu RT_MENU (type=4):
           Menu template: mtOption(WORD) mtID(WORD, 0 for popup) mtString(string)
           MF_END (0x80) = ostatni element.
