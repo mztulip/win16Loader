@@ -311,6 +311,7 @@ boot.img: kernel.exe user.exe gdi.exe loader.exe win16_example_app/Win1App.exe f
 	mcopy -i boot.img gdi.exe                       ::gdi.exe
 	mcopy -i boot.img loader.exe                    ::loader.exe
 	mcopy -i boot.img win16_example_app/Win1App.exe ::win1app.exe
+	mcopy -i boot.img $(SKIFREE_DIR)/SKI.EXE        ::ski.exe
 	@echo "[OK] boot.img gotowy"
 
 run-qemu: boot.img
@@ -318,6 +319,18 @@ run-qemu: boot.img
 	    -no-reboot -no-shutdown \
 	    -serial stdio \
 	    -d cpu_reset,int,guest_errors -D qemu.log
+
+# run-shell: tryb shell (bez argumentu LOADER.EXE) - tymczasowo podmienia fdauto.bat
+run-shell: boot.img
+	mcopy -oi boot.img -o fdauto_shell.bat ::fdauto.bat 2>/dev/null || true
+	echo "@echo off" > /tmp/fdauto_shell_tmp.bat
+	echo "LOADER.EXE" >> /tmp/fdauto_shell_tmp.bat
+	mcopy -oi boot.img /tmp/fdauto_shell_tmp.bat ::fdauto.bat
+	qemu-system-i386 -fda boot.img -boot a -m 16 \
+	    -no-reboot -no-shutdown \
+	    -serial stdio \
+	    -d cpu_reset,int,guest_errors -D qemu.log ; \
+	mcopy -oi boot.img fdauto.bat ::fdauto.bat
 
 run: boot.img
 	bochs -f bochsrc -q
