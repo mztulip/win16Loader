@@ -1538,19 +1538,31 @@ static void load_ski_bitmaps(const char *filename)
 }
 #endif  /* USUNIETE W STEP18 */
 
+/* 20b-20e: shell tekstowy - skanowanie katalogu i wybor apki */
+extern const char *shell_run(void);
+
 /* ============================================================
  * main
  * ============================================================ */
 int main(int argc, char *argv[])
 {
-    const char *app_name = (argc > 1) ? argv[1] : "SKI.EXE";
+    const char *app_name;
     serial_init();
-    kprintf("=== NE Loader STEP15 - GlobalHeap XMS + RAM detection ===\n");
-    kprintf("App: %s\n", app_name);
+    kprintf("=== NE Loader STEP20 - shell / menu bar ===\n");
 
     /* 0. Wykryj dostepna pamiec RAM (przed PM - INT 15h dostepny tylko w real mode) */
     kprintf("--- RAM detection ---\n");
     mem_detect();
+
+    /* 20b-20e: jezeli brak argumentu -> uruchom shell textowy (przed VESA)
+     * Jezeli argument podany -> bezposrednie uruchomienie (jak dotychczas) */
+    if (argc <= 1) {
+        kprintf("--- Shell mode ---\n");
+        app_name = shell_run();  /* skanuje *.EXE, wyswietla UI, zwraca wybrany plik */
+    } else {
+        app_name = argv[1];
+    }
+    kprintf("App: %s\n", app_name);
 
     /* 0a. Inicjalizacja VESA (przed wejsciem w PM!) */
     kprintf("--- VESA init ---\n");
@@ -1657,35 +1669,45 @@ int main(int argc, char *argv[])
                 kcb->heap_phys, kcb->heap_end);
     }
 
-    /* 6. Zaladuj aplikacje NE */
-    kprintf("--- Ladowanie %s ---\n", app_name);
-    if (load_ne(app_name) != 0)
-        return 1;
-
-    /* 6b+6c: zasoby NE (RT_STRING -> KCB, RT_BITMAP -> SEL_BITMAPS,
-     *         RT_MENU/RT_DIALOG/RT_ACCEL -> RSC_HEAP) */
-    kprintf("--- Ladowanie zasobow NE: %s ---\n", app_name);
-    rc_init(app_name);
-    rc_load_all(g_kcb_phys, g_bitmaps_phys);
-    rc_copy_menu_to_kcb(g_kcb_phys);   /* RT_MENU -> KCB[292..511] */
-
-    g_orig_cs = get_cs();
-    g_orig_ss = get_ss();
-    g_orig_sp = get_sp();
-    g_cs_phys = (unsigned long)g_orig_cs << 4;
-
-    /* Reset tick_ms do 0 - IRQ0 incrementowal go podczas ladowania bitmap w PM */
-    {
+    /* 6. Petla shell: laduj i uruchamiaj aplikacje; wraca do shella po zamknieciu
+     *    (20e). Przy argc>1: jeden przebieg, potem exit. */
+    for (;;) {
         unsigned kcb_rm = (unsigned)(g_kcb_phys >> 4);
         KCB_LAYOUT __far *kcb_ptr = (KCB_LAYOUT __far *)MK_FP(kcb_rm, 0);
-        kcb_ptr->tick_ms = 0UL;
-    }
-    /* Inicjalizacja myszy PS/2 (real mode, przed PM) */
-    init_mouse_ps2();
 
-    kprintf("LFB=0x%08lX pitch=%u font=0x%06lX -> wchodze w PM\n",
-            g_lfb_phys, g_vesa_pitch, g_font_phys);
-    pm_call_app();
-    kprintf("STEP17 done.\n");
+        kprintf("--- Ladowanie %s ---\n", app_name);
+        if (load_ne(app_name) != 0) return 1;
+
+        kprintf("--- Ladowanie zasobow NE: %s ---\n", app_name);
+        rc_init(app_name);
+        rc_load_all(g_kcb_phys, g_bitmaps_phys);
+        rc_copy_menu_to_kcb(g_kcb_phys);
+
+        g_orig_cs = get_cs();
+        g_orig_ss = get_ss();
+        g_orig_sp = get_sp();
+        g_cs_phys = (unsigned long)g_orig_cs << 4;
+
+        /* Reset KCB pomiedzy uruchomieniami: tick, keyboard, mouse */
+        kcb_ptr->tick_ms = 0UL;
+        {
+            unsigned char __far *kb = (unsigned char __far *)MK_FP(kcb_rm, 272);
+            int ki;
+            for (ki = 0; ki < 19; ki++) kb[ki] = 0;
+        }
+
+        init_mouse_ps2();
+
+        kprintf("LFB=0x%08lX pitch=%u font=0x%06lX -> wchodze w PM\n",
+                g_lfb_phys, g_vesa_pitch, g_font_phys);
+        pm_call_app();
+        kprintf("App zakonczyla dzialanie.\n");
+
+        /* Tryb bezposredni: jeden przebieg, wyjdz */
+        if (argc > 1) break;
+
+        /* Tryb shell: pokaz liste ponownie i wybierz nastepna apke */
+        app_name = shell_run();
+    }
     return 0;
 }
