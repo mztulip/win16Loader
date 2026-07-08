@@ -91,6 +91,99 @@ static void vesa_fill_rect(int x0, int y0, int w, int h,
     }
 }
 
+static void vesa_get_pixel(int x, int y,
+                            unsigned char *pr, unsigned char *pg, unsigned char *pb)
+{
+    unsigned long off = (unsigned long)y * VESA_PITCH + (unsigned long)x * VESA_BPP;
+    unsigned win = (unsigned)(off >> 16);
+    unsigned o   = (unsigned)(off & 0xFFFFUL);
+    unsigned char __far *p = USR_MK_FP_VESA(SEL_VESA_BASE + win * 8u, o);
+    *pb = p[0]; *pg = p[1]; *pr = p[2];
+}
+
+static void vesa_put_pixel(int x, int y,
+                            unsigned char r, unsigned char g, unsigned char b)
+{
+    unsigned long off = (unsigned long)y * VESA_PITCH + (unsigned long)x * VESA_BPP;
+    unsigned win = (unsigned)(off >> 16);
+    unsigned o   = (unsigned)(off & 0xFFFFUL);
+    unsigned char __far *p = USR_MK_FP_VESA(SEL_VESA_BASE + win * 8u, o);
+    p[0] = b; p[1] = g; p[2] = r;
+}
+
+/* ============================================================
+ * Software mouse cursor — strzalka 12x17 pikseli
+ * 0=przezroczysty, 1=czarny, 2=bialy
+ * ============================================================ */
+#define CURSOR_W 12
+#define CURSOR_H 17
+
+static const unsigned char g_cur_shape[CURSOR_H][CURSOR_W] = {
+    {1,0,0,0,0,0,0,0,0,0,0,0},
+    {1,1,0,0,0,0,0,0,0,0,0,0},
+    {1,2,1,0,0,0,0,0,0,0,0,0},
+    {1,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0},
+    {1,2,2,2,2,1,0,0,0,0,0,0},
+    {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,2,2,2,2,2,1,0,0,0,0},
+    {1,2,2,2,2,1,1,1,0,0,0,0},
+    {1,2,2,1,2,1,0,0,0,0,0,0},
+    {1,2,1,0,1,2,1,0,0,0,0,0},
+    {1,1,0,0,0,1,2,1,0,0,0,0},
+    {0,0,0,0,0,1,2,1,0,0,0,0},
+    {0,0,0,0,0,0,1,2,1,0,0,0},
+    {0,0,0,0,0,0,0,1,1,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0},
+};
+
+/* Zapisane tlo pod kursorem (r,g,b per pixel) */
+static unsigned char g_cur_bg[CURSOR_H][CURSOR_W][3];
+static int g_cur_drawn = 0;
+static int g_cur_x = 0, g_cur_y = 0;
+
+static void cursor_erase(void)
+{
+    int row, col;
+    if (!g_cur_drawn) return;
+    for (row = 0; row < CURSOR_H; row++) {
+        int y = g_cur_y + row;
+        if (y < 0 || y >= 480) continue;
+        for (col = 0; col < CURSOR_W; col++) {
+            int x = g_cur_x + col;
+            if (x < 0 || x >= 640) continue;
+            if (g_cur_shape[row][col])
+                vesa_put_pixel(x, y, g_cur_bg[row][col][0],
+                                     g_cur_bg[row][col][1],
+                                     g_cur_bg[row][col][2]);
+        }
+    }
+    g_cur_drawn = 0;
+}
+
+static void cursor_draw(int cx, int cy)
+{
+    int row, col;
+    g_cur_x = cx; g_cur_y = cy;
+    for (row = 0; row < CURSOR_H; row++) {
+        int y = cy + row;
+        if (y < 0 || y >= 480) continue;
+        for (col = 0; col < CURSOR_W; col++) {
+            int x = cx + col;
+            unsigned char pix = g_cur_shape[row][col];
+            if (x < 0 || x >= 640 || !pix) continue;
+            vesa_get_pixel(x, y,
+                           &g_cur_bg[row][col][0],
+                           &g_cur_bg[row][col][1],
+                           &g_cur_bg[row][col][2]);
+            if (pix == 1) vesa_put_pixel(x, y,   0,   0,   0);
+            else          vesa_put_pixel(x, y, 255, 255, 255);
+        }
+    }
+    g_cur_drawn = 1;
+}
+
 /* DS switch */
 unsigned get_ds(void);
 #pragma aux get_ds = "mov ax, ds" value [ax] modify [ax];
@@ -1007,6 +1100,16 @@ BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
     }
     /* Sprawdz zdarzenia myszy (mouse_msg.c) */
     if (mouse_poll(pmsg, g_kb_hwnd ? g_kb_hwnd : 1)) {
+        /* Aktualizuj pozycje kursora (KCB[285..288] = abs X/Y) */
+        {
+            unsigned char __far *kcb = KCB_MK_FP(0);
+            int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+            int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+            if (mx != g_cur_x || my != g_cur_y || !g_cur_drawn) {
+                cursor_erase();
+                cursor_draw(mx, my);
+            }
+        }
         /* WM_LBUTTONDOWN: sprawdz czy w NC area */
         if (pmsg->message == 0x0201 /* WM_LBUTTONDOWN */) {
             int abs_x = (int)(pmsg->lParam & 0xFFFFUL);
@@ -1245,6 +1348,7 @@ BOOL __far __pascal ShowWindow(HWND hwnd, int nCmdShow)
         }
     }
     /* Wypelnij ekran tlem (bialy lub czarny) */
+    cursor_erase();
     vesa_fill_rect(0, 0, 640, 480, 0xFF, 0xFF, 0xFF);
     /* Narysuj chrome okna (ramka, pasek tytulu, przyciski) i menu bar */
     for (i = 0; i < MAX_WINDOWS; i++) {
@@ -1254,6 +1358,8 @@ BOOL __far __pascal ShowWindow(HWND hwnd, int nCmdShow)
             break;
         }
     }
+    /* Narysuj kursor w poczatkowej pozycji (srodek ekranu) */
+    cursor_draw(320, 240);
     /* WM_SIZE / WM_ACTIVATE (dla SKI.EXE game loop) */
     SendMessage(hwnd, WM_SIZE,     0, ((unsigned long)480 << 16) | 640UL);
     SendMessage(hwnd, WM_ACTIVATE, 1, 0L);
