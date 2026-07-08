@@ -1337,6 +1337,9 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
             if (wi >= MAX_WINDOWS) return 0;
             g_popup_idx = found;
+            /* Ukryj kursor PRZED draw_menu_bar, zeby cursor_erase w popup
+             * nie przywrocila pikselii sprzed podswietlenia (slad kursora) */
+            cursor_erase();
             draw_menu_bar(wi);
             cmd_id = draw_and_run_popup(found, hwnd);
             g_popup_idx = -1;
