@@ -925,38 +925,58 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
         }
     }
 
-    /* Prosta petla: czekaj na klikniecie myszy lub ESC */
-    for (;;) {
-        MSG tmp;
-        int hit_item = -1;
+    /* Petla menu - tryb "click to open, click to close" (Windows 3.1):
+     * Pierwsze WM_LBUTTONUP (puszczenie przycisku ktory otwarl menu) jest
+     * ignorowane. Menu zostaje otwarte az do nastepnego klikniecia:
+     *   - WM_LBUTTONDOWN poza popupem -> zamknij
+     *   - WM_LBUTTONDOWN na itemie   -> wybierz
+     *   - ESC                         -> zamknij */
+    {
+        int first_up_done = 0;  /* 0 = jeszcze nie puszczono przycisku otwierajacego */
 
-        do_hlt();   /* czekaj na IRQ */
+        for (;;) {
+            MSG tmp;
+            int hit_item = -1;
 
-        /* Sprawdz ESC */
-        do_sti(); vk = kb_dequeue(); do_cli();
-        if (vk == 0x1B) return 0;  /* ESC */
+            do_hlt();   /* czekaj na IRQ */
 
-        /* Sprawdz myszke */
-        if (mouse_poll(&tmp, target_hwnd)) {
-            if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
-                int ax = (int)(tmp.lParam & 0xFFFFUL);
-                int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                /* Klik poza popupem = zamknij */
-                if (ax < px || ax >= px + pw || ay < py || ay >= py + ph)
-                    return 0;
-                /* Klik w item */
-                i = (ay - py - 1) / item_h;
-                if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
-                    hit_item = i;
-            } else if (tmp.message == 0x0201 /* WM_LBUTTONDOWN */) {
-                int ax = (int)(tmp.lParam & 0xFFFFUL);
-                int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                if (ax < px || ax >= px + pw || ay < py || ay >= py + ph)
-                    return 0;
+            /* Sprawdz ESC */
+            do_sti(); vk = kb_dequeue(); do_cli();
+            if (vk == 0x1B) return 0;  /* ESC */
+
+            /* Sprawdz myszke */
+            if (mouse_poll(&tmp, target_hwnd)) {
+                if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
+                    if (!first_up_done) {
+                        /* Pierwsze puszczenie: zignoruj, przelacz w tryb click */
+                        first_up_done = 1;
+                    } else {
+                        /* Drugie puszczenie: klik na itemie lub poza */
+                        int ax = (int)(tmp.lParam & 0xFFFFUL);
+                        int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph)
+                            return 0;
+                        i = (ay - py - 1) / item_h;
+                        if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
+                            hit_item = i;
+                    }
+                } else if (tmp.message == 0x0201 /* WM_LBUTTONDOWN */) {
+                    /* Po pierwszym puszczeniu: klikniecie zamyka lub wybiera */
+                    if (first_up_done) {
+                        int ax = (int)(tmp.lParam & 0xFFFFUL);
+                        int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph)
+                            return 0;
+                        /* Klik na itemie: zaznacz, poczekaj na UP */
+                        i = (ay - py - 1) / item_h;
+                        if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
+                            hit_item = i;
+                    }
+                }
             }
+            if (hit_item >= 0)
+                return (unsigned)g_menu[mi].items[hit_item].id;
         }
-        if (hit_item >= 0)
-            return (unsigned)g_menu[mi].items[hit_item].id;
     }
 }
 
