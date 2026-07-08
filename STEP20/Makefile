@@ -46,8 +46,11 @@ rc_loader.obj: rc_loader.c rc_loader.h
 	$(WCC) -ml -q $< -fo=$@
 
 # Loader
-loader.exe: loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj
-	$(WCL) -ml -l=dos -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj -fe=loader.exe
+shell.obj: shell.c
+	$(WCC) -ml -q shell.c -fo=shell.obj
+
+loader.exe: loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj
+	$(WCL) -ml -l=dos -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj -fe=loader.exe
 
 # -------------------------------------------------------
 # KERNEL.EXE - prawdziwe Win16 ordynaly
