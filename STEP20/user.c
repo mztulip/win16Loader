@@ -761,18 +761,18 @@ static void draw_chrome_text(int sx, int sy, const char *s,
 static void draw_nc_button(int bx, int by, int bw, int bh, char glyph)
 {
     int tx, ty;
-    /* tlo szare */
-    vesa_fill_rect(bx, by, bw, bh, 0xC0, 0xC0, 0xC0);
-    /* ramka 1px biala (top/left) i czarna (bottom/right) — efekt 3D */
-    vesa_fill_rect(bx,          by,          bw, 1,  0xFF, 0xFF, 0xFF);
-    vesa_fill_rect(bx,          by,          1,  bh, 0xFF, 0xFF, 0xFF);
-    vesa_fill_rect(bx,          by + bh - 1, bw, 1,  0x00, 0x00, 0x00);
-    vesa_fill_rect(bx + bw - 1, by,          1,  bh, 0x00, 0x00, 0x00);
+    /* tlo — sredni teal */
+    vesa_fill_rect(bx, by, bw, bh, 0x60, 0xA8, 0xB4);
+    /* ramka 1px jasna (top/left) i ciemna (bottom/right) — efekt 3D */
+    vesa_fill_rect(bx,          by,          bw, 1,  0xA0, 0xD8, 0xE0);
+    vesa_fill_rect(bx,          by,          1,  bh, 0xA0, 0xD8, 0xE0);
+    vesa_fill_rect(bx,          by + bh - 1, bw, 1,  0x00, 0x40, 0x48);
+    vesa_fill_rect(bx + bw - 1, by,          1,  bh, 0x00, 0x40, 0x48);
     /* znak wycentrowany */
     tx = bx + (bw - FONT_W_USR) / 2;
     ty = by + (bh - FONT_H_USR) / 2;
     draw_chrome_char(tx, ty, (unsigned char)glyph,
-                     0x00,0x00,0x00, 0xC0,0xC0,0xC0);
+                     0x00,0x00,0x00, 0x60,0xA8,0xB4);
 }
 
 static void draw_window_chrome(int wi)
@@ -798,17 +798,17 @@ static void draw_window_chrome(int wi)
     vesa_fill_rect(wx, wy + wh - 1, ww, 1, 0,0,0);
     vesa_fill_rect(wx, wy, 1, wh, 0,0,0);
     vesa_fill_rect(wx + ww - 1, wy, 1, wh, 0,0,0);
-    /* Wewnetrzna gruba ramka 3px szara (inset o 1) */
-    vesa_fill_rect(wx+1, wy+1, ww-2, 3, 0xC0,0xC0,0xC0);
-    vesa_fill_rect(wx+1, wy+wh-4, ww-2, 3, 0xC0,0xC0,0xC0);
-    vesa_fill_rect(wx+1, wy+1, 3, wh-2, 0xC0,0xC0,0xC0);
-    vesa_fill_rect(wx+ww-4, wy+1, 3, wh-2, 0xC0,0xC0,0xC0);
+    /* Wewnetrzna gruba ramka 3px jasny teal (inset o 1) */
+    vesa_fill_rect(wx+1, wy+1, ww-2, 3, 0x88,0xC8,0xD0);
+    vesa_fill_rect(wx+1, wy+wh-4, ww-2, 3, 0x88,0xC8,0xD0);
+    vesa_fill_rect(wx+1, wy+1, 3, wh-2, 0x88,0xC8,0xD0);
+    vesa_fill_rect(wx+ww-4, wy+1, 3, wh-2, 0x88,0xC8,0xD0);
 
     /* Pasek tytulu: od (wx+4, wy+4) szerokosc ww-8, wysokosc NC_CAPTION_H */
     cap_x = wx + NC_BORDER_W;
     cap_y = wy + NC_BORDER_W;
     cap_w = ww - 2 * NC_BORDER_W;
-    vesa_fill_rect(cap_x, cap_y, cap_w, NC_CAPTION_H, 0x00,0x00,0x80); /* navy */
+    vesa_fill_rect(cap_x, cap_y, cap_w, NC_CAPTION_H, 0x0A,0x6E,0x7E); /* deep teal */
 
     /* Przycisk sysmenu (lewy) */
     draw_nc_button(cap_x, cap_y, NC_SYSMENU_W, NC_CAPTION_H, '=');
@@ -826,7 +826,7 @@ static void draw_window_chrome(int wi)
     title_x = cap_x + NC_SYSMENU_W + 4;
     title_y = cap_y + (NC_CAPTION_H - FONT_H_USR) / 2;
     draw_chrome_text(title_x, title_y, title,
-                     0xFF,0xFF,0xFF, 0x00,0x00,0x80);
+                     0xFF,0xFF,0xFF, 0x0A,0x6E,0x7E);
     (void)title_len;
 
     /* Obszar klienta: bialy (z uwzglednieniem menu bar jesli obecne) */
@@ -863,10 +863,10 @@ static void draw_menu_bar(int wi)
     g_menu_bar_y = my;
     g_menu_bar_w = mw;
 
-    /* Tlo szare */
-    vesa_fill_rect(mx, my, mw, MENU_BAR_H, 0xC0, 0xC0, 0xC0);
+    /* Tlo — jasny teal */
+    vesa_fill_rect(mx, my, mw, MENU_BAR_H, 0x88, 0xC0, 0xC8);
     /* Linia u dolu */
-    vesa_fill_rect(mx, my + MENU_BAR_H - 1, mw, 1, 0x80, 0x80, 0x80);
+    vesa_fill_rect(mx, my + MENU_BAR_H - 1, mw, 1, 0x40, 0x80, 0x88);
 
     /* Top-level pozycje */
     x = mx + 4;
@@ -879,14 +879,14 @@ static void draw_menu_bar(int wi)
         g_menu[i].x1 = x + tw + 8;
         /* Podswietl aktywny popup */
         if (i == g_popup_idx)
-            vesa_fill_rect(x - 2, my, tw + 12, MENU_BAR_H - 1, 0x00,0x00,0x80);
+            vesa_fill_rect(x - 2, my, tw + 12, MENU_BAR_H - 1, 0x0A,0x6E,0x7E);
         draw_chrome_text(x + 2, my + 1, g_menu[i].title,
                          (i == g_popup_idx) ? 0xFF : 0x00,
                          (i == g_popup_idx) ? 0xFF : 0x00,
                          (i == g_popup_idx) ? 0xFF : 0x00,
-                         (i == g_popup_idx) ? 0x00 : 0xC0,
-                         (i == g_popup_idx) ? 0x00 : 0xC0,
-                         (i == g_popup_idx) ? 0x00 : 0xC0);
+                         (i == g_popup_idx) ? 0x0A : 0x88,
+                         (i == g_popup_idx) ? 0x6E : 0xC0,
+                         (i == g_popup_idx) ? 0x7E : 0xC8);
         x = g_menu[i].x1;
     }
 }
@@ -911,20 +911,20 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
     /* Ukryj kursor przed rysowaniem popupu */
     cursor_erase();
 
-    /* Ramka + tlo */
-    vesa_fill_rect(px, py, pw, ph, 0xC0, 0xC0, 0xC0);
-    vesa_fill_rect(px, py, pw, 1, 0x00,0x00,0x00);
-    vesa_fill_rect(px, py + ph - 1, pw, 1, 0x00,0x00,0x00);
-    vesa_fill_rect(px, py, 1, ph, 0x00,0x00,0x00);
-    vesa_fill_rect(px + pw - 1, py, 1, ph, 0x00,0x00,0x00);
+    /* Ramka + tlo — bardzo jasny teal */
+    vesa_fill_rect(px, py, pw, ph, 0xC0, 0xE4, 0xE8);
+    vesa_fill_rect(px, py, pw, 1, 0x00,0x40,0x48);
+    vesa_fill_rect(px, py + ph - 1, pw, 1, 0x00,0x40,0x48);
+    vesa_fill_rect(px, py, 1, ph, 0x00,0x40,0x48);
+    vesa_fill_rect(px + pw - 1, py, 1, ph, 0x00,0x40,0x48);
 
     for (i = 0; i < n; i++) {
         int iy = py + 1 + i * item_h;
         if (g_menu[mi].items[i].separator) {
-            vesa_fill_rect(px+2, iy + item_h/2, pw-4, 1, 0x80,0x80,0x80);
+            vesa_fill_rect(px+2, iy + item_h/2, pw-4, 1, 0x40,0x90,0x98);
         } else {
             draw_chrome_text(px + 6, iy + 1, g_menu[mi].items[i].name,
-                             0x00,0x00,0x00, 0xC0,0xC0,0xC0);
+                             0x00,0x00,0x00, 0xC0,0xE4,0xE8);
         }
     }
 
@@ -1405,7 +1405,7 @@ BOOL __far __pascal ShowWindow(HWND hwnd, int nCmdShow)
     }
     /* Wypelnij ekran tlem (bialy lub czarny) */
     cursor_erase();
-    vesa_fill_rect(0, 0, 640, 480, 0xFF, 0xFF, 0xFF);
+    vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58); /* desktop: dark teal */
     /* Narysuj chrome okna (ramka, pasek tytulu, przyciski) i menu bar */
     for (i = 0; i < MAX_WINDOWS; i++) {
         if (g_windows[i].used && g_windows[i].hwnd == hwnd) {
