@@ -908,6 +908,9 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
     pw = 120;
     ph = n * item_h + 2;
 
+    /* Ukryj kursor przed rysowaniem popupu */
+    cursor_erase();
+
     /* Ramka + tlo */
     vesa_fill_rect(px, py, pw, ph, 0xC0, 0xC0, 0xC0);
     vesa_fill_rect(px, py, pw, 1, 0x00,0x00,0x00);
@@ -942,10 +945,20 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
 
             /* Sprawdz ESC */
             do_sti(); vk = kb_dequeue(); do_cli();
-            if (vk == 0x1B) return 0;  /* ESC */
+            if (vk == 0x1B) { cursor_draw(g_cur_x, g_cur_y); return 0; }
 
             /* Sprawdz myszke */
             if (mouse_poll(&tmp, target_hwnd)) {
+                /* Aktualizuj kursor na biezaco */
+                {
+                    unsigned char __far *kcb = KCB_MK_FP(0);
+                    int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+                    int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+                    if (mx != g_cur_x || my != g_cur_y || !g_cur_drawn) {
+                        cursor_erase();
+                        cursor_draw(mx, my);
+                    }
+                }
                 if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
                     if (!first_up_done) {
                         /* Pierwsze puszczenie: zignoruj, przelacz w tryb click */
@@ -954,8 +967,10 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
                         /* Drugie puszczenie: klik na itemie lub poza */
                         int ax = (int)(tmp.lParam & 0xFFFFUL);
                         int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph)
+                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph) {
+                            cursor_draw(g_cur_x, g_cur_y);
                             return 0;
+                        }
                         i = (ay - py - 1) / item_h;
                         if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
                             hit_item = i;
@@ -965,8 +980,10 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
                     if (first_up_done) {
                         int ax = (int)(tmp.lParam & 0xFFFFUL);
                         int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph)
+                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph) {
+                            cursor_draw(g_cur_x, g_cur_y);
                             return 0;
+                        }
                         /* Klik na itemie: zaznacz, poczekaj na UP */
                         i = (ay - py - 1) / item_h;
                         if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
@@ -974,8 +991,10 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
                     }
                 }
             }
-            if (hit_item >= 0)
+            if (hit_item >= 0) {
+                cursor_draw(g_cur_x, g_cur_y);
                 return (unsigned)g_menu[mi].items[hit_item].id;
+            }
         }
     }
 }
