@@ -1092,6 +1092,138 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
     }
 }
 
+/* Wyswietla uproszczone system menu pod przyciskiem sysmenu.
+ * bx,by: lewy-gorny rog przycisku; bh: wysokosc przycisku.
+ * win_state: 0=normal, 1=minimized, 2=maximized (do greyed itemow).
+ * Zwraca wybrany SC_* lub 0. */
+static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int win_state)
+{
+    /* Statyczne stringi w DS (SS!=DS w DLL) */
+    static const char s_restore[]  = "Restore";
+    static const char s_minimize[] = "Minimize";
+    static const char s_maximize[] = "Maximize";
+    static const char s_close[]    = "Close";
+
+    static struct {
+        const char *name;
+        unsigned    cmd;
+        int         sep;
+        int         grayed;
+    } items[5];
+
+    int px, py, pw, ph, n, i, item_h, hover_item, first_up_done;
+
+    items[0].name = s_restore;  items[0].cmd = SC_RESTORE;  items[0].sep = 0; items[0].grayed = (win_state == 0);
+    items[1].name = s_minimize; items[1].cmd = SC_MINIMIZE; items[1].sep = 0; items[1].grayed = (win_state == 1);
+    items[2].name = s_maximize; items[2].cmd = SC_MAXIMIZE; items[2].sep = 0; items[2].grayed = (win_state == 2);
+    items[3].name = 0;          items[3].cmd = 0;           items[3].sep = 1; items[3].grayed = 0;
+    items[4].name = s_close;    items[4].cmd = SC_CLOSE;    items[4].sep = 0; items[4].grayed = 0;
+    n = 5;
+
+    item_h = FONT_H_USR + 2;
+    px = bx;
+    py = by + bh;
+    pw = 90;
+    ph = n * item_h + 2;
+
+    cursor_erase();
+
+    /* Ramka + tlo */
+    vesa_fill_rect(px, py, pw, ph, 0xC0,0xE4,0xE8);
+    vesa_fill_rect(px, py,         pw, 1,  0x00,0x40,0x48);
+    vesa_fill_rect(px, py + ph - 1, pw, 1,  0x00,0x40,0x48);
+    vesa_fill_rect(px, py,          1, ph,  0x00,0x40,0x48);
+    vesa_fill_rect(px + pw - 1, py, 1, ph,  0x00,0x40,0x48);
+
+    for (i = 0; i < n; i++) {
+        int iy = py + 1 + i * item_h;
+        if (items[i].sep) {
+            vesa_fill_rect(px+1, iy, pw-2, item_h, 0xC0,0xE4,0xE8);
+            vesa_fill_rect(px+2, iy + item_h/2, pw-4, 1, 0x40,0x90,0x98);
+        } else {
+            unsigned char tr = items[i].grayed ? 0x90 : 0x00;
+            unsigned char tg = items[i].grayed ? 0x90 : 0x00;
+            unsigned char tb = items[i].grayed ? 0x90 : 0x00;
+            vesa_fill_rect(px+1, iy, pw-2, item_h, 0xC0,0xE4,0xE8);
+            draw_chrome_text(px + 6, iy + 1, items[i].name, tr,tg,tb, 0xC0,0xE4,0xE8);
+        }
+    }
+
+    hover_item    = -1;
+    first_up_done = 0;
+
+    for (;;) {
+        MSG tmp;
+        int hit_item = -1;
+        unsigned char vk;
+
+        do_hlt();
+        do_sti(); vk = kb_dequeue(); do_cli();
+        if (vk == 0x1B) { cursor_draw(g_cur_x, g_cur_y); return 0; }
+
+        if (mouse_poll(&tmp, target_hwnd)) {
+            unsigned char __far *kcb = KCB_MK_FP(0);
+            int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+            int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+            int new_hover = -1;
+
+            if (mx >= px && mx < px + pw && my >= py + 1 && my < py + ph - 1) {
+                int idx = (my - py - 1) / item_h;
+                if (idx >= 0 && idx < n && !items[idx].sep && !items[idx].grayed)
+                    new_hover = idx;
+            }
+            if (mx != g_cur_x || my != g_cur_y || new_hover != hover_item || !g_cur_drawn) {
+                cursor_erase();
+                if (new_hover != hover_item) {
+                    if (hover_item >= 0) {
+                        int iy = py + 1 + hover_item * item_h;
+                        vesa_fill_rect(px+1, iy, pw-2, item_h, 0xC0,0xE4,0xE8);
+                        draw_chrome_text(px+6, iy+1, items[hover_item].name,
+                                         0x00,0x00,0x00, 0xC0,0xE4,0xE8);
+                    }
+                    if (new_hover >= 0) {
+                        int iy = py + 1 + new_hover * item_h;
+                        vesa_fill_rect(px+1, iy, pw-2, item_h, 0x0A,0x6E,0x7E);
+                        draw_chrome_text(px+6, iy+1, items[new_hover].name,
+                                         0xFF,0xFF,0xFF, 0x0A,0x6E,0x7E);
+                    }
+                    hover_item = new_hover;
+                }
+                cursor_draw(mx, my);
+            }
+
+            if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
+                if (!first_up_done) { first_up_done = 1; }
+                else {
+                    int ax = (int)(tmp.lParam & 0xFFFFUL);
+                    int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                    if (ax < px || ax >= px+pw || ay < py || ay >= py+ph) {
+                        cursor_draw(g_cur_x, g_cur_y); return 0;
+                    }
+                    i = (ay - py - 1) / item_h;
+                    if (i >= 0 && i < n && !items[i].sep && !items[i].grayed)
+                        hit_item = i;
+                }
+            } else if (tmp.message == 0x0201 /* WM_LBUTTONDOWN */) {
+                if (first_up_done) {
+                    int ax = (int)(tmp.lParam & 0xFFFFUL);
+                    int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                    if (ax < px || ax >= px+pw || ay < py || ay >= py+ph) {
+                        cursor_draw(g_cur_x, g_cur_y); return 0;
+                    }
+                    i = (ay - py - 1) / item_h;
+                    if (i >= 0 && i < n && !items[i].sep && !items[i].grayed)
+                        hit_item = i;
+                }
+            }
+        }
+        if (hit_item >= 0) {
+            cursor_draw(g_cur_x, g_cur_y);
+            return items[hit_item].cmd;
+        }
+    }
+}
+
 /* ============================================================
  * ordinal 41: CreateWindow
  * ============================================================ */
@@ -1490,9 +1622,12 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 }
             }
             if (track_nc_button(bx, by, bw, bh, glyph, hwnd)) {
-                if (wp == HTSYSMENU)
-                    push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
-                else if (wp == HTMINBUTTON)
+                if (wp == HTSYSMENU) {
+                    unsigned sc = show_sysmenu_popup(bx, by, bh, hwnd,
+                                                     g_windows[wi].state);
+                    if (sc)
+                        push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)sc, lp);
+                } else if (wp == HTMINBUTTON)
                     push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MINIMIZE, lp);
                 else
                     push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
