@@ -880,10 +880,10 @@ static void draw_window_chrome(int wi)
     draw_nc_button(cap_x, cap_y, NC_SYSMENU_W, NC_CAPTION_H, '=', 0);
 
     /* Przycisk minimize (drugi od prawej) */
-    draw_nc_button(cap_x + cap_w - 2*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '_', 0);
+    draw_nc_button(cap_x + cap_w - 2*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '-', 0);
 
     /* Przycisk maximize (prawy) */
-    draw_nc_button(cap_x + cap_w - NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '^', 0);
+    draw_nc_button(cap_x + cap_w - NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '+', 0);
 
     /* Tytul: bialy tekst wycentrowany pionowo, wyrownany od lewej */
     title = g_windows[wi].title;
@@ -1484,9 +1484,9 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 if (wp == HTSYSMENU) {
                     bx=cap_x; by=cap_y; bw=NC_SYSMENU_W; bh=NC_CAPTION_H; glyph='=';
                 } else if (wp == HTMINBUTTON) {
-                    bx=cap_x+cap_w-2*NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='_';
+                    bx=cap_x+cap_w-2*NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='-';
                 } else {
-                    bx=cap_x+cap_w-NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='^';
+                    bx=cap_x+cap_w-NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='+';
                 }
             }
             if (track_nc_button(bx, by, bw, bh, glyph, hwnd)) {
