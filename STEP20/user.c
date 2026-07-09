@@ -1682,7 +1682,65 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
             }
         }
-        /* HTCAPTION: brak akcji w tej wersji */
+        /* HTCAPTION: drag okna */
+        if (wp == HTCAPTION) {
+            int wi;
+            int ax = (int)(lp & 0xFFFFUL);
+            int ay = (int)((lp >> 16) & 0xFFFFUL);
+            int drag_ox, drag_oy;
+            for (wi = 0; wi < MAX_WINDOWS; wi++)
+                if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
+            if (wi >= MAX_WINDOWS) return 0;
+            /* Nie mozna dragowac zmaksymalizowanego okna */
+            if (g_windows[wi].state == 2) return 0;
+            drag_ox = ax - g_windows[wi].x;
+            drag_oy = ay - g_windows[wi].y;
+            cursor_erase();
+            for (;;) {
+                MSG tmp;
+                do_hlt();
+                if (mouse_poll(&tmp, hwnd)) {
+                    unsigned char __far *kcb = KCB_MK_FP(0);
+                    int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+                    int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+                    int new_x = mx - drag_ox;
+                    int new_y = my - drag_oy;
+                    /* Clamp do ekranu */
+                    if (new_x < 0) new_x = 0;
+                    if (new_y < 0) new_y = 0;
+                    if (new_x + (int)g_windows[wi].w > 640)
+                        new_x = 640 - (int)g_windows[wi].w;
+                    if (new_y + (int)g_windows[wi].h > 480)
+                        new_y = 480 - (int)g_windows[wi].h;
+                    if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
+                        g_windows[wi].x = new_x;
+                        g_windows[wi].y = new_y;
+                        break;
+                    }
+                    /* Przerysuj przy ruchu */
+                    if (mx != g_cur_x || my != g_cur_y) {
+                        g_windows[wi].x = new_x;
+                        g_windows[wi].y = new_y;
+                        vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                        draw_window_chrome(wi);
+                        draw_menu_bar(wi);
+                        cursor_draw(mx, my);
+                    }
+                }
+            }
+            /* Zaktualizuj KCB i wyslij WM_PAINT */
+            {
+                int menu_h = (g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0;
+                kcb_set_wnd_pos((unsigned)hwnd,
+                    g_windows[wi].x + NC_BORDER_W,
+                    g_windows[wi].y + NC_BORDER_W + NC_CAPTION_H + menu_h);
+            }
+            vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+            draw_window_chrome(wi);
+            draw_menu_bar(wi);
+            cursor_draw(g_cur_x, g_cur_y);
+            push_msg(hwnd, WM_PAINT, 0, 0L);
+        }
         return 0;
     }
     if (msg == WM_SYSCOMMAND) {
