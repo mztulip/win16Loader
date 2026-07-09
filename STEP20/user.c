@@ -1433,7 +1433,7 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 push_msg(hwnd, 0x0111u /* WM_COMMAND */, (WPARAM)cmd_id, 0L);
             return 0;
         }
-        if (wp == HTSYSMENU || wp == HTMAXBUTTON) {
+        if (wp == HTSYSMENU || wp == HTMINBUTTON || wp == HTMAXBUTTON) {
             /* Pobierz wspolrzedne odpowiedniego przycisku */
             int wi, bx, by, bw, bh;
             char glyph;
@@ -1446,6 +1446,8 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 int cap_w = (int)g_windows[wi].w - 2 * NC_BORDER_W;
                 if (wp == HTSYSMENU) {
                     bx=cap_x; by=cap_y; bw=NC_SYSMENU_W; bh=NC_CAPTION_H; glyph='=';
+                } else if (wp == HTMINBUTTON) {
+                    bx=cap_x+cap_w-2*NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='_';
                 } else {
                     bx=cap_x+cap_w-NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='^';
                 }
@@ -1453,11 +1455,13 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (track_nc_button(bx, by, bw, bh, glyph, hwnd)) {
                 if (wp == HTSYSMENU)
                     push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
+                else if (wp == HTMINBUTTON)
+                    push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MINIMIZE, lp);
                 else
                     push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
             }
         }
-        /* HTCAPTION/HTMINBUTTON: brak akcji w tej wersji */
+        /* HTCAPTION: brak akcji w tej wersji */
         return 0;
     }
     if (msg == WM_SYSCOMMAND) {
@@ -1465,6 +1469,16 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (cmd == (SC_CLOSE & 0xFFF0u)) {
             /* SC_CLOSE: wyslij WM_CLOSE do okna */
             SendMessage(hwnd, WM_CLOSE, 0, 0L);
+        } else if (cmd == (SC_MINIMIZE & 0xFFF0u)) {
+            int wi;
+            for (wi = 0; wi < MAX_WINDOWS; wi++)
+                if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
+            if (wi < MAX_WINDOWS && g_windows[wi].state != 1) {
+                g_windows[wi].state = 1;
+                cursor_erase();
+                vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                cursor_draw(g_cur_x, g_cur_y);
+            }
         } else if (cmd == (SC_MAXIMIZE & 0xFFF0u)) {
             int wi;
             for (wi = 0; wi < MAX_WINDOWS; wi++)
