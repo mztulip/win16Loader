@@ -1085,7 +1085,14 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
                 }
             }
             if (hit_item >= 0) {
-                cursor_draw(g_cur_x, g_cur_y);
+                /* Flash: ciemniejszy kolor "wcisniety" przez ~110ms */
+                int iy = py + 1 + hit_item * item_h;
+                cursor_erase();
+                vesa_fill_rect(px+1, iy, pw-2, item_h, 0x06,0x40,0x48);
+                draw_chrome_text(px+6, iy+1, g_menu[mi].items[hit_item].name,
+                                 0xFF,0xFF,0xFF, 0x06,0x40,0x48);
+                do_hlt(); do_hlt();
+                if (!g_cur_drawn) cursor_draw(g_cur_x, g_cur_y);
                 return (unsigned)g_menu[mi].items[hit_item].id;
             }
         }
@@ -1220,7 +1227,13 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
             }
         }
         if (hit_item >= 0) {
-            /* kursor juz narysowany w bloku mouse_poll powyzej */
+            /* Flash: ciemniejszy kolor "wcisniety" przez ~110ms */
+            int iy = py + 1 + hit_item * item_h;
+            cursor_erase();
+            vesa_fill_rect(px+1, iy, pw-2, item_h, 0x06,0x40,0x48);
+            draw_chrome_text(px+6, iy+1, items[hit_item].name,
+                             0xFF,0xFF,0xFF, 0x06,0x40,0x48);
+            do_hlt(); do_hlt();
             return items[hit_item].cmd;
         }
     }
