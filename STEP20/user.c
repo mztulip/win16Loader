@@ -796,7 +796,7 @@ static void draw_minimized_icon(int wi)
     int ix = 4 + wi * 124;
     int iy = ICON_Y;
     const char *src = g_windows[wi].title[0] ? g_windows[wi].title : "Window";
-    char buf[13];   /* max 12 znakow + NUL */
+    static char buf[13];   /* static -> w DS, nie na stosie (SS!=DS w DLL) */
     int  i;
     for (i = 0; i < 12 && src[i]; i++) buf[i] = src[i];
     buf[i] = '\0';
