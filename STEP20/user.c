@@ -1625,8 +1625,23 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 if (wp == HTSYSMENU) {
                     unsigned sc = show_sysmenu_popup(bx, by, bh, hwnd,
                                                      g_windows[wi].state);
-                    if (sc)
+                    /* Wymazanie popupu: sc==0 (anulowano) lub sc!=0 jesli akcja
+                     * nie przebudowuje calego ekranu (nieuzywane obecnie, ale
+                     * bezpieczne zawsze). Akcje SC_* ktore czyszcza ekran same
+                     * wywoluja vesa_fill_rect/draw_window_chrome - nie szkodzi
+                     * jesli tu tez przebudujemy (zostanie nadpisane). */
+                    if (!sc) {
+                        /* Anulowano: wymazanie popupu + odswiezenie */
+                        int item_h = FONT_H_USR + 2;
+                        int pop_h  = 5 * item_h + 2;  /* 5 itemow */
+                        cursor_erase();
+                        vesa_fill_rect(bx, by + bh, 90, pop_h, 0xFF, 0xFF, 0xFF);
+                        draw_menu_bar(wi);
+                        cursor_draw(g_cur_x, g_cur_y);
+                        push_msg(hwnd, WM_PAINT, 0, 0L);
+                    } else {
                         push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)sc, lp);
+                    }
                 } else if (wp == HTMINBUTTON)
                     push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MINIMIZE, lp);
                 else
