@@ -759,22 +759,63 @@ static void draw_chrome_text(int sx, int sy, const char *s,
     }
 }
 
-/* Rysuje jeden przycisk NC (szary prostokat z 1 znakiem) */
-static void draw_nc_button(int bx, int by, int bw, int bh, char glyph)
+/* Rysuje jeden przycisk NC; pressed=1 -> odwrocone 3D (wcisniety) */
+static void draw_nc_button(int bx, int by, int bw, int bh, char glyph, int pressed)
 {
     int tx, ty;
-    /* tlo — sredni teal */
     vesa_fill_rect(bx, by, bw, bh, 0x60, 0xA8, 0xB4);
-    /* ramka 1px jasna (top/left) i ciemna (bottom/right) — efekt 3D */
-    vesa_fill_rect(bx,          by,          bw, 1,  0xA0, 0xD8, 0xE0);
-    vesa_fill_rect(bx,          by,          1,  bh, 0xA0, 0xD8, 0xE0);
-    vesa_fill_rect(bx,          by + bh - 1, bw, 1,  0x00, 0x40, 0x48);
-    vesa_fill_rect(bx + bw - 1, by,          1,  bh, 0x00, 0x40, 0x48);
-    /* znak wycentrowany */
-    tx = bx + (bw - FONT_W_USR) / 2;
-    ty = by + (bh - FONT_H_USR) / 2;
+    if (pressed) {
+        /* wcisniety: ciemna krawedz top/left, jasna bottom/right */
+        vesa_fill_rect(bx,          by,          bw, 1,  0x00, 0x40, 0x48);
+        vesa_fill_rect(bx,          by,          1,  bh, 0x00, 0x40, 0x48);
+        vesa_fill_rect(bx,          by + bh - 1, bw, 1,  0xA0, 0xD8, 0xE0);
+        vesa_fill_rect(bx + bw - 1, by,          1,  bh, 0xA0, 0xD8, 0xE0);
+        tx = bx + (bw - FONT_W_USR) / 2 + 1;
+        ty = by + (bh - FONT_H_USR) / 2 + 1;
+    } else {
+        /* normalny: jasna top/left, ciemna bottom/right */
+        vesa_fill_rect(bx,          by,          bw, 1,  0xA0, 0xD8, 0xE0);
+        vesa_fill_rect(bx,          by,          1,  bh, 0xA0, 0xD8, 0xE0);
+        vesa_fill_rect(bx,          by + bh - 1, bw, 1,  0x00, 0x40, 0x48);
+        vesa_fill_rect(bx + bw - 1, by,          1,  bh, 0x00, 0x40, 0x48);
+        tx = bx + (bw - FONT_W_USR) / 2;
+        ty = by + (bh - FONT_H_USR) / 2;
+    }
     draw_chrome_char(tx, ty, (unsigned char)glyph,
                      0x00,0x00,0x00, 0x60,0xA8,0xB4);
+}
+
+/* Sledzi przycisk NC: rysuje wcisniety, czeka na mouse-up.
+ * Zwraca 1 jesli puszczono nad przyciskiem, 0 jesli poza. */
+static int track_nc_button(int bx, int by, int bw, int bh, char glyph, HWND target_hwnd)
+{
+    int released_on = 0;
+    cursor_erase();
+    draw_nc_button(bx, by, bw, bh, glyph, 1);
+    cursor_draw(g_cur_x, g_cur_y);
+    for (;;) {
+        MSG tmp;
+        do_hlt();
+        if (mouse_poll(&tmp, target_hwnd)) {
+            unsigned char __far *kcb = KCB_MK_FP(0);
+            int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+            int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+            if (mx != g_cur_x || my != g_cur_y || !g_cur_drawn) {
+                cursor_erase();
+                cursor_draw(mx, my);
+            }
+            if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
+                int ax = (int)(tmp.lParam & 0xFFFFUL);
+                int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                released_on = (ax >= bx && ax < bx+bw && ay >= by && ay < by+bh);
+                break;
+            }
+        }
+    }
+    cursor_erase();
+    draw_nc_button(bx, by, bw, bh, glyph, 0);
+    cursor_draw(g_cur_x, g_cur_y);
+    return released_on;
 }
 
 static void draw_window_chrome(int wi)
@@ -813,13 +854,13 @@ static void draw_window_chrome(int wi)
     vesa_fill_rect(cap_x, cap_y, cap_w, NC_CAPTION_H, 0x0A,0x6E,0x7E); /* deep teal */
 
     /* Przycisk sysmenu (lewy) */
-    draw_nc_button(cap_x, cap_y, NC_SYSMENU_W, NC_CAPTION_H, '=');
+    draw_nc_button(cap_x, cap_y, NC_SYSMENU_W, NC_CAPTION_H, '=', 0);
 
     /* Przycisk minimize (drugi od prawej) */
-    draw_nc_button(cap_x + cap_w - 2*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '_');
+    draw_nc_button(cap_x + cap_w - 2*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '_', 0);
 
     /* Przycisk maximize (prawy) */
-    draw_nc_button(cap_x + cap_w - NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '^');
+    draw_nc_button(cap_x + cap_w - NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '^', 0);
 
     /* Tytul: bialy tekst wycentrowany pionowo, wyrownany od lewej */
     title = g_windows[wi].title;
@@ -1392,12 +1433,30 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 push_msg(hwnd, 0x0111u /* WM_COMMAND */, (WPARAM)cmd_id, 0L);
             return 0;
         }
-        if (wp == HTSYSMENU) {
-            /* Klikniecie na sysmenu = zamknij okno (Win3.1: double-click; my: single) */
-            push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
+        if (wp == HTSYSMENU || wp == HTMAXBUTTON) {
+            /* Pobierz wspolrzedne odpowiedniego przycisku */
+            int wi, bx, by, bw, bh;
+            char glyph;
+            for (wi = 0; wi < MAX_WINDOWS; wi++)
+                if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
+            if (wi >= MAX_WINDOWS) return 0;
+            {
+                int cap_x = g_windows[wi].x + NC_BORDER_W;
+                int cap_y = g_windows[wi].y + NC_BORDER_W;
+                int cap_w = (int)g_windows[wi].w - 2 * NC_BORDER_W;
+                if (wp == HTSYSMENU) {
+                    bx=cap_x; by=cap_y; bw=NC_SYSMENU_W; bh=NC_CAPTION_H; glyph='=';
+                } else {
+                    bx=cap_x+cap_w-NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='^';
+                }
+            }
+            if (track_nc_button(bx, by, bw, bh, glyph, hwnd)) {
+                if (wp == HTSYSMENU)
+                    push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
+                else
+                    push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
+            }
         }
-        if (wp == HTMAXBUTTON)
-            push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
         /* HTCAPTION/HTMINBUTTON: brak akcji w tej wersji */
         return 0;
     }
