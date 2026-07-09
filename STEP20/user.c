@@ -893,6 +893,24 @@ static void draw_menu_bar(int wi)
 
 /* Rysuje popup dropdown dla g_menu[idx].
  * Zwraca ID wybranego itemu (0 jesli zadnego / ESC). */
+/* Rysuje jeden item popupu (z podswietleniem lub bez) */
+static void draw_popup_item(int mi, int i, int px, int py, int pw, int item_h, int highlighted)
+{
+    int iy = py + 1 + i * item_h;
+    if (g_menu[mi].items[i].separator) {
+        vesa_fill_rect(px+1, iy, pw-2, item_h,  0xC0,0xE4,0xE8);
+        vesa_fill_rect(px+2, iy + item_h/2, pw-4, 1, 0x40,0x90,0x98);
+    } else if (highlighted) {
+        vesa_fill_rect(px+1, iy, pw-2, item_h, 0x0A,0x6E,0x7E);
+        draw_chrome_text(px + 6, iy + 1, g_menu[mi].items[i].name,
+                         0xFF,0xFF,0xFF, 0x0A,0x6E,0x7E);
+    } else {
+        vesa_fill_rect(px+1, iy, pw-2, item_h, 0xC0,0xE4,0xE8);
+        draw_chrome_text(px + 6, iy + 1, g_menu[mi].items[i].name,
+                         0x00,0x00,0x00, 0xC0,0xE4,0xE8);
+    }
+}
+
 static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
 {
     int px, py, pw, ph, i, item_h, n;
@@ -918,15 +936,8 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
     vesa_fill_rect(px, py, 1, ph, 0x00,0x40,0x48);
     vesa_fill_rect(px + pw - 1, py, 1, ph, 0x00,0x40,0x48);
 
-    for (i = 0; i < n; i++) {
-        int iy = py + 1 + i * item_h;
-        if (g_menu[mi].items[i].separator) {
-            vesa_fill_rect(px+2, iy + item_h/2, pw-4, 1, 0x40,0x90,0x98);
-        } else {
-            draw_chrome_text(px + 6, iy + 1, g_menu[mi].items[i].name,
-                             0x00,0x00,0x00, 0xC0,0xE4,0xE8);
-        }
-    }
+    for (i = 0; i < n; i++)
+        draw_popup_item(mi, i, px, py, pw, item_h, 0);
 
     /* Petla menu - tryb "click to open, click to close" (Windows 3.1):
      * Pierwsze WM_LBUTTONUP (puszczenie przycisku ktory otwarl menu) jest
@@ -936,6 +947,7 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
      *   - ESC                         -> zamknij */
     {
         int first_up_done = 0;  /* 0 = jeszcze nie puszczono przycisku otwierajacego */
+        int hover_item = -1;    /* aktualnie podswietlony item (-1 = brak) */
 
         for (;;) {
             MSG tmp;
@@ -949,13 +961,28 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
 
             /* Sprawdz myszke */
             if (mouse_poll(&tmp, target_hwnd)) {
-                /* Aktualizuj kursor na biezaco */
+                /* Aktualizuj kursor + hover na biezaco */
                 {
                     unsigned char __far *kcb = KCB_MK_FP(0);
                     int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
                     int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
-                    if (mx != g_cur_x || my != g_cur_y || !g_cur_drawn) {
+                    int new_hover = -1;
+                    /* Oblicz nowy hover */
+                    if (mx >= px && mx < px + pw && my >= py + 1 && my < py + ph - 1) {
+                        int idx = (my - py - 1) / item_h;
+                        if (idx >= 0 && idx < n && !g_menu[mi].items[idx].separator)
+                            new_hover = idx;
+                    }
+                    if (mx != g_cur_x || my != g_cur_y || new_hover != hover_item || !g_cur_drawn) {
                         cursor_erase();
+                        /* Przerysuj zmienione itemy bez kursora */
+                        if (new_hover != hover_item) {
+                            if (hover_item >= 0)
+                                draw_popup_item(mi, hover_item, px, py, pw, item_h, 0);
+                            if (new_hover >= 0)
+                                draw_popup_item(mi, new_hover, px, py, pw, item_h, 1);
+                            hover_item = new_hover;
+                        }
                         cursor_draw(mx, my);
                     }
                 }
