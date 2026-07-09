@@ -440,6 +440,7 @@ static void decode_dc(HDC hdc, int *ox, int *oy)
 #define SC_MINIMIZE 0xF020u
 #define SC_MAXIMIZE 0xF030u
 #define SC_RESTORE  0xF120u
+#define SC_MOVE     0xF010u
 
 /* Font ROM (8x16, PSF) dostepny przez GDT selector 0x118 */
 #define SEL_FONT_USR   0x118u
@@ -1105,6 +1106,7 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
 {
     /* Statyczne stringi w DS (SS!=DS w DLL) */
     static const char s_restore[]  = "Restore";
+    static const char s_move[]     = "Move";
     static const char s_minimize[] = "Minimize";
     static const char s_maximize[] = "Maximize";
     static const char s_close[]    = "Close";
@@ -1114,16 +1116,17 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
         unsigned    cmd;
         int         sep;
         int         grayed;
-    } items[5];
+    } items[6];
 
     int px, py, pw, ph, n, i, item_h, hover_item, first_up_done;
 
     items[0].name = s_restore;  items[0].cmd = SC_RESTORE;  items[0].sep = 0; items[0].grayed = (win_state == 0);
-    items[1].name = s_minimize; items[1].cmd = SC_MINIMIZE; items[1].sep = 0; items[1].grayed = (win_state == 1);
-    items[2].name = s_maximize; items[2].cmd = SC_MAXIMIZE; items[2].sep = 0; items[2].grayed = (win_state == 2);
-    items[3].name = 0;          items[3].cmd = 0;           items[3].sep = 1; items[3].grayed = 0;
-    items[4].name = s_close;    items[4].cmd = SC_CLOSE;    items[4].sep = 0; items[4].grayed = 0;
-    n = 5;
+    items[1].name = s_move;     items[1].cmd = SC_MOVE;     items[1].sep = 0; items[1].grayed = (win_state != 0);
+    items[2].name = s_minimize; items[2].cmd = SC_MINIMIZE; items[2].sep = 0; items[2].grayed = (win_state == 1);
+    items[3].name = s_maximize; items[3].cmd = SC_MAXIMIZE; items[3].sep = 0; items[3].grayed = (win_state == 2);
+    items[4].name = 0;          items[4].cmd = 0;           items[4].sep = 1; items[4].grayed = 0;
+    items[5].name = s_close;    items[5].cmd = SC_CLOSE;    items[5].sep = 0; items[5].grayed = 0;
+    n = 6;
 
     item_h = FONT_H_USR + 2;
     px = bx;
@@ -1802,6 +1805,55 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     ((unsigned long)(g_windows[wi].h - 2*NC_BORDER_W - NC_CAPTION_H
                                      - ((g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0)) << 16)
                     | (unsigned long)(g_windows[wi].w - 2*NC_BORDER_W));
+                push_msg(hwnd, WM_PAINT, 0, 0L);
+            }
+        } else if (cmd == (SC_MOVE & 0xFFF0u)) {
+            /* SC_MOVE: drag okna myszka (tak jak HTCAPTION, start od g_cur_x/y) */
+            int wi;
+            for (wi = 0; wi < MAX_WINDOWS; wi++)
+                if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
+            if (wi < MAX_WINDOWS && g_windows[wi].state == 0) {
+                int drag_ox = g_cur_x - g_windows[wi].x;
+                int drag_oy = g_cur_y - g_windows[wi].y;
+                cursor_erase();
+                for (;;) {
+                    MSG tmp;
+                    do_hlt();
+                    if (mouse_poll(&tmp, hwnd)) {
+                        unsigned char __far *kcb = KCB_MK_FP(0);
+                        int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+                        int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+                        int new_x = mx - drag_ox;
+                        int new_y = my - drag_oy;
+                        if (new_x < 0) new_x = 0;
+                        if (new_y < 0) new_y = 0;
+                        if (new_x + (int)g_windows[wi].w > 640) new_x = 640 - (int)g_windows[wi].w;
+                        if (new_y + (int)g_windows[wi].h > 480) new_y = 480 - (int)g_windows[wi].h;
+                        if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
+                            g_windows[wi].x = new_x;
+                            g_windows[wi].y = new_y;
+                            break;
+                        }
+                        if (mx != g_cur_x || my != g_cur_y) {
+                            g_windows[wi].x = new_x;
+                            g_windows[wi].y = new_y;
+                            vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                            draw_window_chrome(wi);
+                            draw_menu_bar(wi);
+                            cursor_draw(mx, my);
+                        }
+                    }
+                }
+                {
+                    int menu_h = (g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0;
+                    kcb_set_wnd_pos((unsigned)hwnd,
+                        g_windows[wi].x + NC_BORDER_W,
+                        g_windows[wi].y + NC_BORDER_W + NC_CAPTION_H + menu_h);
+                }
+                vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                draw_window_chrome(wi);
+                draw_menu_bar(wi);
+                cursor_draw(g_cur_x, g_cur_y);
                 push_msg(hwnd, WM_PAINT, 0, 0L);
             }
         } else if (cmd == (SC_RESTORE & 0xFFF0u)) {
