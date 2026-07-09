@@ -795,14 +795,17 @@ static void draw_minimized_icon(int wi)
 {
     int ix = 4 + wi * 124;
     int iy = ICON_Y;
+    const char *src = g_windows[wi].title[0] ? g_windows[wi].title : "Window";
+    char buf[13];   /* max 12 znakow + NUL */
+    int  i;
+    for (i = 0; i < 12 && src[i]; i++) buf[i] = src[i];
+    buf[i] = '\0';
     vesa_fill_rect(ix,    iy,    ICON_W, ICON_H, 0x60, 0xA8, 0xB4);
     vesa_fill_rect(ix,    iy,    ICON_W, 1,      0xA0, 0xD8, 0xE0);
     vesa_fill_rect(ix,    iy,    1,      ICON_H, 0xA0, 0xD8, 0xE0);
     vesa_fill_rect(ix,    iy+ICON_H-1, ICON_W, 1, 0x00, 0x40, 0x48);
     vesa_fill_rect(ix+ICON_W-1, iy, 1, ICON_H, 0x00, 0x40, 0x48);
-    draw_chrome_text(ix + 4, iy + 2,
-                     g_windows[wi].title[0] ? g_windows[wi].title : "Window",
-                     0x00, 0x00, 0x00, 0x60, 0xA8, 0xB4);
+    draw_chrome_text(ix + 4, iy + 2, buf, 0x00, 0x00, 0x00, 0x60, 0xA8, 0xB4);
 }
 
 /* Sledzi przycisk NC: rysuje wcisniety, czeka na mouse-up.
