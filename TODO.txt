@@ -1235,6 +1235,9 @@ Wymagania wstepne:
           Na WM_LBUTTONUP: zaktualizuj KCB (kcb_set_wnd_pos), vesa_fill_rect,
             draw_window_chrome, draw_menu_bar, cursor_draw, push WM_PAINT.
         Drag zmaksymalizowanego okna (state==2) zablokowany.
+        Sysmenu popup: dodano item "Move" (SC_MOVE 0xF010),
+          wyszarzony gdy state!=0. SC_MOVE handler = identyczny drag
+          jak HTCAPTION ale startuje od g_cur_x/y (pozycja kursora).
 
 [x] 20b: Skanowanie katalogu - lista plikow EXE (real mode, przed PM)
         Przed wejsciem w PM loader skanuje root directory dyskietki DOS:
