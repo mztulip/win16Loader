@@ -439,6 +439,7 @@ static void decode_dc(HDC hdc, int *ox, int *oy)
 #define SC_CLOSE    0xF060u
 #define SC_MINIMIZE 0xF020u
 #define SC_MAXIMIZE 0xF030u
+#define SC_RESTORE  0xF120u
 
 /* Font ROM (8x16, PSF) dostepny przez GDT selector 0x118 */
 #define SEL_FONT_USR   0x118u
@@ -783,6 +784,25 @@ static void draw_nc_button(int bx, int by, int bw, int bh, char glyph, int press
     }
     draw_chrome_char(tx, ty, (unsigned char)glyph,
                      0x00,0x00,0x00, 0x60,0xA8,0xB4);
+}
+
+/* Rysuje mini-ikone zminimalizowanego okna na dole ekranu.
+ * wi: indeks w g_windows. Ikona: x=4+wi*124, y=462, 120x16. */
+#define ICON_Y   462
+#define ICON_W   120
+#define ICON_H    16
+static void draw_minimized_icon(int wi)
+{
+    int ix = 4 + wi * 124;
+    int iy = ICON_Y;
+    vesa_fill_rect(ix,    iy,    ICON_W, ICON_H, 0x60, 0xA8, 0xB4);
+    vesa_fill_rect(ix,    iy,    ICON_W, 1,      0xA0, 0xD8, 0xE0);
+    vesa_fill_rect(ix,    iy,    1,      ICON_H, 0xA0, 0xD8, 0xE0);
+    vesa_fill_rect(ix,    iy+ICON_H-1, ICON_W, 1, 0x00, 0x40, 0x48);
+    vesa_fill_rect(ix+ICON_W-1, iy, 1, ICON_H, 0x00, 0x40, 0x48);
+    draw_chrome_text(ix + 4, iy + 2,
+                     g_windows[wi].title[0] ? g_windows[wi].title : "Window",
+                     0x00, 0x00, 0x00, 0x60, 0xA8, 0xB4);
 }
 
 /* Sledzi przycisk NC: rysuje wcisniety, czeka na mouse-up.
@@ -1226,8 +1246,22 @@ BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
             unsigned ht = HTCLIENT;
             int wi;
             HWND hw = g_kb_hwnd ? g_kb_hwnd : 1;
+            /* Sprawdz klikniecie na ikonie zminimalizowanego okna */
             for (wi = 0; wi < MAX_WINDOWS; wi++) {
-                if (g_windows[wi].used && g_windows[wi].hwnd == hw) {
+                if (g_windows[wi].used && g_windows[wi].state == 1) {
+                    int ix = 4 + wi * 124;
+                    if (abs_x >= ix && abs_x < ix + ICON_W &&
+                        abs_y >= ICON_Y && abs_y < ICON_Y + ICON_H) {
+                        push_msg(g_windows[wi].hwnd, WM_SYSCOMMAND,
+                                 (WPARAM)SC_RESTORE, 0L);
+                        pmsg->message = 0; /* WM_NULL - polknij klikniecie */
+                        break;
+                    }
+                }
+            }
+            for (wi = 0; wi < MAX_WINDOWS; wi++) {
+                if (g_windows[wi].used && g_windows[wi].hwnd == hw
+                    && g_windows[wi].state != 1) {
                     ht = nc_hit_test(wi, abs_x, abs_y);
                     if (ht != HTCLIENT) {
                         /* NC klikniecie */
@@ -1477,6 +1511,7 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_windows[wi].state = 1;
                 cursor_erase();
                 vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                draw_minimized_icon(wi);
                 cursor_draw(g_cur_x, g_cur_y);
             }
         } else if (cmd == (SC_MAXIMIZE & 0xFFF0u)) {
@@ -1522,6 +1557,19 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     ((unsigned long)(g_windows[wi].h - 2*NC_BORDER_W - NC_CAPTION_H
                                      - ((g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0)) << 16)
                     | (unsigned long)(g_windows[wi].w - 2*NC_BORDER_W));
+                push_msg(hwnd, WM_PAINT, 0, 0L);
+            }
+        } else if (cmd == (SC_RESTORE & 0xFFF0u)) {
+            int wi;
+            for (wi = 0; wi < MAX_WINDOWS; wi++)
+                if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
+            if (wi < MAX_WINDOWS && g_windows[wi].state == 1) {
+                g_windows[wi].state = 0;
+                cursor_erase();
+                vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                draw_window_chrome(wi);
+                draw_menu_bar(wi);
+                cursor_draw(g_cur_x, g_cur_y);
                 push_msg(hwnd, WM_PAINT, 0, 0L);
             }
         }
