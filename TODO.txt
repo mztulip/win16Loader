@@ -1205,8 +1205,26 @@ Wymagania wstepne:
           rysuje mala ikone (120x16) na dole ekranu (y=462)
           z obcietym tytulem okna (max 12 znakow, static buf - DS!=SS fix).
         Klikniecie w ikone -> push_msg SC_RESTORE.
-        SC_RESTORE: state=0, przerysowuje okno + WM_PAINT.
+        SC_RESTORE: state==1 -> state=0 (przywroc), state==2 -> state=0
+          (przywroc saved_x/y/w/h + KCB). Przerysowuje okno + WM_SIZE + WM_PAINT.
         Okna z state==1 pomijane w NC hit-test (niewidoczne).
+
+[x] 20a-7: Sysmenu popup (przycisk '=')
+        Klikniecie '=' otwiera popup zamiast od razu zamykac:
+          Restore  (wyszarzony gdy state==0)
+          Minimize (wyszarzony gdy state==1)
+          Maximize (wyszarzony gdy state==2)
+          ---------
+          Close
+        show_sysmenu_popup(): hover highlight, pressed state, static strings
+          (DS!=SS fix), wymazanie obszaru po zamknieciu + WM_PAINT.
+        Glify NC przyciskow zmienione: '-'=minimize, '+'=maximize (nie-windowsowe).
+
+[x] 20a-8: Menu item pressed state (efekt klikniecia)
+        draw_popup_item(): state 0=normal/1=hover/2=pressed (kolor 0x064048).
+        Pętla popup (draw_and_run_popup + show_sysmenu_popup): pressed_item
+          tracking - DOWN na item -> kolor pressed; UP nad tym samym -> wykonaj;
+          UP poza -> odwolaj pressed, przywroc hover/normal. Brak delay-flash.
 
 [x] 20b: Skanowanie katalogu - lista plikow EXE (real mode, przed PM)
         Przed wejsciem w PM loader skanuje root directory dyskietki DOS:
