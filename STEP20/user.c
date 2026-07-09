@@ -1370,8 +1370,8 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             draw_menu_bar(wi);
             cmd_id = draw_and_run_popup(found, hwnd);
             g_popup_idx = -1;
-            /* Wymazanie dropdownu: wypelnij obszar pod menu barem bialym,
-             * potem push WM_PAINT zeby app odswiezyla klienta */
+            /* Wymazanie dropdownu: ukryj kursor, wypelnij bialym, odswierz */
+            cursor_erase();
             {
                 int erase_x = g_menu_bar_x;
                 int erase_y = g_menu_bar_y + MENU_BAR_H;
@@ -1384,6 +1384,7 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                                    0xFF, 0xFF, 0xFF);
             }
             draw_menu_bar(wi);
+            cursor_draw(g_cur_x, g_cur_y);
             push_msg(hwnd, WM_PAINT, 0, 0L);
             if (cmd_id > 0)
                 push_msg(hwnd, 0x0111u /* WM_COMMAND */, (WPARAM)cmd_id, 0L);
