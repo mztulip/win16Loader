@@ -1144,7 +1144,7 @@ Porownanie API STEP18 vs STEP19 (nowe exporty USER.EXE):
   GetModuleHandle: NIE importowane przez Win1App - nie potrzebne.
 
 ---------------------------------------------------------------------------
-ETAP 20 - Menu bar + Shell / przeglądarka plikow z ikonami               [TODO]
+ETAP 20 - Menu bar + Shell / przeglądarka plikow z ikonami               [WIP]
 ---------------------------------------------------------------------------
 Cel: (1) Pelne menu bar w oknie Win16 (RT_MENU, WM_COMMAND).
      (2) Loader shell: lista plikow EXE z dysku, pojedyncze/podwojne klikniecie.
@@ -1167,6 +1167,46 @@ Wymagania wstepne:
           CreateMenu (USER.151), DestroyMenu (USER.152), GetMenu (USER.157)
           DrawMenuBar (USER.160), HiliteMenuItem (USER.162)
           GetMenuItemCount (USER.263)
+
+[x] 20a-bis: "Midnight Teal" kolorystyka + DestroyWindow clear
+        Zmiana palety z Win3.1-szarej na wlasny motyw:
+          Desktop:       #1C5058 (ciemny teal)
+          Caption bar:   #0A6E7E
+          Granica wewn.: #88C8D0
+          NC przyciski:  #60A8B4
+          Menu bar:      #88C0C8
+          Popup bg:      #C0E4E8
+        DestroyWindow (po Exit): czysci caly LFB kolorem desktop.
+
+[x] 20a-ter: Popup menu hover + cursor trail fixes
+        draw_popup_item(highlighted): podswietlenie najechanych itemow
+          kolorem caption (#0A6E7E), bialy tekst.
+        hover_item tracking w petli popup - przerysuj item przy zmianie.
+        Fixe sladu kursora: cursor_erase() przed kazda zmiana ekranu
+          (menu bar highlight, popup open/close, desktop clear).
+        first_up_done flag: zapobiega zamknieciu popup przy pierwszym
+          WM_LBUTTONUP (tryb drag - trzymanie przycisku przy otwieraniu).
+
+[x] 20a-4: NC button press effect (track_nc_button)
+        draw_nc_button(pressed): odwrocone ramki 3D gdy wcisniety
+          (sciemnienie gory/lewej, jasnosc dolu/prawej).
+        track_nc_button(): blokujaca petla czekajaca na mouse-up,
+          rysuje stan pressed, zwraca 1 jesli puszczono nad przyciskiem.
+        Obslugiwane przyciski: HTSYSMENU (=), HTMINBUTTON (_), HTMAXBUTTON (^).
+
+[x] 20a-5: Maximize button - SC_MAXIMIZE (toggle maximize/restore)
+        WM_SYSCOMMAND SC_MAXIMIZE:
+          state==0 -> state=2: zapisz saved_x/y/w/h, ustaw 640x480.
+          state==2 -> state=0: przywroc saved_x/y/w/h.
+        Aktualizacja KCB (client origin), przerysowanie, WM_SIZE + WM_PAINT.
+
+[x] 20a-6: Minimize button + ikona + SC_RESTORE
+        SC_MINIMIZE: state=1, czysci LFB na kolor desktop,
+          rysuje mala ikone (120x16) na dole ekranu (y=462)
+          z obcietym tytulem okna (max 12 znakow, static buf - DS!=SS fix).
+        Klikniecie w ikone -> push_msg SC_RESTORE.
+        SC_RESTORE: state=0, przerysowuje okno + WM_PAINT.
+        Okna z state==1 pomijane w NC hit-test (niewidoczne).
 
 [x] 20b: Skanowanie katalogu - lista plikow EXE (real mode, przed PM)
         Przed wejsciem w PM loader skanuje root directory dyskietki DOS:
