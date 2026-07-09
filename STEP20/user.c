@@ -960,13 +960,18 @@ static void draw_menu_bar(int wi)
 /* Rysuje popup dropdown dla g_menu[idx].
  * Zwraca ID wybranego itemu (0 jesli zadnego / ESC). */
 /* Rysuje jeden item popupu (z podswietleniem lub bez) */
-static void draw_popup_item(int mi, int i, int px, int py, int pw, int item_h, int highlighted)
+/* state: 0=normal, 1=hover, 2=pressed */
+static void draw_popup_item(int mi, int i, int px, int py, int pw, int item_h, int state)
 {
     int iy = py + 1 + i * item_h;
     if (g_menu[mi].items[i].separator) {
         vesa_fill_rect(px+1, iy, pw-2, item_h,  0xC0,0xE4,0xE8);
         vesa_fill_rect(px+2, iy + item_h/2, pw-4, 1, 0x40,0x90,0x98);
-    } else if (highlighted) {
+    } else if (state == 2) {
+        vesa_fill_rect(px+1, iy, pw-2, item_h, 0x06,0x40,0x48);
+        draw_chrome_text(px + 6, iy + 1, g_menu[mi].items[i].name,
+                         0xFF,0xFF,0xFF, 0x06,0x40,0x48);
+    } else if (state == 1) {
         vesa_fill_rect(px+1, iy, pw-2, item_h, 0x0A,0x6E,0x7E);
         draw_chrome_text(px + 6, iy + 1, g_menu[mi].items[i].name,
                          0xFF,0xFF,0xFF, 0x0A,0x6E,0x7E);
@@ -1007,93 +1012,86 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
 
     /* Petla menu - tryb "click to open, click to close" (Windows 3.1):
      * Pierwsze WM_LBUTTONUP (puszczenie przycisku ktory otwarl menu) jest
-     * ignorowane. Menu zostaje otwarte az do nastepnego klikniecia:
-     *   - WM_LBUTTONDOWN poza popupem -> zamknij
-     *   - WM_LBUTTONDOWN na itemie   -> wybierz
-     *   - ESC                         -> zamknij */
+     * ignorowane. Potem: DOWN na itemie = pressed, UP na tym samym = wykonaj.
+     *   - DOWN/UP poza popupem -> zamknij
+     *   - ESC                  -> zamknij */
     {
-        int first_up_done = 0;  /* 0 = jeszcze nie puszczono przycisku otwierajacego */
-        int hover_item = -1;    /* aktualnie podswietlony item (-1 = brak) */
+        int first_up_done = 0;
+        int hover_item    = -1;
+        int pressed_item  = -1;
 
         for (;;) {
             MSG tmp;
-            int hit_item = -1;
 
-            do_hlt();   /* czekaj na IRQ */
+            do_hlt();
 
-            /* Sprawdz ESC */
             do_sti(); vk = kb_dequeue(); do_cli();
-            if (vk == 0x1B) { cursor_draw(g_cur_x, g_cur_y); return 0; }
+            if (vk == 0x1B) { if (!g_cur_drawn) cursor_draw(g_cur_x, g_cur_y); return 0; }
 
-            /* Sprawdz myszke */
             if (mouse_poll(&tmp, target_hwnd)) {
-                /* Aktualizuj kursor + hover na biezaco */
-                {
-                    unsigned char __far *kcb = KCB_MK_FP(0);
-                    int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
-                    int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
-                    int new_hover = -1;
-                    /* Oblicz nowy hover */
-                    if (mx >= px && mx < px + pw && my >= py + 1 && my < py + ph - 1) {
-                        int idx = (my - py - 1) / item_h;
-                        if (idx >= 0 && idx < n && !g_menu[mi].items[idx].separator)
-                            new_hover = idx;
-                    }
-                    if (mx != g_cur_x || my != g_cur_y || new_hover != hover_item || !g_cur_drawn) {
-                        cursor_erase();
-                        /* Przerysuj zmienione itemy bez kursora */
-                        if (new_hover != hover_item) {
-                            if (hover_item >= 0)
-                                draw_popup_item(mi, hover_item, px, py, pw, item_h, 0);
-                            if (new_hover >= 0)
-                                draw_popup_item(mi, new_hover, px, py, pw, item_h, 1);
-                            hover_item = new_hover;
-                        }
-                        cursor_draw(mx, my);
-                    }
+                unsigned char __far *kcb = KCB_MK_FP(0);
+                int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
+                int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
+                int new_hover = -1;
+
+                if (mx >= px && mx < px + pw && my >= py + 1 && my < py + ph - 1) {
+                    int idx = (my - py - 1) / item_h;
+                    if (idx >= 0 && idx < n && !g_menu[mi].items[idx].separator)
+                        new_hover = idx;
                 }
+                if (mx != g_cur_x || my != g_cur_y || new_hover != hover_item || !g_cur_drawn) {
+                    cursor_erase();
+                    if (new_hover != hover_item) {
+                        /* Przerysuj stary i nowy item (z uwzglednieniem pressed) */
+                        if (hover_item >= 0)
+                            draw_popup_item(mi, hover_item, px, py, pw, item_h,
+                                            (hover_item == pressed_item) ? 2 : 0);
+                        if (new_hover >= 0)
+                            draw_popup_item(mi, new_hover, px, py, pw, item_h,
+                                            (new_hover == pressed_item) ? 2 : 1);
+                        hover_item = new_hover;
+                    }
+                    cursor_draw(mx, my);
+                }
+
                 if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
                     if (!first_up_done) {
-                        /* Pierwsze puszczenie: zignoruj, przelacz w tryb click */
                         first_up_done = 1;
-                    } else {
-                        /* Drugie puszczenie: klik na itemie lub poza */
+                    } else if (pressed_item >= 0) {
+                        /* Puszczono: wykonaj jesli nad tym samym itemem */
                         int ax = (int)(tmp.lParam & 0xFFFFUL);
                         int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph) {
-                            cursor_draw(g_cur_x, g_cur_y);
-                            return 0;
+                        if (ax >= px && ax < px+pw && ay >= py && ay < py+ph) {
+                            i = (ay - py - 1) / item_h;
+                            if (i == pressed_item)
+                                return (unsigned)g_menu[mi].items[i].id;
                         }
-                        i = (ay - py - 1) / item_h;
-                        if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
-                            hit_item = i;
+                        /* Puszczono poza itemem: odwolaj pressed */
+                        draw_popup_item(mi, pressed_item, px, py, pw, item_h,
+                                        (pressed_item == hover_item) ? 1 : 0);
+                        pressed_item = -1;
+                    } else {
+                        /* UP bez wczesniejszego DOWN (click-mode zamkniecie) */
+                        int ax = (int)(tmp.lParam & 0xFFFFUL);
+                        int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                        if (ax < px || ax >= px+pw || ay < py || ay >= py+ph)
+                            return 0;
                     }
                 } else if (tmp.message == 0x0201 /* WM_LBUTTONDOWN */) {
-                    /* Po pierwszym puszczeniu: klikniecie zamyka lub wybiera */
                     if (first_up_done) {
                         int ax = (int)(tmp.lParam & 0xFFFFUL);
                         int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                        if (ax < px || ax >= px + pw || ay < py || ay >= py + ph) {
-                            cursor_draw(g_cur_x, g_cur_y);
+                        if (ax < px || ax >= px+pw || ay < py || ay >= py+ph)
                             return 0;
-                        }
-                        /* Klik na itemie: zaznacz, poczekaj na UP */
                         i = (ay - py - 1) / item_h;
-                        if (i >= 0 && i < n && !g_menu[mi].items[i].separator)
-                            hit_item = i;
+                        if (i >= 0 && i < n && !g_menu[mi].items[i].separator) {
+                            pressed_item = i;
+                            cursor_erase();
+                            draw_popup_item(mi, i, px, py, pw, item_h, 2);
+                            cursor_draw(mx, my);
+                        }
                     }
                 }
-            }
-            if (hit_item >= 0) {
-                /* Flash: ciemniejszy kolor "wcisniety" przez ~110ms */
-                int iy = py + 1 + hit_item * item_h;
-                cursor_erase();
-                vesa_fill_rect(px+1, iy, pw-2, item_h, 0x06,0x40,0x48);
-                draw_chrome_text(px+6, iy+1, g_menu[mi].items[hit_item].name,
-                                 0xFF,0xFF,0xFF, 0x06,0x40,0x48);
-                do_hlt(); do_hlt();
-                if (!g_cur_drawn) cursor_draw(g_cur_x, g_cur_y);
-                return (unsigned)g_menu[mi].items[hit_item].id;
             }
         }
     }
@@ -1158,10 +1156,11 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
 
     hover_item    = -1;
     first_up_done = 0;
+    {
+    int pressed_item = -1;
 
     for (;;) {
         MSG tmp;
-        int hit_item = -1;
         unsigned char vk;
 
         do_hlt();
@@ -1182,17 +1181,26 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
             if (mx != g_cur_x || my != g_cur_y || new_hover != hover_item || !g_cur_drawn) {
                 cursor_erase();
                 if (new_hover != hover_item) {
+                    /* Rysuj stary item: pressed > hover > normal */
                     if (hover_item >= 0) {
                         int iy = py + 1 + hover_item * item_h;
-                        vesa_fill_rect(px+1, iy, pw-2, item_h, 0xC0,0xE4,0xE8);
-                        draw_chrome_text(px+6, iy+1, items[hover_item].name,
-                                         0x00,0x00,0x00, 0xC0,0xE4,0xE8);
+                        int st = (hover_item == pressed_item) ? 2 : 0;
+                        unsigned char br = st ? 0x06 : 0xC0;
+                        unsigned char bg = st ? 0x40 : 0xE4;
+                        unsigned char bb = st ? 0x48 : 0xE8;
+                        unsigned char tr = st ? 0xFF : 0x00;
+                        vesa_fill_rect(px+1, iy, pw-2, item_h, br,bg,bb);
+                        draw_chrome_text(px+6, iy+1, items[hover_item].name, tr,tr,tr, br,bg,bb);
                     }
+                    /* Rysuj nowy item */
                     if (new_hover >= 0) {
                         int iy = py + 1 + new_hover * item_h;
-                        vesa_fill_rect(px+1, iy, pw-2, item_h, 0x0A,0x6E,0x7E);
-                        draw_chrome_text(px+6, iy+1, items[new_hover].name,
-                                         0xFF,0xFF,0xFF, 0x0A,0x6E,0x7E);
+                        int st = (new_hover == pressed_item) ? 2 : 1;
+                        unsigned char br = (st==2) ? 0x06 : 0x0A;
+                        unsigned char bg = (st==2) ? 0x40 : 0x6E;
+                        unsigned char bb = (st==2) ? 0x48 : 0x7E;
+                        vesa_fill_rect(px+1, iy, pw-2, item_h, br,bg,bb);
+                        draw_chrome_text(px+6, iy+1, items[new_hover].name, 0xFF,0xFF,0xFF, br,bg,bb);
                     }
                     hover_item = new_hover;
                 }
@@ -1200,42 +1208,53 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
             }
 
             if (tmp.message == 0x0202 /* WM_LBUTTONUP */) {
-                if (!first_up_done) { first_up_done = 1; }
-                else {
+                if (!first_up_done) {
+                    first_up_done = 1;
+                } else if (pressed_item >= 0) {
                     int ax = (int)(tmp.lParam & 0xFFFFUL);
                     int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                    if (ax < px || ax >= px+pw || ay < py || ay >= py+ph) {
-                        /* kursor juz narysowany powyzej - nie wolno rysowac ponownie */
-                        return 0;
+                    if (ax >= px && ax < px+pw && ay >= py && ay < py+ph) {
+                        i = (ay - py - 1) / item_h;
+                        if (i == pressed_item)
+                            return items[i].cmd;
                     }
-                    i = (ay - py - 1) / item_h;
-                    if (i >= 0 && i < n && !items[i].sep && !items[i].grayed)
-                        hit_item = i;
+                    /* Puszczono poza: odwolaj pressed */
+                    {
+                        int iy = py + 1 + pressed_item * item_h;
+                        int is_hov = (pressed_item == hover_item);
+                        unsigned char br = is_hov ? 0x0A : 0xC0;
+                        unsigned char bg2 = is_hov ? 0x6E : 0xE4;
+                        unsigned char bb = is_hov ? 0x7E : 0xE8;
+                        unsigned char tr = is_hov ? 0xFF : 0x00;
+                        vesa_fill_rect(px+1, iy, pw-2, item_h, br,bg2,bb);
+                        draw_chrome_text(px+6, iy+1, items[pressed_item].name, tr,tr,tr, br,bg2,bb);
+                    }
+                    pressed_item = -1;
+                } else {
+                    int ax = (int)(tmp.lParam & 0xFFFFUL);
+                    int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
+                    if (ax < px || ax >= px+pw || ay < py || ay >= py+ph)
+                        return 0;
                 }
             } else if (tmp.message == 0x0201 /* WM_LBUTTONDOWN */) {
                 if (first_up_done) {
                     int ax = (int)(tmp.lParam & 0xFFFFUL);
                     int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
-                    if (ax < px || ax >= px+pw || ay < py || ay >= py+ph) {
-                        /* kursor juz narysowany powyzej - nie wolno rysowac ponownie */
+                    if (ax < px || ax >= px+pw || ay < py || ay >= py+ph)
                         return 0;
-                    }
                     i = (ay - py - 1) / item_h;
-                    if (i >= 0 && i < n && !items[i].sep && !items[i].grayed)
-                        hit_item = i;
+                    if (i >= 0 && i < n && !items[i].sep && !items[i].grayed) {
+                        int iy = py + 1 + i * item_h;
+                        pressed_item = i;
+                        cursor_erase();
+                        vesa_fill_rect(px+1, iy, pw-2, item_h, 0x06,0x40,0x48);
+                        draw_chrome_text(px+6, iy+1, items[i].name, 0xFF,0xFF,0xFF, 0x06,0x40,0x48);
+                        cursor_draw(mx, my);
+                    }
                 }
             }
         }
-        if (hit_item >= 0) {
-            /* Flash: ciemniejszy kolor "wcisniety" przez ~110ms */
-            int iy = py + 1 + hit_item * item_h;
-            cursor_erase();
-            vesa_fill_rect(px+1, iy, pw-2, item_h, 0x06,0x40,0x48);
-            draw_chrome_text(px+6, iy+1, items[hit_item].name,
-                             0xFF,0xFF,0xFF, 0x06,0x40,0x48);
-            do_hlt(); do_hlt();
-            return items[hit_item].cmd;
-        }
+    }
     }
 }
 
