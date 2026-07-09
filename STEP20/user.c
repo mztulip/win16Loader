@@ -1603,9 +1603,18 @@ BOOL __far __pascal DestroyWindow(HWND hwnd)
     serial_puts("USER: DestroyWindow\n");
     /* Wyslij WM_DESTROY - apka powinna wywolac PostQuitMessage */
     SendMessage(hwnd, WM_DESTROY, 0, 0L);
-    /* Oznacz okno jako nieuzywane */
-    for (i = 0; i < MAX_WINDOWS; i++)
-        if (g_windows[i].hwnd == hwnd) { g_windows[i].used = 0; break; }
+    /* Oznacz okno jako nieuzywane i wymazaj z ekranu */
+    for (i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i].hwnd == hwnd) {
+            if (g_windows[i].parent == 0) {
+                /* Okno glowne: wymazanie calego ekranu kolorem desktopu */
+                cursor_erase();
+                vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+            }
+            g_windows[i].used = 0;
+            break;
+        }
+    }
     return 1;
 }
 
