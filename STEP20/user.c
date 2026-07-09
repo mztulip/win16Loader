@@ -1159,7 +1159,7 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
 
         do_hlt();
         do_sti(); vk = kb_dequeue(); do_cli();
-        if (vk == 0x1B) { cursor_draw(g_cur_x, g_cur_y); return 0; }
+        if (vk == 0x1B) { if (!g_cur_drawn) cursor_draw(g_cur_x, g_cur_y); return 0; }
 
         if (mouse_poll(&tmp, target_hwnd)) {
             unsigned char __far *kcb = KCB_MK_FP(0);
@@ -1198,7 +1198,8 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
                     int ax = (int)(tmp.lParam & 0xFFFFUL);
                     int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
                     if (ax < px || ax >= px+pw || ay < py || ay >= py+ph) {
-                        cursor_draw(g_cur_x, g_cur_y); return 0;
+                        /* kursor juz narysowany powyzej - nie wolno rysowac ponownie */
+                        return 0;
                     }
                     i = (ay - py - 1) / item_h;
                     if (i >= 0 && i < n && !items[i].sep && !items[i].grayed)
@@ -1209,7 +1210,8 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
                     int ax = (int)(tmp.lParam & 0xFFFFUL);
                     int ay = (int)((tmp.lParam >> 16) & 0xFFFFUL);
                     if (ax < px || ax >= px+pw || ay < py || ay >= py+ph) {
-                        cursor_draw(g_cur_x, g_cur_y); return 0;
+                        /* kursor juz narysowany powyzej - nie wolno rysowac ponownie */
+                        return 0;
                     }
                     i = (ay - py - 1) / item_h;
                     if (i >= 0 && i < n && !items[i].sep && !items[i].grayed)
@@ -1218,7 +1220,7 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
             }
         }
         if (hit_item >= 0) {
-            cursor_draw(g_cur_x, g_cur_y);
+            /* kursor juz narysowany w bloku mouse_poll powyzej */
             return items[hit_item].cmd;
         }
     }
