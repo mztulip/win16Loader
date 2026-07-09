@@ -579,6 +579,8 @@ static struct {
     unsigned long style;          /* WS_* flagi */
     char          title[64];      /* tytul (z CreateWindow lpWindowName) */
     unsigned char state;          /* 0=normal, 1=minimized, 2=maximized */
+    int           saved_x, saved_y;   /* pozycja przed maximize */
+    unsigned      saved_w, saved_h;   /* rozmiar przed maximize */
 } g_windows[MAX_WINDOWS];
 
 static unsigned g_next_hwnd = 1;
@@ -1394,7 +1396,9 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             /* Klikniecie na sysmenu = zamknij okno (Win3.1: double-click; my: single) */
             push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
         }
-        /* HTCAPTION/HTMINBUTTON/HTMAXBUTTON: brak akcji w tej wersji */
+        if (wp == HTMAXBUTTON)
+            push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
+        /* HTCAPTION/HTMINBUTTON: brak akcji w tej wersji */
         return 0;
     }
     if (msg == WM_SYSCOMMAND) {
@@ -1402,6 +1406,51 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (cmd == (SC_CLOSE & 0xFFF0u)) {
             /* SC_CLOSE: wyslij WM_CLOSE do okna */
             SendMessage(hwnd, WM_CLOSE, 0, 0L);
+        } else if (cmd == (SC_MAXIMIZE & 0xFFF0u)) {
+            int wi;
+            for (wi = 0; wi < MAX_WINDOWS; wi++)
+                if (g_windows[wi].used && g_windows[wi].hwnd == hwnd) break;
+            if (wi < MAX_WINDOWS) {
+                cursor_erase();
+                if (g_windows[wi].state != 2) {
+                    /* Normalny -> zmaksymalizuj */
+                    g_windows[wi].saved_x = g_windows[wi].x;
+                    g_windows[wi].saved_y = g_windows[wi].y;
+                    g_windows[wi].saved_w = g_windows[wi].w;
+                    g_windows[wi].saved_h = g_windows[wi].h;
+                    g_windows[wi].x = 0; g_windows[wi].y = 0;
+                    g_windows[wi].w = 640; g_windows[wi].h = 480;
+                    g_windows[wi].state = 2;
+                } else {
+                    /* Zmaksymalizowany -> przywroc */
+                    g_windows[wi].x = g_windows[wi].saved_x;
+                    g_windows[wi].y = g_windows[wi].saved_y;
+                    g_windows[wi].w = g_windows[wi].saved_w;
+                    g_windows[wi].h = g_windows[wi].saved_h;
+                    g_windows[wi].state = 0;
+                }
+                /* Zaktualizuj KCB (client origin) */
+                {
+                    int menu_h = (g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0;
+                    kcb_set_wnd_pos((unsigned)hwnd,
+                        g_windows[wi].x + NC_BORDER_W,
+                        g_windows[wi].y + NC_BORDER_W + NC_CAPTION_H + menu_h);
+                    kcb_set_wnd_w((unsigned)hwnd,
+                        (unsigned)(g_windows[wi].w - 2*NC_BORDER_W));
+                    kcb_set_wnd_h((unsigned)hwnd,
+                        (unsigned)(g_windows[wi].h - 2*NC_BORDER_W - NC_CAPTION_H - menu_h));
+                }
+                /* Przerysuj caly ekran */
+                vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
+                draw_window_chrome(wi);
+                draw_menu_bar(wi);
+                cursor_draw(g_cur_x, g_cur_y);
+                push_msg(hwnd, WM_SIZE, 0,
+                    ((unsigned long)(g_windows[wi].h - 2*NC_BORDER_W - NC_CAPTION_H
+                                     - ((g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0)) << 16)
+                    | (unsigned long)(g_windows[wi].w - 2*NC_BORDER_W));
+                push_msg(hwnd, WM_PAINT, 0, 0L);
+            }
         }
         return 0;
     }
