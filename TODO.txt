@@ -1226,6 +1226,16 @@ Wymagania wstepne:
           tracking - DOWN na item -> kolor pressed; UP nad tym samym -> wykonaj;
           UP poza -> odwolaj pressed, przywroc hover/normal. Brak delay-flash.
 
+[x] 20a-9: Drag okna za pasek tytulu (HTCAPTION)
+        Blokujaca petla mouse_poll w DefWindowProc WM_NCLBUTTONDOWN HTCAPTION:
+          drag_ox/oy = offset klikniecia wzgledem lewego-gornego rogu okna.
+          Na kazdy ruch: new_x/y = mx-drag_ox / my-drag_oy, clamp do ekranu,
+            vesa_fill_rect (desktop teal) + draw_window_chrome + draw_menu_bar,
+            cursor_draw. Brak WM_PAINT podczas dragu (client teal).
+          Na WM_LBUTTONUP: zaktualizuj KCB (kcb_set_wnd_pos), vesa_fill_rect,
+            draw_window_chrome, draw_menu_bar, cursor_draw, push WM_PAINT.
+        Drag zmaksymalizowanego okna (state==2) zablokowany.
+
 [x] 20b: Skanowanie katalogu - lista plikow EXE (real mode, przed PM)
         Przed wejsciem w PM loader skanuje root directory dyskietki DOS:
           Uzyc INT 21h AH=4Eh (Find First) + AH=4Fh (Find Next) z maska *.EXE
