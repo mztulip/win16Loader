@@ -26,6 +26,7 @@ unsigned char io_inb(unsigned port);
 #define KCB_KB_TAIL  273   /* BYTE: indeks zapisu */
 #define KCB_KB_BUF   274   /* BYTE[8]: cykliczny bufor VK */
 #define KCB_KB_SZ    8
+#define KCB_KB_EXT   291  /* BYTE: flaga extended key (0xE0 prefix) */
 
 /* Wywolywana z irq1_handler w pm_call.asm (AX, BX, CX, DX, ES zapisane przez caller).
  * Nazwa bez trailing '_': Watcom near func 'irq1_c' -> symbol 'irq1_c_' -> extern w NASM */
@@ -40,7 +41,27 @@ void irq1_c(void)
     if (io_inb(0x64) & 0x20) return;
 
     scancode = io_inb(0x60);
+
+    /* 0xE0 = extended key prefix (strzalki, Home, End, etc).
+     * Zapisz flage w KCB i czekaj na nastepny bajt (wlasciwy scancode). */
+    if (scancode == 0xE0) {
+        kcb = (unsigned char __far *)MK_FP(SEL_KCB, 0);
+        kcb[KCB_KB_EXT] = 1;
+        return;
+    }
+
+    /* Wyczysc flage extended - uzyta lub nie, nastepny bajt nie jest juz czescia sekwencji */
+    kcb = (unsigned char __far *)MK_FP(SEL_KCB, 0);
+    kcb[KCB_KB_EXT] = 0;
+
+    /* Alt key state tracking (scancode 0x38 = make, 0xB8 = break) */
+    if (scancode == 0x38) { kcb[292] = 1; return; }  /* Alt press */
+    if (scancode == 0xB8) { kcb[292] = 0; return; }  /* Alt release */
+
     if (scancode & 0x80) return;   /* key release - ignoruj */
+
+    /* Alt+F4 -> VK=0xFF (specjalny kod zamkniecia) */
+    if (scancode == 0x3E && kcb[292]) { vk = 0xFF; goto push_vk; }
 
     /* scan code -> Virtual Key (tylko klawisze uzywane przez SKI.EXE i aplikacje Win16) */
     if      (scancode == 0x01) vk = 0x1B;   /* Esc      -> VK_ESCAPE */
@@ -60,6 +81,7 @@ void irq1_c(void)
     else if (scancode == 0x39) vk = 0x20;   /* Space    -> VK_SPACE */
     else return;   /* nieznany klawisz */
 
+push_vk:
     kcb = (unsigned char __far *)MK_FP(SEL_KCB, 0);
     head = kcb[KCB_KB_HEAD];
     tail = kcb[KCB_KB_TAIL];

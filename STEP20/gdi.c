@@ -311,7 +311,8 @@ typedef struct { int x1, y1, x2, y2; } ExclRect;
 static int get_child_excl(ExclRect *out, int max_out)
 {
     int ci, n = 0;
-    for (ci = 0; ci < KCB_MAX_HWNDS && n < max_out; ci++) {
+    /* ci=1: skip slot 0 (hwnd=1, main/top-level window) - chron tylko child windows */
+    for (ci = 1; ci < KCB_MAX_HWNDS && n < max_out; ci++) {
         short cx = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (unsigned)ci*2u);
         short cy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (unsigned)ci*2u);
         short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF  + (unsigned)ci*2u);
@@ -325,6 +326,28 @@ static int get_child_excl(ExclRect *out, int max_out)
     return n;
 }
 
+/* Clip rect for DC — ogranicza rendering do client area okna.
+ * Czyta z KCB slot 0 (main window): ox, oy, w, h. */
+typedef struct { int x1, y1, x2, y2; } ClipRect;
+
+static void get_client_clip(ClipRect *cr)
+{
+    short ox = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF);
+    short oy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF);
+    short cw = *(short __far *)MK_FP(SEL_KCB, KCB_WND_W_OFF);
+    short ch = *(short __far *)MK_FP(SEL_KCB, KCB_WND_H_OFF);
+    cr->x1 = (int)ox;
+    cr->y1 = (int)oy;
+    cr->x2 = (int)ox + (int)cw;
+    cr->y2 = (int)oy + (int)ch;
+}
+
+/* Sprawdza czy piksel (x,y) jest POZA clip rectem (= powinien byc pomijany) */
+static int clip_outside(const ClipRect *cr, int x, int y)
+{
+    return (x < cr->x1 || x >= cr->x2 || y < cr->y1 || y >= cr->y2);
+}
+
 static int excl_contains(const ExclRect *excl, int n, int x, int y)
 {
     int i;
@@ -336,7 +359,8 @@ static int excl_contains(const ExclRect *excl, int n, int x, int y)
 
 static void draw_char_gdi(unsigned char ch, unsigned x, unsigned y,
                            unsigned char br, unsigned char bg, unsigned char bb,
-                           const ExclRect *excl, int nexcl)
+                           const ExclRect *excl, int nexcl,
+                           const ClipRect *clip)
 {
     unsigned row, bit;
     unsigned long row_base = (unsigned long)y * VESA_PITCH
@@ -348,12 +372,15 @@ static void draw_char_gdi(unsigned char ch, unsigned x, unsigned y,
         int dy = (int)y + (int)row;
         for (bit = 8; bit-- > 0; ) {
             int dx = (int)x + (int)(8u - 1u - bit);
-            if (!excl_contains(excl, nexcl, dx, dy)) {
-                if (fbyte & (1 << bit))
-                    draw_pixel(edi, br, bg, bb);        /* foreground */
-                else
-                    draw_pixel(edi, 0xFF, 0xFF, 0xFF);  /* background = bialy (OPAQUE) */
+            if ((clip && clip_outside(clip, dx, dy)) ||
+                excl_contains(excl, nexcl, dx, dy)) {
+                edi += VESA_BPP;
+                continue;
             }
+            if (fbyte & (1 << bit))
+                draw_pixel(edi, br, bg, bb);        /* foreground */
+            else
+                draw_pixel(edi, 0xFF, 0xFF, 0xFF);  /* background = bialy (OPAQUE) */
             edi += VESA_BPP;
         }
     }
@@ -367,7 +394,7 @@ BOOL __far __pascal TextOut(HDC hdc, int x, int y,
 {
     int i;
     ExclRect excl[KCB_MAX_HWNDS]; int nexcl;
-    { static unsigned char s_to = 0; if (!s_to) { serial_puts("TO!\n"); s_to=1; } }
+    ClipRect cr; const ClipRect *pclip = 0;
     /* Dekoduj origin z HDC (inline - near ptr na stos nie dziala gdy DS!=SS) */
     if ((unsigned)hdc & 0x4000u) {
         unsigned hwnd_v = (unsigned)hdc & 0x3FFFu;
@@ -375,7 +402,14 @@ BOOL __far __pascal TextOut(HDC hdc, int x, int y,
         short __far *koy = (short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (hwnd_v-1u)*2u);
         x += *kox;
         y += *koy;
-        nexcl = 0;  /* HWND DC rysuje wewnatrz swojego okna - bez exclusion */
+        /* Top-level HWND DC (hwnd=1): clip do client area + chron child windows */
+        if (hwnd_v <= 1) {
+            nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
+            get_client_clip(&cr);
+            pclip = &cr;
+        } else {
+            nexcl = 0;
+        }
     } else if ((unsigned)hdc & 0x8000u) {
         x += (int)(((unsigned)hdc >> 7) & 0xFFu) * 4;
         y += (int)((unsigned)hdc & 0x7Fu) * 4;
@@ -387,7 +421,7 @@ BOOL __far __pascal TextOut(HDC hdc, int x, int y,
         draw_char_gdi((unsigned char)s[i],
                       (unsigned)(x + i * FONT_W), (unsigned)y,
                       0x00, 0x00, 0x00,
-                      excl, nexcl);
+                      excl, nexcl, pclip);
     return 1;
 }
 
@@ -395,7 +429,7 @@ BOOL __far __pascal TextOut(HDC hdc, int x, int y,
  * blit_sprite_hbm - renderuje sprite HBITMAP (1..86) na LFB
  * ============================================================ */
 static void blit_sprite_hbm(unsigned hbm, int xDst, int yDst, int w, int h,
-                              int xSrc, int ySrc)
+                              int xSrc, int ySrc, const ClipRect *clip)
 {
     unsigned char __far *bmp_buf;
     unsigned short bmp_off;
@@ -438,7 +472,8 @@ static void blit_sprite_hbm(unsigned hbm, int xDst, int yDst, int w, int h,
                 int dst_x = xDst + c;
                 unsigned char byte_val, idx;
                 unsigned char __far *rgb;
-                if (excl_contains(excl, nexcl, dst_x, dst_y)) continue;
+                if ((clip && clip_outside(clip, dst_x, dst_y)) ||
+                    excl_contains(excl, nexcl, dst_x, dst_y)) continue;
                 byte_val = *(bmp_buf + row_off + (unsigned)(sx >> 1));
                 idx = (sx & 1) ? (byte_val & 0x0F) : (byte_val >> 4);
                 if (idx == TRANSP_IDX) continue;
@@ -488,32 +523,68 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                             HDC hdcSrc, int xSrc, int ySrc, unsigned long dwRop)
 {
     unsigned src_hbm;
-
-    if (hdcDst < 1 || hdcDst >= 16) return 1;
-
-    /* Pattern ROPs: WHITENESS/BLACKNESS - wypelnienie niezalezne od zrodla */
-    if (dwRop == 0x00FF0062UL || dwRop == 0x00000042UL) {
-        if (hdcDst == 1) {
-            unsigned char rv = (dwRop == 0x00FF0062UL) ? 0xFF : 0;
-            int row, col, cx = xDst, cy = yDst, cw = w, ch = h;
-            ExclRect excl[KCB_MAX_HWNDS]; int nexcl;
-            if (cx < 0) { cw += cx; cx = 0; }
-            if (cy < 0) { ch += cy; cy = 0; }
-            if (cx + cw > 640) cw = 640 - cx;
-            if (cy + ch > 480) ch = 480 - cy;
-            nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
-            for (row = 0; row < ch; row++)
-                for (col = 0; col < cw; col++) {
-                    int dx = cx + col, dy = cy + row;
-                    if (excl_contains(excl, nexcl, dx, dy)) continue;
-                    draw_pixel((unsigned long)dy * VESA_PITCH +
-                               (unsigned long)dx * VESA_BPP, rv, rv, rv);
-                }
-        }
-        return 1;
+    int is_screen_dst = (hdcDst == 1 || ((unsigned)hdcDst & 0x4000u));
+    int dst_ox = 0;
+    int dst_oy = 0;
+    ClipRect cr; const ClipRect *pclip = 0;
+    /* Dekoduj origin celu: HWND-based DC czyta z KCB */
+    if ((unsigned)hdcDst & 0x4000u) {
+        unsigned hv = (unsigned)hdcDst & 0x3FFFu;
+        short __far *kox = (short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (hv-1u)*2u);
+        short __far *koy = (short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (hv-1u)*2u);
+        dst_ox = *kox;
+        dst_oy = *koy;
+        if (hv <= 1) { get_client_clip(&cr); pclip = &cr; }
     }
 
-    if (hdcSrc < 1 || hdcSrc >= 16) return 1;
+    if (!is_screen_dst && (hdcDst < 2 || hdcDst >= 16)) return 1;
+
+        /* Pattern ROPs: WHITENESS/BLACKNESS - wypelnienie niezalezne od zrodla */
+        if (dwRop == 0x00FF0062UL || dwRop == 0x00000042UL) {
+            if (is_screen_dst) {
+                unsigned char rv = (dwRop == 0x00FF0062UL) ? 0xFF : 0;
+                int row, col, cx = dst_ox + xDst, cy = dst_oy + yDst, cw = w, ch = h;
+                ExclRect excl[KCB_MAX_HWNDS]; int nexcl;
+                if (cx < 0) { cw += cx; cx = 0; }
+                if (cy < 0) { ch += cy; cy = 0; }
+                if (cx + cw > 640) cw = 640 - cx;
+                if (cy + ch > 480) ch = 480 - cy;
+                nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
+                for (row = 0; row < ch; row++)
+                    for (col = 0; col < cw; col++) {
+                        int dx = cx + col, dy = cy + row;
+                        if ((pclip && clip_outside(pclip, dx, dy)) ||
+                            excl_contains(excl, nexcl, dx, dy)) continue;
+                        draw_pixel((unsigned long)dy * VESA_PITCH +
+                                   (unsigned long)dx * VESA_BPP, rv, rv, rv);
+                    }
+            } else {
+                /* memDC: wypelnij bufor (przypadek zdegenerowany - raczej nie wywoływany) */
+                if (hdcDst >= 2 && hdcDst < 16) {
+                    unsigned buf_sel_w = g_dc_buf_sel[hdcDst];
+                    if (buf_sel_w) {
+                        unsigned char rv2 = (dwRop == 0x00FF0062UL) ? 0xFF : 0;
+                        int dc_ww = g_dc_buf_w[hdcDst], dc_hw = g_dc_buf_h[hdcDst];
+                        int rw, cw2, cx2 = xDst, cy2 = yDst, ww = w, hh = h;
+                        unsigned long dc_pw = (unsigned long)dc_ww * 4UL;
+                        if (cx2 < 0) { ww += cx2; cx2 = 0; }
+                        if (cy2 < 0) { hh += cy2; cy2 = 0; }
+                        if (cx2 + ww > dc_ww) ww = dc_ww - cx2;
+                        if (cy2 + hh > dc_hw) hh = dc_hw - cy2;
+                        for (rw = 0; rw < hh; rw++)
+                            for (cw2 = 0; cw2 < ww; cw2++) {
+                                unsigned long bo = (unsigned long)(cy2+rw) * dc_pw
+                                                 + (unsigned long)(cx2+cw2) * 4u;
+                                draw_dc_pixel(buf_sel_w, bo, rv2, rv2, rv2);
+                            }
+                        g_dc_has_bg[hdcDst] = 1;
+                    }
+                }
+            }
+            return 1;
+        }
+
+        if (hdcSrc < 1 || hdcSrc >= 16) return 1;
 
     src_hbm = g_dc_bitmap[hdcSrc];
 
@@ -659,20 +730,27 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
      * ====================================================== */
 
     /* ---- Przypadek A (15d): screen(1) -> memDC, SRCCOPY: zapisz tlo ---- */
-    if (hdcSrc == 1 && hdcDst >= 2 && hdcDst < 16 && dwRop == 0x00CC0020UL) {
+    if ((hdcSrc == 1 || (unsigned)hdcSrc == 0x4001u) &&
+        hdcDst >= 2 && hdcDst < 16 && dwRop == 0x00CC0020UL) {
         unsigned buf_sel = g_dc_buf_sel[hdcDst];
         if (buf_sel != 0) {
             int row, col;
             int dc_wA    = g_dc_buf_w[hdcDst];
             int dc_hA    = g_dc_buf_h[hdcDst];
             unsigned long dc_pitchA = (unsigned long)dc_wA * 4UL;
+            int src_ox = 0, src_oy = 0;
+            if ((unsigned)hdcSrc & 0x4000u) {
+                unsigned hv = (unsigned)hdcSrc & 0x3FFFu;
+                src_ox = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (hv-1u)*2u);
+                src_oy = *(short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (hv-1u)*2u);
+            }
             for (row = 0; row < h; row++) {
-                int sy = ySrc + row;
+                int sy = src_oy + ySrc + row;
                 int by = yDst + row;
                 if (sy < 0 || sy >= 480) continue;
                 if (by < 0 || by >= dc_hA) continue;
                 for (col = 0; col < w; col++) {
-                    int sx = xSrc + col;
+                    int sx = src_ox + xSrc + col;
                     int bx = xDst + col;
                     unsigned char r, g, bv;
                     unsigned long buf_off;
@@ -797,10 +875,10 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
         return 1;
     }
 
-    /* ---- Przypadek C (15c): memDC -> screen(1), SRCCOPY: blit z bufora ----
+    /* ---- Przypadek C (15c): memDC -> screen(1) lub HWND DC, SRCCOPY: blit z bufora ----
      * Piksele z alpha=1 kopiowane na ekran; alpha zerowane po odczycie (auto-clear).
      * Przezroczyste piksele bufora (alpha=0) nie nadpisuja tla ekranu. */
-    if (hdcDst == 1 && hdcSrc >= 2 && hdcSrc < 16 && dwRop == 0x00CC0020UL) {
+    if (is_screen_dst && hdcSrc >= 2 && hdcSrc < 16 && dwRop == 0x00CC0020UL) {
         unsigned buf_sel = g_dc_buf_sel[hdcSrc];
         if (buf_sel != 0 && g_dc_has_bg[hdcSrc]) {
             int row, col;
@@ -811,17 +889,18 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
             ExclRect excl[KCB_MAX_HWNDS]; int nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
             for (row = 0; row < h; row++) {
                 int sy = ySrc + row;
-                int dy = yDst + row;
+                int dy = dst_oy + yDst + row;
                 if (sy < 0 || sy >= dc_hC) continue;
                 if (dy < 0 || dy >= 480) continue;
                 for (col = 0; col < w; col++) {
                     int sx = xSrc + col;
-                    int dx = xDst + col;
+                    int dx = dst_ox + xDst + col;
                     unsigned long buf_off;
                     unsigned char __far *bp;
                     if (sx < 0 || sx >= dc_wC) continue;
                     if (dx < 0 || dx >= 640) continue;
-                    if (excl_contains(excl, nexcl, dx, dy)) continue;
+                    if ((pclip && clip_outside(pclip, dx, dy)) ||
+                        excl_contains(excl, nexcl, dx, dy)) continue;
                     buf_off = (unsigned long)sy * dc_pitchC + (unsigned long)sx * 4u;
                     bp = (unsigned char __far *)MK_FP(
                             buf_sel + (unsigned)(buf_off >> 16) * 8u,
@@ -840,8 +919,8 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
     }
 
     /* ---- Przypadek 4: sprite (1..86) -> ekran bezposrednio ---- */
-    if (src_hbm >= 1 && src_hbm <= MAX_BITMAPS && hdcDst == 1) {
-        blit_sprite_hbm(src_hbm, xDst, yDst, w, h, xSrc, ySrc);
+    if (src_hbm >= 1 && src_hbm <= MAX_BITMAPS && is_screen_dst) {
+        blit_sprite_hbm(src_hbm, dst_ox + xDst, dst_oy + yDst, w, h, xSrc, ySrc, pclip);
         return 1;
     }
 
@@ -898,34 +977,40 @@ BOOL __far __pascal PatBlt(HDC hdc, int x, int y, int w, int h,
     if (hdc != 1 && !((unsigned)hdc & 0xC000u)) return 1;
 
     /* Dekoduj origin (inline - DS!=SS w DLL) */
-    if ((unsigned)hdc & 0x4000u) {
-        unsigned hwnd_v = (unsigned)hdc & 0x3FFFu;
-        short __far *kox = (short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (hwnd_v-1u)*2u);
-        short __far *koy = (short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (hwnd_v-1u)*2u);
-        x += *kox;
-        y += *koy;
-    } else if ((unsigned)hdc & 0x8000u) {
-        x += (int)(((unsigned)hdc >> 7) & 0xFFu) * 4;
-        y += (int)((unsigned)hdc & 0x7Fu) * 4;
-    }
-
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > 640) w = 640 - x;
-    if (y + h > 480) h = 480 - y;
-    if (w <= 0 || h <= 0) return 1;
-
     {
-        ExclRect excl[KCB_MAX_HWNDS]; int nexcl = 0;
-        /* screen DC: chron child windows przed nadpisaniem (per-pixel, obsluguje tez x>=cx) */
-        if ((unsigned)hdc == 1u)
-            nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
-        for (row = 0; row < h; row++) {
-            for (col = 0; col < w; col++) {
-                int dx = x + col, dy = y + row;
-                if (excl_contains(excl, nexcl, dx, dy)) continue;
-                draw_pixel((unsigned long)dy * VESA_PITCH +
-                           (unsigned long)dx * VESA_BPP, rv, gv, bv);
+        ClipRect cr_p; const ClipRect *pclip_p = 0;
+        if ((unsigned)hdc & 0x4000u) {
+            unsigned hwnd_v = (unsigned)hdc & 0x3FFFu;
+            short __far *kox = (short __far *)MK_FP(SEL_KCB, KCB_WND_OX_OFF + (hwnd_v-1u)*2u);
+            short __far *koy = (short __far *)MK_FP(SEL_KCB, KCB_WND_OY_OFF + (hwnd_v-1u)*2u);
+            x += *kox;
+            y += *koy;
+            if (hwnd_v <= 1) { get_client_clip(&cr_p); pclip_p = &cr_p; }
+        } else if ((unsigned)hdc & 0x8000u) {
+            x += (int)(((unsigned)hdc >> 7) & 0xFFu) * 4;
+            y += (int)((unsigned)hdc & 0x7Fu) * 4;
+        }
+
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > 640) w = 640 - x;
+        if (y + h > 480) h = 480 - y;
+        if (w <= 0 || h <= 0) return 1;
+
+        {
+            ExclRect excl[KCB_MAX_HWNDS]; int nexcl = 0;
+            /* Screen DC lub top-level HWND DC: chron child windows.
+             * Child HWND DC (hwnd>1): nexcl=0, rysuje wewnatrz swojego okna. */
+            if ((unsigned)hdc == 1u || (unsigned)hdc == 0x4001u)
+                nexcl = get_child_excl(excl, KCB_MAX_HWNDS);
+            for (row = 0; row < h; row++) {
+                for (col = 0; col < w; col++) {
+                    int dx = x + col, dy = y + row;
+                    if ((pclip_p && clip_outside(pclip_p, dx, dy)) ||
+                        excl_contains(excl, nexcl, dx, dy)) continue;
+                    draw_pixel((unsigned long)dy * VESA_PITCH +
+                               (unsigned long)dx * VESA_BPP, rv, gv, bv);
+                }
             }
         }
     }

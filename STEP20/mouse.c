@@ -52,8 +52,8 @@ void mouse_c(void)
 
     if (state == 0) {
         /* Bajt 0 (status): bit 3 zawsze 1 (synchronizacja pakietu). */
-        if (!(data & 0x08)) return;    /* brak bitu sync -> ignoruj (desync) */
-        if (data & 0xC0)    return;    /* overflow X lub Y -> ignoruj pakiet */
+        if (!(data & 0x08)) return;   /* brak bitu sync — ignoruj */
+        if (data & 0xC0)    return;   /* overflow — ignoruj */
         kcb[KCB_MOUSE_PKT_B0] = data;
         kcb[KCB_MOUSE_STATE]  = 1;
     } else if (state == 1) {
