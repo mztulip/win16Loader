@@ -229,9 +229,10 @@ static void vesa_init(void)
 
     _dos_freemem(mib_seg);
 
-    /* INT 10h AX=4F02h BX=tryb|0x4000 (bit14=LFB) */
+    /* INT 10h AX=4F02h BX=tryb (bez bit14 = banked mode dla shell)
+     * LFB wlaczamy pozniej przez vesa_set_lfb() przed wejsciem w PM. */
     r.x.ax = 0x4F02;
-    r.x.bx = mode | 0x4000;
+    r.x.bx = mode;   /* banked mode — 0xA000 window dostepny */
     int86(0x10, &r, &r);
 
     if (r.x.ax != 0x004F) {
@@ -239,8 +240,19 @@ static void vesa_init(void)
         g_lfb_phys = 0;
         return;
     }
-    kprintf("VESA: tryb 0x%04X ustawiony, LFB=0x%08lX pitch=%u\n",
+    kprintf("VESA: tryb 0x%04X ustawiony (banked), LFB=0x%08lX pitch=%u\n",
             mode, g_lfb_phys, g_vesa_pitch);
+}
+
+/* Przelacz VESA na LFB mode (bit14) — wywolac przed wejsciem w PM */
+static void vesa_set_lfb(void)
+{
+    union REGS r;
+    r.x.ax = 0x4F02;
+    r.x.bx = 0x0112 | 0x4000;   /* LFB mode */
+    int86(0x10, &r, &r);
+    if (r.x.ax == 0x004F)
+        kprintf("VESA: LFB mode enabled\n");
 }
 
 /* ============================================================
@@ -343,6 +355,7 @@ extern unsigned short get_irq12_off(void);
 extern unsigned short get_gpf_off(void);
 extern unsigned short get_exc00_off(void);
 extern unsigned short get_exc06_off(void);
+extern unsigned short get_exc08_off(void);
 extern unsigned short get_exc0B_off(void);
 extern unsigned short get_exc0C_off(void);
 extern unsigned short get_exc0D_off(void);
@@ -429,21 +442,23 @@ static void init_int3f(unsigned short handler_off)
 
     /* IDT[0x00]: #DE Divide Error */
     /* IDT[0x06]: #UD Invalid Opcode */
+    /* IDT[0x08]: #DF Double Fault */
     /* IDT[0x0B]: #NP Segment Not Present */
     /* IDT[0x0C]: #SS Stack Fault */
     /* IDT[0x0D]: #GP General Protection (panic screen) */
     /* IDT[0x0E]: #PF Page Fault */
     {
-        static const unsigned char exc_vecs[6]  = { 0x00, 0x06, 0x0B, 0x0C, 0x0D, 0x0E };
-        unsigned short exc_offs[6];
+        static const unsigned char exc_vecs[7]  = { 0x00, 0x06, 0x08, 0x0B, 0x0C, 0x0D, 0x0E };
+        unsigned short exc_offs[7];
         int ei;
         exc_offs[0] = get_exc00_off();
         exc_offs[1] = get_exc06_off();
-        exc_offs[2] = get_exc0B_off();
-        exc_offs[3] = get_exc0C_off();
-        exc_offs[4] = get_exc0D_off();
-        exc_offs[5] = get_exc0E_off();
-        for (ei = 0; ei < 6; ei++) {
+        exc_offs[2] = get_exc08_off();
+        exc_offs[3] = get_exc0B_off();
+        exc_offs[4] = get_exc0C_off();
+        exc_offs[5] = get_exc0D_off();
+        exc_offs[6] = get_exc0E_off();
+        for (ei = 0; ei < 7; ei++) {
             p = MK_FP(idt_seg, (int)exc_vecs[ei] * 8);
             p[0] = (unsigned char)(exc_offs[ei] & 0xFF);
             p[1] = (unsigned char)(exc_offs[ei] >> 8);
@@ -1554,19 +1569,19 @@ int main(int argc, char *argv[])
     kprintf("--- RAM detection ---\n");
     mem_detect();
 
-    /* 20b-20e: jezeli brak argumentu -> uruchom shell textowy (przed VESA)
+    /* 0a. Inicjalizacja VESA (przed shell i PM — potrzebne do graficznego shella) */
+    kprintf("--- VESA init ---\n");
+    vesa_init();
+
+    /* 20b-20f: jezeli brak argumentu -> uruchom shell graficzny (VESA)
      * Jezeli argument podany -> bezposrednie uruchomienie (jak dotychczas) */
     if (argc <= 1) {
         kprintf("--- Shell mode ---\n");
-        app_name = shell_run();  /* skanuje *.EXE, wyswietla UI, zwraca wybrany plik */
+        app_name = shell_run();  /* skanuje *.EXE, wyswietla UI + ikony, zwraca wybrany plik */
     } else {
         app_name = argv[1];
     }
     kprintf("App: %s\n", app_name);
-
-    /* 0a. Inicjalizacja VESA (przed wejsciem w PM!) */
-    kprintf("--- VESA init ---\n");
-    vesa_init();
 
     /* 0b. Pobierz font BIOS 8x16 */
     kprintf("--- Font init ---\n");
@@ -1681,7 +1696,11 @@ int main(int argc, char *argv[])
         kprintf("--- Ladowanie zasobow NE: %s ---\n", app_name);
         rc_init(app_name);
         rc_load_all(g_kcb_phys, g_bitmaps_phys);
-        rc_copy_menu_to_kcb(g_kcb_phys);
+        {
+            int rc_ok = rc_copy_menu_to_kcb(g_kcb_phys);
+            unsigned char __far *kd = (unsigned char __far *)MK_FP((unsigned)(g_kcb_phys >> 4), 0);
+            kprintf("rc_copy_menu=%d KCB[292]=%u\n", rc_ok, kd[292]);
+        }
 
         g_orig_cs = get_cs();
         g_orig_ss = get_ss();
@@ -1698,6 +1717,7 @@ int main(int argc, char *argv[])
 
         init_mouse_ps2();
 
+        vesa_set_lfb();  /* przelacz VESA z banked na LFB mode przed PM */
         kprintf("LFB=0x%08lX pitch=%u font=0x%06lX -> wchodze w PM\n",
                 g_lfb_phys, g_vesa_pitch, g_font_phys);
         pm_call_app();

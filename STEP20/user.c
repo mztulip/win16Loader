@@ -54,13 +54,16 @@ unsigned char io_inb(unsigned port);
 void io_outb(unsigned port, unsigned char val);
 #pragma aux io_outb = "out dx, al" parm [dx] [al] modify [];
 
-/* Odczyt SP: uzywane do debugowania glebi stosu */
+/* Odczyt SP/SS: uzywane do debugowania glebi stosu */
 unsigned get_sp(void);
 #pragma aux get_sp = "mov ax, sp" value [ax] modify [ax];
+unsigned get_ss(void);
+#pragma aux get_ss = "mov ax, ss" value [ax] modify [ax];
 
 /* HLT z IF=1: czeka na nastepne przerwanie (IRQ0 co ~55ms) */
 static void do_hlt(void);
 #pragma aux do_hlt = "sti" "hlt" "cli" modify [];
+
 
 /* ============================================================
  * VESA LFB: 640x480x24bpp, pitch=1920
@@ -77,6 +80,11 @@ static void vesa_fill_rect(int x0, int y0, int w, int h,
                             unsigned char r, unsigned char g, unsigned char b)
 {
     int row, col;
+    /* Clip do widocznego ekranu (15 selektorow VESA = y<480, x<640) */
+    if (x0 >= 640 || y0 >= 480) return;
+    if (x0 + w > 640) w = 640 - x0;
+    if (y0 + h > 480) h = 480 - y0;
+    if (w <= 0 || h <= 0) return;
     for (row = 0; row < h; row++) {
         unsigned long base = (unsigned long)(y0 + row) * VESA_PITCH
                            + (unsigned long)x0 * VESA_BPP;
@@ -244,6 +252,7 @@ typedef LRESULT (__far __pascal *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 #define WM_KEYDOWN       0x0100
 #define WM_KEYUP         0x0101
 #define WM_CHAR          0x0102
+#define WM_COMMAND       0x0111
 #define WM_SYSCOMMAND    0x0112
 
 typedef struct {
@@ -351,6 +360,15 @@ static unsigned char kb_dequeue(void)
     return kcb[KCB_KB_BUF + head];
 }
 
+static unsigned char kb_peek(void)
+{
+    unsigned char __far *kcb = KCB_MK_FP(0);
+    unsigned char head = kcb[KCB_KB_HEAD];
+    unsigned char tail = kcb[KCB_KB_TAIL];
+    if (head == tail) return 0;   /* bufor pusty */
+    return kcb[KCB_KB_BUF + head];  /* nie modyfikuj head */
+}
+
 static HDC make_hwnd_dc(unsigned hwnd)
 {
     return (HDC)(0x4000u | (hwnd & 0x3FFFu));
@@ -432,6 +450,7 @@ static void decode_dc(HDC hdc, int *ox, int *oy)
 #define HTSYSMENU   3
 #define HTMINBUTTON 8
 #define HTMAXBUTTON 9
+#define HTCLOSE     20
 #define HTBORDER   18
 #define HTMENU     10   /* klikniecie w menu bar (nie standard Windows - wewnetrzny) */
 
@@ -601,6 +620,7 @@ static unsigned g_msg_count = 0;
 
 /* Forward declarations */
 LRESULT __far __pascal SendMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 unsigned long __far __pascal GetTickCount(void);
 BOOL __far __pascal DestroyWindow(HWND hwnd);
 static unsigned nc_hit_test(int wi, int abs_x, int abs_y);
@@ -698,28 +718,27 @@ LRESULT __far __pascal SendMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     if (!proc) return 0;
 
     save_ds = get_ds();
+    /* Workaround: SKI.EXE sub_00DF / WndProcMain check DS:[0..3] at every entry.
+     * Non-zero (set by Watcom heap init during WM_CREATE) triggers infinite recursion.
+     * Zero them before each dispatch so the check takes the "skip" path. */
     {
-        unsigned *pp = (unsigned *)&proc;
         unsigned short __far *dp = (unsigned short __far *)((unsigned long)app_ds << 16);
-        serial_puts("SM: proc=");
-        serial_hex16(pp[1]);
-        serial_putc(':');
-        serial_hex16(pp[0]);
-        serial_puts(" ds=");
-        serial_hex16(app_ds);
-        serial_puts(" msg=");
-        serial_hex16(msg);
-        serial_puts(" sp=");
-        serial_hex16(get_sp());
-        serial_puts(" [0]=");
-        serial_hex16(dp[0]);
-        serial_puts(" [2]=");
-        serial_hex16(dp[1]);
-        serial_putc('\n');
+        dp[0] = 0;
+        dp[1] = 0;
     }
+    /* Ukryj kursor przed wywolaniem WndProc: app moze renderowac bezposrednio do LFB
+     * (BitBlt/PatBlt). Bez erase tu, g_cur_bg staje sie nieaktualne => ghost cursor. */
+    cursor_erase();
     set_ds(app_ds);
     result = proc(hwnd, msg, wp, lp);
     set_ds(save_ds);
+    /* Odtworz kursor po renderowaniu: czytaj pozycje bezposrednio z KCB */
+    {
+        unsigned char __far *kcb_c = KCB_MK_FP(0);
+        int mx_c = (int)((unsigned)kcb_c[285] | ((unsigned)kcb_c[286] << 8));
+        int my_c = (int)((unsigned)kcb_c[287] | ((unsigned)kcb_c[288] << 8));
+        cursor_draw(mx_c, my_c);
+    }
     return result;
 }
 
@@ -732,6 +751,7 @@ static void draw_chrome_char(int sx, int sy, unsigned char ch,
                               unsigned char br, unsigned char bg, unsigned char bb)
 {
     int row, col;
+    if (sy >= 480 || sx >= 640) return;
     for (row = 0; row < FONT_H_USR; row++) {
         unsigned char bits = *((unsigned char __far *)
             ((unsigned long)SEL_FONT_USR << 16 | (unsigned)((unsigned)ch * FONT_H_USR + row)));
@@ -880,11 +900,14 @@ static void draw_window_chrome(int wi)
     /* Przycisk sysmenu (lewy) */
     draw_nc_button(cap_x, cap_y, NC_SYSMENU_W, NC_CAPTION_H, '=', 0);
 
-    /* Przycisk minimize (drugi od prawej) */
-    draw_nc_button(cap_x + cap_w - 2*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '-', 0);
+    /* Przycisk minimize (trzeci od prawej) */
+    draw_nc_button(cap_x + cap_w - 3*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '-', 0);
 
-    /* Przycisk maximize (prawy) */
-    draw_nc_button(cap_x + cap_w - NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '+', 0);
+    /* Przycisk maximize (drugi od prawej) */
+    draw_nc_button(cap_x + cap_w - 2*NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, '+', 0);
+
+    /* Przycisk close (prawy) */
+    draw_nc_button(cap_x + cap_w - NC_BTN_W, cap_y, NC_BTN_W, NC_CAPTION_H, 'X', 0);
 
     /* Tytul: bialy tekst wycentrowany pionowo, wyrownany od lewej */
     title = g_windows[wi].title;
@@ -1282,8 +1305,8 @@ HWND __far __pascal CreateWindow(
     if (wi >= MAX_WINDOWS) return 0;
 
     /* CW_USEDEFAULT: uzyj domyslnej pozycji/rozmiaru */
-    if (x == CW_USEDEFAULT || x == 0) x = 10;
-    if (y == CW_USEDEFAULT || y == 0) y = 10;
+    if (x == CW_USEDEFAULT) x = 10;
+    if (y == CW_USEDEFAULT) y = 10;
     if (w <= 0 || w == (int)0x8000)   w = 320;
     if (h <= 0 || h == (int)0x8000)   h = 200;
 
@@ -1303,16 +1326,13 @@ HWND __far __pascal CreateWindow(
     g_windows[wi].title[ti] = '\0';
     g_windows[wi].used      = 1;
 
-    /* Dla okien potomnych: x,y sa wzgledem client area rodzica. */
+    /* Dla okien potomnych: x,y sa wzgledem client area rodzica.
+     * Uzyj KCB-stored origin rodzica (= client area origin dla top-level). */
     if (parent != 0) {
-        int pi;
-        for (pi = 0; pi < MAX_WINDOWS; pi++) {
-            if (g_windows[pi].used && g_windows[pi].hwnd == parent) {
-                g_windows[wi].x += g_windows[pi].x;
-                g_windows[wi].y += g_windows[pi].y;
-                break;
-            }
-        }
+        short __far *kox = (short __far *)KCB_MK_FP(KCB_WND_OX_OFF + (parent-1u)*2u);
+        short __far *koy = (short __far *)KCB_MK_FP(KCB_WND_OY_OFF + (parent-1u)*2u);
+        g_windows[wi].x += *kox;
+        g_windows[wi].y += *koy;
     }
 
     /* Zapisz do KCB (dla GDI: HWND-based DC).
@@ -1321,14 +1341,19 @@ HWND __far __pascal CreateWindow(
     /* Parsuj menu klasy (top-level, z WS_CAPTION) */
     if (parent == 0 && (style & WS_CAPTION) && !g_menu_parsed) {
         unsigned mid = g_classes[ci].menu_name_id;
+        unsigned char __far *kcb = KCB_MK_FP(0);
+        unsigned char kcb_n = kcb[KCB_MENU_N];
         if (mid != 0) {
-            unsigned char __far *kcb = KCB_MK_FP(0);
             unsigned short kid = (unsigned short)kcb[KCB_MENU_ID] |
                                  ((unsigned short)kcb[KCB_MENU_ID+1] << 8);
-            if (kcb[KCB_MENU_N] && kid == mid) {
+            if (kcb_n && kid == mid) {
                 parse_menu_from_kcb();
                 g_menu_parsed = 1;
             }
+        } else if (kcb_n) {
+            /* lpszMenuName=NULL ale RT_MENU zaladowany z NE — uzyj go */
+            parse_menu_from_kcb();
+            g_menu_parsed = 1;
         }
     }
 
@@ -1373,10 +1398,14 @@ BOOL __far __pascal PostMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return 1;
 }
 
+static int g_quit_posted = 0;  /* 1 = PostQuitMessage wywolane, wymusza zakonczenie */
+static int g_quit_code   = 0;
+
 void __far __pascal PostQuitMessage(int exitCode)
 {
     serial_puts("USER: PostQuitMessage\n");
-    push_msg(0, WM_QUIT, (WPARAM)exitCode, 0L);
+    g_quit_posted = 1;
+    g_quit_code   = exitCode;
 }
 
 /* ============================================================
@@ -1388,36 +1417,59 @@ BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
     unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
 
+    /* PostQuitMessage wywolane: zatrzymaj app */
+    if (g_quit_posted) {
+        serial_puts("USER: QUIT\n");
+        for (;;) do_hlt();
+    }
+
     /* Sprawdz bufor klawiatury przed kolejka komunikatow */
     do_sti();
     vk = kb_dequeue();
     do_cli();
     if (vk) {
+        if (vk == 0xFF) {
+            /* Alt+F4 -> SC_CLOSE */
+            HWND hw = g_kb_hwnd ? g_kb_hwnd : 1;
+            serial_puts("USER: Alt+F4 -> SC_CLOSE (G)\n");
+            do_sti();
+            DefWindowProc(hw, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, 0L);
+            pmsg->hwnd    = hw;
+            pmsg->message = 0;
+            pmsg->wParam  = 0;
+            pmsg->lParam  = 0L;
+            return 0;
+        }
         pmsg->hwnd    = g_kb_hwnd ? g_kb_hwnd : 1;
         pmsg->message = WM_KEYDOWN;
         pmsg->wParam  = vk;
         pmsg->lParam  = 0L;
+        do_sti();
         return 1;
     }
     /* Sprawdz zdarzenia myszy (mouse_msg.c) */
     if (mouse_poll(pmsg, g_kb_hwnd ? g_kb_hwnd : 1)) {
-        /* Aktualizuj pozycje kursora (KCB[285..288] = abs X/Y) */
+        /* abs_x/abs_y z lParam (ustawione przez mouse_msg.c jako (abs_y<<16)|abs_x) */
+        int abs_x = (int)(pmsg->lParam & 0xFFFFUL);
+        int abs_y = (int)((pmsg->lParam >> 16) & 0xFFFFUL);
+        HWND hw   = g_kb_hwnd ? g_kb_hwnd : 1;
+        /* Przelicz na client coords przy uzyciu KCB client origin */
         {
-            unsigned char __far *kcb = KCB_MK_FP(0);
-            int mx = (int)((unsigned)kcb[285] | ((unsigned)kcb[286] << 8));
-            int my = (int)((unsigned)kcb[287] | ((unsigned)kcb[288] << 8));
-            if (mx != g_cur_x || my != g_cur_y || !g_cur_drawn) {
-                cursor_erase();
-                cursor_draw(mx, my);
-            }
+            short __far *kox = (short __far *)KCB_MK_FP(KCB_WND_OX_OFF + (hw-1u)*2u);
+            short __far *koy = (short __far *)KCB_MK_FP(KCB_WND_OY_OFF + (hw-1u)*2u);
+            int cx = abs_x - (int)*kox;
+            int cy = abs_y - (int)*koy;
+            pmsg->lParam = ((unsigned long)(unsigned short)cy << 16) | (unsigned short)cx;
+        }
+        /* Aktualizuj pozycje kursora */
+        if (abs_x != g_cur_x || abs_y != g_cur_y || !g_cur_drawn) {
+            cursor_erase();
+            cursor_draw(abs_x, abs_y);
         }
         /* WM_LBUTTONDOWN: sprawdz czy w NC area */
         if (pmsg->message == 0x0201 /* WM_LBUTTONDOWN */) {
-            int abs_x = (int)(pmsg->lParam & 0xFFFFUL);
-            int abs_y = (int)((pmsg->lParam >> 16) & 0xFFFFUL);
             unsigned ht = HTCLIENT;
             int wi;
-            HWND hw = g_kb_hwnd ? g_kb_hwnd : 1;
             /* Sprawdz klikniecie na ikonie zminimalizowanego okna */
             for (wi = 0; wi < MAX_WINDOWS; wi++) {
                 if (g_windows[wi].used && g_windows[wi].state == 1) {
@@ -1436,41 +1488,37 @@ BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
                     && g_windows[wi].state != 1) {
                     ht = nc_hit_test(wi, abs_x, abs_y);
                     if (ht != HTCLIENT) {
-                        /* NC klikniecie */
+                        /* NC klikniecie: lParam = screen coords (dla DefWindowProc) */
                         pmsg->message = WM_NCLBUTTONDOWN;
                         pmsg->wParam  = ht;
-                        /* lParam = MAKELONG(screen_x, screen_y) - zostaje */
-                    } else {
-                        /* Klient: lParam = wzgledem client origin */
-                        int menu_h = (g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0;
-                        int client_ox = g_windows[wi].x + NC_BORDER_W;
-                        int client_oy = g_windows[wi].y + NC_BORDER_W + NC_CAPTION_H + menu_h;
-                        if (g_windows[wi].style & WS_CAPTION) {
-                            pmsg->lParam = (LPARAM)(((unsigned long)(unsigned)(abs_y - client_oy) << 16) |
-                                                     (unsigned)(abs_x - client_ox));
-                        }
+                        pmsg->lParam  = (LPARAM)(((unsigned long)(unsigned)abs_y << 16) |
+                                                  (unsigned)abs_x);
                     }
+                    /* Klient: lParam juz przeliczony na client coords powyzej */
                     break;
                 }
             }
             serial_puts("MSE:0x"); serial_hex16(pmsg->message);
             serial_puts(" ht="); serial_hex16(ht); serial_putc('\n');
         }
+        do_sti();
         return 1;
     }
 
     if (g_msg_count == 0) {
         /* Kolejka pusta: czekaj na przerwanie (IRQ0/IRQ1/IRQ12) */
-        do_hlt();
+        do_hlt();   /* sti + hlt + cli — czeka na dokladnie jedno przerwanie */
         pmsg->hwnd    = 0;
         pmsg->message = 0;   /* WM_NULL */
         pmsg->wParam  = 0;
         pmsg->lParam  = 0L;
+        do_sti();
         return 1;
     }
     *pmsg = g_msg_queue[g_msg_head];
     g_msg_head = (g_msg_head + 1) % MSG_QUEUE_SIZE;
     g_msg_count--;
+    do_sti();
     return (pmsg->message != WM_QUIT) ? 1 : 0;
 }
 
@@ -1483,21 +1531,99 @@ BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
     unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
 
+    /* PostQuitMessage wywolane: zatrzymaj app.
+     * SKI.EXE nie obsluguje WM_QUIT wiec HLT w petli — nic wiecej nie moze zrobic. */
+    if (g_quit_posted) {
+        serial_puts("USER: QUIT\n");
+        for (;;) do_hlt();
+    }
+
     /* Najpierw sprawdz bufor klawiatury (IRQ1 zapisuje VK do KCB) */
     do_sti();
-    vk = kb_dequeue();
+    vk = wRemoveMsg ? kb_dequeue() : kb_peek();
     do_cli();
     if (vk) {
-        serial_puts("KEY:0x"); serial_hex16(vk); serial_putc('\n');
+        if (vk == 0xFF) {
+            /* Alt+F4 -> SC_CLOSE */
+            HWND hw = g_kb_hwnd ? g_kb_hwnd : 1;
+            serial_puts("USER: Alt+F4 -> SC_CLOSE\n");
+            do_sti();
+            DefWindowProc(hw, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, 0L);
+            pmsg->hwnd    = hw;
+            pmsg->message = 0;  /* WM_NULL */
+            pmsg->wParam  = 0;
+            pmsg->lParam  = 0L;
+            return 1;
+        }
         pmsg->hwnd    = g_kb_hwnd ? g_kb_hwnd : 1;
         pmsg->message = WM_KEYDOWN;
         pmsg->wParam  = vk;
         pmsg->lParam  = 0L;
+        do_sti();  /* app musi biec z IF=1 (INT 3F = interrupt gate) */
         return 1;
     }
     /* Sprawdz zdarzenia myszy (mouse_msg.c) */
     if (mouse_poll(pmsg, g_kb_hwnd ? g_kb_hwnd : 1)) {
-        serial_puts("MSE:0x"); serial_hex16(pmsg->message); serial_putc('\n');
+        /* mouse_poll konsumuje zdarzenie (czyści mouse_changed).
+         * Jesli PM_NOREMOVE: zapisz MSG do kolejki aby GetMessage go znalazl. */
+        unsigned char __far *kcb2 = KCB_MK_FP(0);
+        int mx2 = (int)((unsigned)kcb2[285] | ((unsigned)kcb2[286] << 8));
+        int my2 = (int)((unsigned)kcb2[287] | ((unsigned)kcb2[288] << 8));
+        HWND hw2  = g_kb_hwnd ? g_kb_hwnd : 1;
+        int cx2, cy2;
+        {
+            short __far *kox2 = (short __far *)KCB_MK_FP(KCB_WND_OX_OFF + (hw2-1u)*2u);
+            short __far *koy2 = (short __far *)KCB_MK_FP(KCB_WND_OY_OFF + (hw2-1u)*2u);
+            cx2 = mx2 - (int)*kox2;
+            cy2 = my2 - (int)*koy2;
+            /* lParam: client coords (low=x, high=y) */
+            pmsg->lParam = ((unsigned long)(unsigned short)cy2 << 16)
+                         | (unsigned short)cx2;
+        }
+        /* Przesun kursor na nowa pozycje */
+        if (mx2 != g_cur_x || my2 != g_cur_y) {
+            cursor_erase();
+            cursor_draw(mx2, my2);
+        }
+        /* WM_LBUTTONDOWN: NC hit test (menu bar, title bar, przyciski).
+         * SKI.EXE nie wywoluje DefWindowProc — obslugujemy NC klikniecia tutaj. */
+        if (pmsg->message == 0x0201 /* WM_LBUTTONDOWN */) {
+            unsigned ht = HTCLIENT;
+            int wi;
+            for (wi = 0; wi < MAX_WINDOWS; wi++) {
+                if (g_windows[wi].used && g_windows[wi].state == 1) {
+                    int ix = 4 + wi * 124;
+                    if (mx2 >= ix && mx2 < ix + ICON_W &&
+                        my2 >= ICON_Y && my2 < ICON_Y + ICON_H) {
+                        push_msg(g_windows[wi].hwnd, WM_SYSCOMMAND,
+                                 (WPARAM)SC_RESTORE, 0L);
+                        pmsg->message = 0;
+                        break;
+                    }
+                }
+            }
+            for (wi = 0; wi < MAX_WINDOWS; wi++) {
+                if (g_windows[wi].used && g_windows[wi].hwnd == hw2
+                    && g_windows[wi].state != 1) {
+                    ht = nc_hit_test(wi, mx2, my2);
+                    if (ht != HTCLIENT) {
+                        /* Obsluz NC klik bezposrednio (app nie wywola DefWindowProc) */
+                        LPARAM nc_lp = (LPARAM)(((unsigned long)(unsigned)my2 << 16) |
+                                                 (unsigned)mx2);
+                        DefWindowProc(hw2, WM_NCLBUTTONDOWN, (WPARAM)ht, nc_lp);
+                        pmsg->message = 0; /* WM_NULL — polknij klikniecie */
+                    }
+                    break;
+                }
+            }
+        }
+        /* PM_NOREMOVE: mouse_poll juz skonsumowal zdarzenie, wiec wrzuc
+         * przetworzone MSG do kolejki aby nastepne GetMessage go znalazlo.
+         * Robimy to PO NC handling — jesli NC polknelo klik, wrzucamy WM_NULL. */
+        if (!wRemoveMsg && pmsg->message) {
+            push_msg(hw2, pmsg->message, pmsg->wParam, pmsg->lParam);
+        }
+        do_sti();
         return 1;
     }
 
@@ -1508,20 +1634,18 @@ BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
             g_msg_head = (g_msg_head + 1) % MSG_QUEUE_SIZE;
             g_msg_count--;
         }
+        do_sti();
         return 1;
     }
 
-    /* Kolejka pusta i brak klawiszy: czekaj az IRQ0 zmieni tick_ms.
-     * STI/CLI potrzebne: thunk INT 3F to interrupt gate (IF=0 przy wejsciu).
-     * IRQ0 bezpieczny: PIC przemapowany na INT 0x20. */
-    {
-        unsigned long __far *tick_p =
-            (unsigned long __far *)KCB_MK_FP(28);
-        unsigned long t0 = *tick_p;
-        do_sti();
-        while (*tick_p == t0) {}   /* czekaj na jeden tik IRQ0 (~55ms) */
-        do_cli();
+    /* Brak komunikatow: przerysuj kursor (gra mogla go nadpisac przy renderowaniu)
+     * i czekaj na dowolne przerwanie (IRQ0/IRQ1/IRQ12).
+     * HLT budzi sie natychmiast po IRQ12 (mysz) → szybsza reakcja niz tick wait. */
+    if (!g_cur_drawn) {
+        cursor_draw(g_cur_x, g_cur_y);
     }
+    do_hlt();   /* sti + hlt + cli — czeka na jedno przerwanie */
+    do_sti();
     return 0;
 }
 
@@ -1581,8 +1705,10 @@ static unsigned nc_hit_test(int wi, int abs_x, int abs_y)
         if (abs_x < cap_x + NC_SYSMENU_W)
             return HTSYSMENU;
         if (abs_x >= cap_x + cap_w - NC_BTN_W)
-            return HTMAXBUTTON;
+            return HTCLOSE;
         if (abs_x >= cap_x + cap_w - 2 * NC_BTN_W)
+            return HTMAXBUTTON;
+        if (abs_x >= cap_x + cap_w - 3 * NC_BTN_W)
             return HTMINBUTTON;
         return HTCAPTION;
     }
@@ -1639,7 +1765,7 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 push_msg(hwnd, 0x0111u /* WM_COMMAND */, (WPARAM)cmd_id, 0L);
             return 0;
         }
-        if (wp == HTSYSMENU || wp == HTMINBUTTON || wp == HTMAXBUTTON) {
+        if (wp == HTSYSMENU || wp == HTMINBUTTON || wp == HTMAXBUTTON || wp == HTCLOSE) {
             /* Pobierz wspolrzedne odpowiedniego przycisku */
             int wi, bx, by, bw, bh;
             char glyph;
@@ -1653,9 +1779,11 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 if (wp == HTSYSMENU) {
                     bx=cap_x; by=cap_y; bw=NC_SYSMENU_W; bh=NC_CAPTION_H; glyph='=';
                 } else if (wp == HTMINBUTTON) {
-                    bx=cap_x+cap_w-2*NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='-';
+                    bx=cap_x+cap_w-3*NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='-';
+                } else if (wp == HTMAXBUTTON) {
+                    bx=cap_x+cap_w-2*NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='+';
                 } else {
-                    bx=cap_x+cap_w-NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='+';
+                    bx=cap_x+cap_w-NC_BTN_W; by=cap_y; bw=NC_BTN_W; bh=NC_CAPTION_H; glyph='X';
                 }
             }
             if (track_nc_button(bx, by, bw, bh, glyph, hwnd)) {
@@ -1677,12 +1805,15 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                         cursor_draw(g_cur_x, g_cur_y);
                         push_msg(hwnd, WM_PAINT, 0, 0L);
                     } else {
-                        push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)sc, lp);
+                        /* Obsluz SC_* bezposrednio (app nie wywola DefWindowProc) */
+                        DefWindowProc(hwnd, WM_SYSCOMMAND, (WPARAM)sc, lp);
                     }
                 } else if (wp == HTMINBUTTON)
-                    push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MINIMIZE, lp);
-                else
-                    push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
+                    DefWindowProc(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MINIMIZE, lp);
+                else if (wp == HTMAXBUTTON)
+                    DefWindowProc(hwnd, WM_SYSCOMMAND, (WPARAM)SC_MAXIMIZE, lp);
+                else if (wp == HTCLOSE)
+                    DefWindowProc(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
             }
         }
         /* HTCAPTION: drag okna */
@@ -1749,8 +1880,10 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     if (msg == WM_SYSCOMMAND) {
         unsigned cmd = wp & 0xFFF0u;
         if (cmd == (SC_CLOSE & 0xFFF0u)) {
-            /* SC_CLOSE: wyslij WM_CLOSE do okna */
+            /* SC_CLOSE: wyslij WM_CLOSE, a jesli app nie zniszczyla okna - zrob to */
             SendMessage(hwnd, WM_CLOSE, 0, 0L);
+            if (!g_quit_posted)
+                DestroyWindow(hwnd);
         } else if (cmd == (SC_MINIMIZE & 0xFFF0u)) {
             int wi;
             for (wi = 0; wi < MAX_WINDOWS; wi++)
@@ -1902,6 +2035,9 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return 0;
 }
 
+/* forward declaration (needed by ShowWindow) */
+BOOL __far __pascal GetClientRect(HWND hwnd, RECT __far *lpRect);
+
 /* ============================================================
  * ordinal 42: ShowWindow
  * ordinal 124: UpdateWindow
@@ -1930,10 +2066,20 @@ BOOL __far __pascal ShowWindow(HWND hwnd, int nCmdShow)
             break;
         }
     }
+    /* Inicjalizuj pozycje myszy w KCB (poczatkowa: srodek ekranu).
+     * SendMessage czyta pozycje z KCB[285..288] bezposrednio po powrocie z proc(). */
+    {
+        unsigned short __far *px = (unsigned short __far *)KCB_MK_FP(285);
+        unsigned short __far *py = (unsigned short __far *)KCB_MK_FP(287);
+        *px = 320;
+        *py = 240;
+    }
     /* Narysuj kursor w poczatkowej pozycji (srodek ekranu) */
     cursor_draw(320, 240);
-    /* WM_SIZE / WM_ACTIVATE (dla SKI.EXE game loop) */
-    SendMessage(hwnd, WM_SIZE,     0, ((unsigned long)480 << 16) | 640UL);
+    /* WM_SIZE: lParam = (client_h << 16) | client_w
+     * Uzywamy pelnego rozmiaru okna (640), nie client area (632),
+     * poniewaz SKI.EXE uzywa tego do obliczen rozmiaru gry. */
+    SendMessage(hwnd, WM_SIZE, 0, ((unsigned long)480 << 16) | 640UL);
     SendMessage(hwnd, WM_ACTIVATE, 1, 0L);
     return 1;
 }
@@ -1975,13 +2121,10 @@ HDC __far __pascal BeginPaint(HWND hwnd, PAINTSTRUCT __far *ps)
     ps->rcPaint[3] = 480;  /* bottom */
     for (i = 0; i < MAX_WINDOWS; i++) {
         if (g_windows[i].used && g_windows[i].hwnd == hwnd) {
-            /* Okna potomne dostaja HWND-based DC (dynamiczny - origin z KCB) */
-            if (g_windows[i].parent != 0) {
-                hdc = make_hwnd_dc((unsigned)hwnd);
-                /* rcPaint = client area okna (wspolrzedne wzgledem origin okna) */
-                ps->rcPaint[2] = (unsigned)g_windows[i].w;   /* right */
-                ps->rcPaint[3] = (unsigned)g_windows[i].h;   /* bottom */
-            }
+            hdc = make_hwnd_dc((unsigned)hwnd);
+            /* rcPaint = client area okna (wspolrzedne wzgledem origin okna) */
+            ps->rcPaint[2] = (unsigned)g_windows[i].w;   /* right */
+            ps->rcPaint[3] = (unsigned)g_windows[i].h;   /* bottom */
             break;
         }
     }
@@ -2003,15 +2146,17 @@ BOOL __far __pascal EndPaint(HWND hwnd, const PAINTSTRUCT __far *ps)
 HDC __far __pascal GetDC(HWND hwnd)
 {
     int i;
+    HDC result = 1;
+    serial_puts("USER: GetDC hwnd="); serial_hex16(hwnd);
     for (i = 0; i < MAX_WINDOWS; i++) {
         if (g_windows[i].used && g_windows[i].hwnd == hwnd) {
-            /* Okna potomne dostaja HWND-based DC (dynamiczny - origin z KCB) */
-            if (g_windows[i].parent != 0)
-                return make_hwnd_dc((unsigned)hwnd);
-            return 1;
+            /* Zawsze zwracaj HWND-based DC — clip do client area okna */
+            result = make_hwnd_dc((unsigned)hwnd);
+            break;
         }
     }
-    return 1;
+    serial_puts(" -> hdc="); serial_hex16(result); serial_putc('\n');
+    return result;
 }
 
 int __far __pascal ReleaseDC(HWND hwnd, HDC hdc)
@@ -2037,12 +2182,19 @@ unsigned long __far __pascal GetTickCount(void)
 BOOL __far __pascal GetClientRect(HWND hwnd, RECT __far *lpRect)
 {
     int i, j;
+    serial_puts("GCR\n");
     lpRect->left = 0;
     lpRect->top  = 0;
     for (i = 0; i < MAX_WINDOWS; i++) {
         if (g_windows[i].used && g_windows[i].hwnd == hwnd) {
             lpRect->right  = (int)g_windows[i].w;
             lpRect->bottom = (int)g_windows[i].h;
+            /* Okno top-level z paskiem tytu³u: odejmij obszar NC */
+            if (g_windows[i].parent == 0 && (g_windows[i].style & WS_CAPTION)) {
+                int menu_h = (g_menu_parsed && g_menu_n > 0) ? MENU_BAR_H : 0;
+                lpRect->right  -= 2 * NC_BORDER_W;
+                lpRect->bottom -= 2 * NC_BORDER_W + NC_CAPTION_H + menu_h;
+            }
             /* Okno glowne: przytnij do wysokosci fizycznego ekranu */
             if (g_windows[i].parent == 0 && lpRect->bottom > 480)
                 lpRect->bottom = 480;
@@ -2091,7 +2243,10 @@ int __far __pascal SetFocus(HWND hwnd)
 
 BOOL __far __pascal IsIconic(HWND hwnd)
 {
-    (void)hwnd;
+    int wi;
+    for (wi = 0; wi < MAX_WINDOWS; wi++)
+        if (g_windows[wi].used && g_windows[wi].hwnd == hwnd)
+            return (g_windows[wi].state == 1) ? 1 : 0;
     return 0;
 }
 
@@ -2116,6 +2271,7 @@ HWND __far __pascal FindWindow(const char __far *cls, const char __far *title)
 BOOL __far __pascal DestroyWindow(HWND hwnd)
 {
     int i;
+    int is_toplevel = 0;
     serial_puts("USER: DestroyWindow\n");
     /* Wyslij WM_DESTROY - apka powinna wywolac PostQuitMessage */
     SendMessage(hwnd, WM_DESTROY, 0, 0L);
@@ -2123,6 +2279,7 @@ BOOL __far __pascal DestroyWindow(HWND hwnd)
     for (i = 0; i < MAX_WINDOWS; i++) {
         if (g_windows[i].hwnd == hwnd) {
             if (g_windows[i].parent == 0) {
+                is_toplevel = 1;
                 /* Okno glowne: wymazanie calego ekranu kolorem desktopu */
                 cursor_erase();
                 vesa_fill_rect(0, 0, 640, 480, 0x1C, 0x50, 0x58);
@@ -2131,6 +2288,10 @@ BOOL __far __pascal DestroyWindow(HWND hwnd)
             break;
         }
     }
+    /* Fallback: jesli app nie wywolala PostQuitMessage, zrob to za nia.
+     * Bez tego game loop nigdy nie dostanie WM_QUIT i gra "uruchomi sie ponownie". */
+    if (is_toplevel)
+        PostQuitMessage(0);
     return 1;
 }
 
@@ -2141,16 +2302,13 @@ BOOL __far __pascal MoveWindow(HWND hwnd, int x, int y, int w, int h, BOOL repai
     for (i = 0; i < MAX_WINDOWS; i++) {
         if (g_windows[i].used && g_windows[i].hwnd == hwnd) {
             /* Dla okien potomnych x,y sa wzgledem client area rodzica.
-             * Zawsze dodajemy abs pozycje rodzica. */
+             * Uzyj KCB-stored origin rodzica (= client area origin). */
             if (g_windows[i].parent != 0) {
-                int pi;
-                for (pi = 0; pi < MAX_WINDOWS; pi++) {
-                    if (g_windows[pi].used && g_windows[pi].hwnd == g_windows[i].parent) {
-                        x += g_windows[pi].x;
-                        y += g_windows[pi].y;
-                        break;
-                    }
-                }
+                unsigned phwnd = (unsigned)g_windows[i].parent;
+                short __far *kox = (short __far *)KCB_MK_FP(KCB_WND_OX_OFF + (phwnd-1u)*2u);
+                short __far *koy = (short __far *)KCB_MK_FP(KCB_WND_OY_OFF + (phwnd-1u)*2u);
+                x += *kox;
+                y += *koy;
             }
             g_windows[i].x = x;
             g_windows[i].y = y;

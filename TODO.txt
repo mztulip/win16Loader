@@ -1144,7 +1144,7 @@ Porownanie API STEP18 vs STEP19 (nowe exporty USER.EXE):
   GetModuleHandle: NIE importowane przez Win1App - nie potrzebne.
 
 ---------------------------------------------------------------------------
-ETAP 20 - Menu bar + Shell / przeglądarka plikow z ikonami               [WIP]
+ETAP 20 - Menu bar + Shell / przeglądarka plikow z ikonami               [DONE]
 ---------------------------------------------------------------------------
 Cel: (1) Pelne menu bar w oknie Win16 (RT_MENU, WM_COMMAND).
      (2) Loader shell: lista plikow EXE z dysku, pojedyncze/podwojne klikniecie.
@@ -1305,34 +1305,32 @@ Wymagania wstepne:
           Uwaga: wymaga zresetowania stanu GDI/USER po zamknieciu apki
             (wyczyscic g_windows[], g_classes[], DC-e itp.).
 
-[ ] 20f: Prawdziwa ikona z zasobow NE (wymaga ETAP 18 rc_loader.c)
-        Format ikony Win16 w NE:
-          RT_GROUP_ICON (0x800E): katalog ikon - GRPICONDIR + GRPICONDIRENTRY[]
-            GRPICONDIR: idReserved(2) idType(2) idCount(2)
-            GRPICONDIRENTRY: bWidth bHeight bColorCount bReserved
-                             wPlanes wBitCount dwBytesInRes nId
-          RT_ICON (0x8003): surowe dane ikony - BITMAPINFOHEADER + XOR mask + AND mask
-            biBitCount: 1 (mono), 4 (16 kolorow), 8 (256 kolorow)
-            Rozmiar: 32x32 (standard) lub 16x16 (small)
+[x] 20f: Prawdziwa ikona z zasobow NE
+        Zaimplementowane w shell.c (bez rc_loader — samodzielne parsowanie NE):
 
-        Proces wczytania ikony dla pliku EXE:
-          1. Otworz plik EXE (DOS INT 21h AH=3Dh) - w real mode przed PM
-          2. Znajdz NE header (read MZ stub -> e_lfanew -> seek -> read NE header)
-          3. Uzyj rc_loader.find_ne_resource(RT_GROUP_ICON, 1) -> file_off, size
-          4. Wczytaj GRPICONDIR, wybierz najlepszy wpis (preferuj 32x32 4bpp)
-          5. Uzyj rc_loader.find_ne_resource(RT_ICON, nId) -> ikona danych
-          6. Wczytaj dane ikony do bufora shell_icons[i] (max 32x32x4bpp = 512B/ikone)
+        extract_icon(filename, out_icon):
+          1. fopen(filename, "rb") — DOS fread/fseek w real mode
+          2. MZ header -> e_lfanew (0x3C) -> NE header -> rsctab (ne+0x24)
+          3. Skan tablicy zasobow: szukaj RT_GROUP_ICON (0x800E)
+          4. GRPICONDIR: iteruj wpisy, preferuj 32x32 4bpp (bbits==4)
+          5. Drugi skan: szukaj RT_ICON (0x8003) z id == best_nid
+          6. fread 744B (BIH 40 + paleta 64 + XOR 512 + AND 128)
 
-        Renderowanie ikony 32x32 4bpp:
-          Paleta 16 kolorow Win16 (standard VGA): hardcode w shell.c
-          XOR mask: piksele (4bpp packed, dwa piksele na bajt)
-          AND mask: przezroczystosc (1bpp, 1=transparent)
-          Rysowac piksel po pikselu do LFB 24bpp:
-            jezeli AND_bit==1: pomiń (tlo przebija)
-            jezeli AND_bit==0: uzyj koloru z palety VGA[XOR_nibble]
+        draw_icon_32(icon_data, sx, sy):
+          BMP bottom-up, 4bpp packed (high nibble = lewy piksel)
+          AND mask: bit=1 -> przezroczysty (pomin)
+          XOR mask: nibble -> indeks palety ikony (BGRX, 4B/kolor)
+          Paleta z samej ikony (nie hardcoded VGA16)
 
-        Nowy plik: shell_icon.c lub jako czesc rc_loader.c
-          render_icon_32(unsigned char far *icon_data, int screen_x, int screen_y);
+        draw_default_icon(sx, sy):
+          Niebieski prostokat z biala ramka i litera "E"
+          Uzywane gdy EXE nie ma ikon (np. WIN1APP.EXE)
+
+        Graficzny shell VESA (bank-switched 640x480x24bpp):
+          put_pixel/fill_rect z bank-switchingiem (INT 10h 4F05h)
+          BIOS font 8x16 (INT 10h AH=11h AL=30h BH=06)
+          Teal header, szare tlo, niebieskie zaznaczenie
+          Strzalki: zaznaczenie, Enter/cyfra: uruchomienie
 
 [x] 20g: Integracja z loaderem - fdauto.bat bez argumentu = shell
         Zmiana zachowania loadera:
@@ -1353,6 +1351,115 @@ Wymagania wstepne:
           Kompilacja: wcc -ml -q shell.c -fo=shell.obj
           Linkowanie: loader.exe = ... shell.obj
           Zawiera: shell_run() wywolywane z loader.c gdy brak argumentu.
+
+ETAP 21 - Prawdziwa kolejka komunikatow (jak Windows 3.1)              [TODO]
+---------------------------------------------------------------------------
+Cel: Zastapic bezposredni odczyt mouse/keyboard z KCB prawdziwa kolejka
+     komunikatow (system queue → app queue), jak w Windows 3.1.
+
+Obecny stan (STEP20):
+  - IRQ12 handler zapisuje surowe dane myszy do KCB[282..290]
+  - IRQ1 handler zapisuje VK do circular buffer KCB[272..281]
+  - PeekMessage/GetMessage odpytuja KCB bezposrednio (mouse_poll / kb_dequeue)
+  - Obejscie: PeekMessage(PM_NOREMOVE) musi push_msg() do kolejki po konsumpcji
+    zdarzenia, bo mouse_poll zawsze kasuje flage mouse_changed
+  - Problemy:
+    * Zdarzenia myszy gina miedzy PeekMessage a GetMessage
+    * Brak jednego zrodla prawdy — mysz w KCB, klawiatura w KCB, reszta w kolejce
+    * NC handling duplikowany w PeekMessage i GetMessage
+
+Architektura Win3.1:
+  - System queue: jedna globalna kolejka, IRQ handler wstawia MSG
+  - App queue: per-task kolejka, system queue -> app queue przy GetMessage/PeekMessage
+  - Raw input -> driver -> USER.EXE system queue -> app queue -> GetMessage/PeekMessage
+  - PeekMessage(PM_NOREMOVE) podglada bez usuwania z tej samej kolejki
+  - PeekMessage(PM_REMOVE) i GetMessage usuwaja z kolejki
+
+[ ] 21a: System message queue w IRQ handlerach
+        Nowa struktura: sys_msg_queue (circular buffer MSG, 32 sloty).
+        Zdefiniowac w user.c (statycznie w DGROUP USER.EXE):
+          static MSG  g_sys_queue[32];
+          static int  g_sys_head, g_sys_tail, g_sys_count;
+          void sys_push_msg(HWND hw, UINT msg, WPARAM wp, LPARAM lp);
+
+        IRQ12 handler (mouse.c / pm_call.asm):
+          Po skompletowaniu 3-bajtowego pakietu PS/2, zamiast ustawiac
+          mouse_changed=1, wygenerowac pelny MSG:
+            - Obliczyc abs X/Y (jak teraz)
+            - Okreslic typ: WM_MOUSEMOVE / WM_LBUTTONDOWN / WM_LBUTTONUP
+              (porownac biezacy btn z poprzednim stanem)
+            - lParam = (abs_y << 16) | abs_x  (screen coords, jeszcze nie client)
+            - Wywolac sys_push_msg() przez far call do USER.EXE
+          Usunac: KCB[289] mouse_btn, KCB[290] mouse_changed
+          Zachowac: KCB[285..288] mouse_x/y (potrzebne do GetCursorPos, cursor draw)
+
+        IRQ1 handler (keyboard.c):
+          Po przeliczeniu scancode -> VK, zamiast wrzucac do KCB kb_buf:
+            - sys_push_msg(g_kb_hwnd, WM_KEYDOWN, vk, 0L)
+          Usunac: KCB[272..281] kb circular buffer
+          Zachowac: kcb[291] = extended flag, kcb[292] = alt state
+
+        Problem: IRQ handler uzywa DS = dowolny (caller's DS).
+          Rozwiazanie: sys_push_msg() musi byc far function w USER.EXE
+          ktora ustawia wlasny DS (push ds; mov ax, DGROUP; mov ds, ax).
+          Albo: sys_queue w KCB (SEL_KCB) — dostepny z kazdego DS przez far ptr.
+          Rekomendacja: KCB jest za maly (512B). Lepiej: nowy selektor SEL_SYSQUEUE
+          z oddzielnym buforem (32*12B MSG = 384B, zmiesci sie w 512B z naglowkiem).
+
+[ ] 21b: Ujednolicony PeekMessage / GetMessage
+        Obie funkcje czytaja z JEDNEJ kolejki (g_sys_queue lub g_msg_queue):
+          1. Sprawdz system queue -> przenies do app queue (przelicz na client coords,
+             NC hit test dla WM_LBUTTONDOWN)
+          2. Sprawdz app queue
+          3. PM_NOREMOVE: podgladnij bez usuwania
+             PM_REMOVE / GetMessage: usun z kolejki
+
+        Wspolna funkcja wewnetrzna:
+          static int pump_sys_to_app(void);
+            - Przenosi MSG z sys_queue do app_queue
+            - Przelicza screen coords -> client coords (wnd_ox/oy z KCB)
+            - NC hit test: WM_LBUTTONDOWN w NC area -> WM_NCLBUTTONDOWN
+            - WM_MOUSEMOVE w NC area -> WM_NCMOUSEMOVE (opcjonalnie)
+            - Aktualizuje pozycje kursora (cursor_erase / cursor_draw)
+
+        PeekMessage:
+          pump_sys_to_app();
+          if (g_msg_count > 0) {
+              *pmsg = g_msg_queue[g_msg_head];
+              if (wRemoveMsg) { head++; count--; }
+              return 1;
+          }
+          return 0;  /* brak komunikatow */
+
+        GetMessage:
+          while (1) {
+              pump_sys_to_app();
+              if (g_msg_count > 0) {
+                  *pmsg = g_msg_queue[g_msg_head]; head++; count--;
+                  return (msg != WM_QUIT);
+              }
+              do_hlt();  /* czekaj na IRQ */
+          }
+
+[ ] 21c: Usunac mouse_msg.c — logika przeniesiona do IRQ12
+        mouse_msg.c (mouse_poll) staje sie zbedny:
+          - Generowanie WM_MOUSEMOVE/LBUTTONDOWN/LBUTTONUP -> w mouse.c (IRQ12)
+          - Sledzenie s_prev_btn -> w mouse.c (KCB lub static w mouse.c)
+        Usunac mouse_msg.obj z linkowania USER.EXE w Makefile.
+
+[ ] 21d: TranslateMessage generuje WM_CHAR z WM_KEYDOWN
+        Obecny TranslateMessage generuje WM_CHAR inline.
+        Po refaktorze: TranslateMessage sprawdza czy MSG to WM_KEYDOWN,
+        jesli tak -> push_msg(WM_CHAR, vk) do app queue.
+        GetMessage/PeekMessage nie powinny juz same generowac WM_CHAR.
+
+[ ] 21e: Testy
+        - Klawiatura: F2 (reset), F3 (pauza), Esc, strzalki — jak dotychczas
+        - Mysz: WM_MOUSEMOVE steruje narciarzem (client coords w lParam)
+        - PeekMessage(PM_NOREMOVE) + GetMessage: zdarzenie nie ginie
+        - WM_LBUTTONDOWN w NC area: menu bar, title bar, przyciski dzialaja
+        - Alt+F4 / przycisk X: zamkniecie gry
+        - Minimize + IsIconic: gra nie renderuje gdy zminimalizowana
 
 NARZEDZIA
 ---------

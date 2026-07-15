@@ -84,6 +84,7 @@ global get_irq12_off_
 global get_gpf_off_
 global get_exc00_off_
 global get_exc06_off_
+global get_exc08_off_
 global get_exc0B_off_
 global get_exc0C_off_
 global get_exc0D_off_
@@ -153,6 +154,8 @@ get_gpf_off_:
 get_exc00_off_: mov ax, exc_stub_00
                 ret
 get_exc06_off_: mov ax, exc_stub_06
+                ret
+get_exc08_off_: mov ax, exc_stub_08
                 ret
 get_exc0B_off_: mov ax, exc_stub_0B
                 ret
@@ -1174,6 +1177,12 @@ int3f_trampoline:
     mov  ds, ax
     pop  ax
 
+    ; Gwarantuj IF=1 przed powrotem do app.
+    ; INT 3F to interrupt gate (IF=0 przy wejsciu). DLL funkcje moga zostawic
+    ; IF=0 (np. cli w PeekMessage/GetMessage). Bez sti tutaj app biegnie z IF=0
+    ; -> IRQ0/IRQ1 zablokowane -> game loop zawieszony.
+    sti
+
     ; Jump to caller's return address (CS prefix: tramp_ret_ip/cs in loader seg)
     db   0x2E, 0xFF, 0x2E
     dw   tramp_ret_ip
@@ -1360,6 +1369,23 @@ exc_stub_06:            ; #UD Invalid Opcode (brak err code)
     push word 0
     push word 0x06
     jmp  exc_common
+exc_stub_08:            ; #DF Double Fault (z err code = 0)
+    ; drukuj '!' natychmiast przed jakimikolwiek operacjami stosu
+    push ax
+    push dx
+.df_w: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .df_w
+    mov  al, '!'
+    mov  dx, 0x3F8
+    out  dx, al
+    pop  dx
+    pop  ax
+    ; nie wywolujemy exc_common (stos moze byc zepsuty), just halt
+    cli
+    hlt
+    jmp  $-1
 exc_stub_0B:            ; #NP Segment Not Present (z err code)
     push word 0x0B
     jmp  exc_common
@@ -1376,6 +1402,21 @@ exc_stub_0E:            ; #PF Page Fault (z err code)
 ; =====================================================================
 bits 16
 exc_common:
+    ; Wczesny znacznik: '#' przed jakimikolwiek zmianami rejestrow/stosu
+    push ax
+    push dx
+.ecm_w: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .ecm_w
+    mov  al, '#'
+    mov  dx, 0x3F8
+    out  dx, al
+    pop  dx
+    pop  ax
+    mov  ax, SEL_DATA16      ; set ES = writable alias of code seg
+    mov  es, ax              ;   (3+2=5 bytes)
+    nop                      ; padding (6th byte)
     push ax
     push bx
     push cx
@@ -1384,16 +1425,61 @@ exc_common:
     ;       [SP+8]=exc [SP+10]=err [SP+12]=faultIP [SP+14]=faultCS [SP+16]=FLAGS
     mov  bx, sp
     mov  ax, [ss:bx+8]
-    mov  [cs:local_fault_exc], ax
+    mov  [es:local_fault_exc], ax
     mov  ax, [ss:bx+10]
-    mov  [cs:local_fault_err], ax
+    mov  [es:local_fault_err], ax
     mov  ax, [ss:bx+12]
-    mov  [cs:local_fault_ip], ax
+    mov  [es:local_fault_ip], ax
     mov  ax, [ss:bx+14]
-    mov  [cs:local_fault_cs], ax
+    mov  [es:local_fault_cs], ax
     mov  ax, bx
     add  ax, 18              ; SP przy wyjatku (przed pushami CPU)
-    mov  [cs:local_fault_sp], ax
+    mov  [es:local_fault_sp], ax
+
+    ; Serial: "EX" + exc(4hex) + ":" + cs(4hex) + ":" + ip(4hex) + "\n"
+    ; AX, BX, CX, DX juz na stosie (push na poczatku exc_common) - mozemy uzywac
+.exc_sw0: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .exc_sw0
+    mov  al, 'E'
+    mov  dx, 0x3F8
+    out  dx, al
+.exc_sw1: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .exc_sw1
+    mov  al, 'X'
+    mov  dx, 0x3F8
+    out  dx, al
+    mov  ax, [cs:local_fault_exc]
+    call gpf_print_hex4
+.exc_sw2: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .exc_sw2
+    mov  al, ':'
+    mov  dx, 0x3F8
+    out  dx, al
+    mov  ax, [cs:local_fault_cs]
+    call gpf_print_hex4
+.exc_sw3: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .exc_sw3
+    mov  al, ':'
+    mov  dx, 0x3F8
+    out  dx, al
+    mov  ax, [cs:local_fault_ip]
+    call gpf_print_hex4
+.exc_sw4: mov dx, 0x3FD
+    in   al, dx
+    test al, 0x20
+    jz   .exc_sw4
+    mov  al, 0x0A
+    mov  dx, 0x3F8
+    out  dx, al
+
     cli
     ; Skok do 32-bit panic_entry_32
     db   0x66, 0xEA          ; far jmp z 32-bit operandem
