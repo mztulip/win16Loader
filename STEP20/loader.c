@@ -573,7 +573,7 @@ extern unsigned short get_int3f_off(void);  /* zwraca offset int3f_handler w SEL
 static void ps2_wait_write(void)
 {
     unsigned char s;
-    int t;
+    long t;
     for (t = 0; t < 100000; t++) {
         s = inp(0x64);
         if (!(s & 0x02)) return;   /* bit 1 = input buffer full; czekaj az 0 */
@@ -582,7 +582,7 @@ static void ps2_wait_write(void)
 
 static unsigned char ps2_read_byte(void)
 {
-    int t;
+    long t;
     for (t = 0; t < 100000; t++) {
         if (inp(0x64) & 0x01)      /* bit 0 = output buffer full */
             return inp(0x60);
@@ -620,6 +620,23 @@ static void init_mouse_ps2(void)
         return;
     }
     kprintf("MOUSE: PS/2 init OK\n");
+}
+
+/* Po powrocie z PM: wylacz IRQ12 w kontrolerze i streaming myszy, zeby BIOS
+ * (INT 74h) nie dostawal pakietow i nie zjadal odpowiedzi przy kolejnym
+ * init_mouse_ps2(). pm16_call_app i tak ustawia CCB=0x47 przy wejsciu w PM. */
+static void shutdown_mouse_ps2(void)
+{
+    while (inp(0x64) & 0x01) inp(0x60);   /* oproznij bufor wyjsciowy */
+    ps2_wait_write();
+    outp(0x64, 0x60);                      /* Write CCB */
+    ps2_wait_write();
+    outp(0x60, 0x45);                      /* kbd_irq | self_test | translate, bez aux_irq */
+    ps2_wait_write();
+    outp(0x64, 0xD4);
+    ps2_wait_write();
+    outp(0x60, 0xF5);                      /* Disable Data Reporting */
+    ps2_read_byte();                       /* ACK */
 }
 
 unsigned short get_cs(void);
@@ -1166,6 +1183,16 @@ err:
 /* ============================================================
  * load_ne: laduje aplikacje NE
  * ============================================================ */
+/* Segmenty DOS zaalokowane dla apki przez load_ne - zwalniane po jej zakonczeniu */
+static unsigned g_app_segs[MAX_DLL_SEGS];
+static unsigned g_app_nsegs = 0;
+
+static void free_app_segs(void)
+{
+    while (g_app_nsegs > 0)
+        _dos_freemem(g_app_segs[--g_app_nsegs]);
+}
+
 int load_ne(const char *filename)
 {
     FILE        *f;
@@ -1241,6 +1268,7 @@ int load_ne(const char *filename)
             if (_dos_allocmem(paragraphs, &seg_addr) != 0) {
                 kprintf("ERROR: _dos_allocmem\n"); goto err;
             }
+            g_app_segs[g_app_nsegs++] = seg_addr;
 
             dst      = MK_FP(seg_addr, 0);
             file_off = (long)seg.ns_sector << ne.ne_align;
@@ -1556,6 +1584,49 @@ static void load_ski_bitmaps(const char *filename)
 /* 20b-20e: shell tekstowy - skanowanie katalogu i wybor apki */
 extern const char *shell_run(void);
 
+/* Kopie poczatkowych DGROUP-ow DLL (stan zaraz po zaladowaniu). Przed kazdym
+ * kolejnym uruchomieniem apki z shella przywracamy je, zeby USER/GDI startowaly
+ * z czystym stanem (g_windows[], kolejka, DC, flaga quit itp.). */
+static unsigned       g_dll_snap_seg[MAX_MODULES];
+static unsigned short g_thunk_dll_end = 0;  /* g_thunk_off po zaladowaniu DLL-i */
+
+static void dll_snapshot_data(void)
+{
+    unsigned i;
+    for (i = 0; i < g_ndll; i++) {
+        g_dll_snap_seg[i] = 0;
+        if (!g_dll_has_data[i] || g_dll_data_size[i] == 0) continue;
+        if (_dos_allocmem((g_dll_data_size[i] + 15u) / 16u, &g_dll_snap_seg[i]) != 0) {
+            kprintf("WARN: brak pamieci na snapshot DLL %u\n", i);
+            g_dll_snap_seg[i] = 0;
+            continue;
+        }
+        _fmemcpy(MK_FP(g_dll_snap_seg[i], 0),
+                 MK_FP((unsigned)(g_dll_data_phys[i] >> 4), 0),
+                 g_dll_data_size[i]);
+    }
+    g_thunk_dll_end = g_thunk_off;
+}
+
+static void dll_restore_data(void)
+{
+    unsigned i;
+    for (i = 0; i < g_ndll; i++) {
+        if (!g_dll_snap_seg[i]) continue;
+        _fmemcpy(MK_FP((unsigned)(g_dll_data_phys[i] >> 4), 0),
+                 MK_FP(g_dll_snap_seg[i], 0),
+                 g_dll_data_size[i]);
+    }
+    g_thunk_off = g_thunk_dll_end;  /* thunki apki generowane od nowa */
+}
+
+static void set_text_mode(void)
+{
+    union REGS r;
+    r.x.ax = 0x0003;
+    int86(0x10, &r, &r);
+}
+
 /* ============================================================
  * main
  * ============================================================ */
@@ -1578,6 +1649,7 @@ int main(int argc, char *argv[])
     if (argc <= 1) {
         kprintf("--- Shell mode ---\n");
         app_name = shell_run();  /* skanuje *.EXE, wyswietla UI + ikony, zwraca wybrany plik */
+        if (!app_name) { set_text_mode(); return 0; }   /* Esc */
     } else {
         app_name = argv[1];
     }
@@ -1611,6 +1683,8 @@ int main(int argc, char *argv[])
         return 1;
     kprintf("GDI zaladowany: code=0x%05lX data=0x%05lX\n",
             g_dll[2].code_phys, g_dll[2].data_phys);
+
+    dll_snapshot_data();
 
     /* 5. Alokuj wszystkie bufory DOS z wyprzedzeniem (przed file I/O z DLL/SKI).
      *    Kolejnosc: PSP, KCB, bufor bitmap (SEL_BITMAPS), globalny heap.
@@ -1707,8 +1781,12 @@ int main(int argc, char *argv[])
         g_orig_sp = get_sp();
         g_cs_phys = (unsigned long)g_orig_cs << 4;
 
-        /* Reset KCB pomiedzy uruchomieniami: tick, keyboard, mouse */
-        kcb_ptr->tick_ms = 0UL;
+        /* Reset KCB pomiedzy uruchomieniami: tick, keyboard, mouse,
+         * dynamiczne selektory GlobalAlloc i wskazniki heapow */
+        kcb_ptr->tick_ms        = 0UL;
+        kcb_ptr->next_dyn_sel   = GDYN_FIRST_SEL;
+        kcb_ptr->heap_next      = kcb_ptr->heap_phys;
+        kcb_ptr->local_heap_off = 0x1000;
         {
             unsigned char __far *kb = (unsigned char __far *)MK_FP(kcb_rm, 272);
             int ki;
@@ -1721,13 +1799,26 @@ int main(int argc, char *argv[])
         kprintf("LFB=0x%08lX pitch=%u font=0x%06lX -> wchodze w PM\n",
                 g_lfb_phys, g_vesa_pitch, g_font_phys);
         pm_call_app();
-        kprintf("App zakonczyla dzialanie.\n");
+        shutdown_mouse_ps2();
+        free_app_segs();
+        {
+            unsigned maxpara = 0;
+            _dos_allocmem(0xFFFF, &maxpara);   /* zawodzi, zwraca najwiekszy wolny blok */
+            kprintf("App zakonczyla dzialanie. DOS free=%luB\n", (unsigned long)maxpara * 16UL);
+        }
 
-        /* Tryb bezposredni: jeden przebieg, wyjdz */
-        if (argc > 1) break;
+        /* Tryb bezposredni: jeden przebieg, wroc do DOS w trybie tekstowym */
+        if (argc > 1) {
+            set_text_mode();
+            break;
+        }
 
-        /* Tryb shell: pokaz liste ponownie i wybierz nastepna apke */
+        /* Tryb shell: przywroc tryb banked dla shella, wyczysc stan DLL,
+         * pokaz liste ponownie i wybierz nastepna apke */
+        vesa_init();
+        dll_restore_data();
         app_name = shell_run();
+        if (!app_name) { set_text_mode(); break; }   /* Esc */
     }
     return 0;
 }

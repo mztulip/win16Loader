@@ -477,7 +477,7 @@ static void shell_draw(void)
     /* Pasek naglowka */
     fill_rect(0, 0, SCREEN_W, 30, COL_HDR_R, COL_HDR_G, COL_HDR_B);
     draw_text(12, 7, "Win16 Shell", COL_WTXT_R, COL_WTXT_G, COL_WTXT_B);
-    draw_text(260, 7, "Arrows: select  Enter: run  1-9: quick",
+    draw_text(180, 7, "Arrows: select  Enter: run  1-9: quick  Esc: DOS",
               COL_WTXT_R, COL_WTXT_G, COL_WTXT_B);
 
     if (g_shell_n == 0) {
@@ -520,6 +520,7 @@ const char *shell_run(void)
 {
     int ch;
 
+    g_cur_bank = 0xFFFF;   /* tryb VESA ustawiony od nowa (powrot z apki) */
     font_init_shell();
     shell_scan();
 
@@ -539,6 +540,8 @@ const char *shell_run(void)
             } else if (ch == 0x50) {  /* strzalka w dol */
                 if (g_shell_sel < g_shell_n - 1) g_shell_sel++;
             }
+        } else if (ch == 0x1B) {   /* Esc: wyjscie do DOS */
+            return NULL;
         } else if (ch == '\r' || ch == '\n') {
             break;
         } else if (ch >= '1' && ch <= '9') {

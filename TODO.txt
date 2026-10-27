@@ -1352,6 +1352,25 @@ Wymagania wstepne:
           Linkowanie: loader.exe = ... shell.obj
           Zawiera: shell_run() wywolywane z loader.c gdy brak argumentu.
 
+[x] 20h: Poprawne zakonczenie apki + powrot do shella/DOS (fix 20e)
+        Wczesniej 20e nie dzialalo: GetMessage/PeekMessage po PostQuitMessage
+        wisialy w petli HLT, a INT 21h/4Ch tez konczyl sie HLT.
+        - USER: GetMessage zwraca 0 (WM_QUIT, wParam=exit code), PeekMessage
+          zwraca WM_QUIT (PM_NOREMOVE zostawia go dla GetMessage).
+        - pm_call.asm: SS:SP przed "call far" apki zapamietane (app_ret_ss/sp);
+          INT 21h/4Ch odwija stos i skacze do pm16_app_returned.
+          Przed zejsciem z PM: PIC z powrotem na 08h/70h + maski z RM,
+          w rm_real: lidt rm_idtr (IVT 0..3FFh). pm_call_app_ zachowuje
+          BP/SI/DI/BX/CX/DX/ES (main() trzyma w nich argc itp.).
+        - loader.c: po powrocie shutdown_mouse_ps2 (CCB=0x45, F5), free_app_segs;
+          tryb bezposredni -> tryb tekstowy + exit do DOS; tryb shell ->
+          vesa_init + dll_restore_data (snapshot DGROUP USER/GDI/KERNEL z chwili
+          zaladowania, rewind thunkow) + reset KCB (dyn_sel, heap_next).
+        - Shell: Esc = wyjscie do DOS.
+        - ps2_wait_write/ps2_read_byte: licznik long (int < 100000 zawsze prawda).
+        - Sysmenu popup: first_up_done=1 (pierwsze klikniecie w item przepadalo).
+        Test: SKI->Alt+F4->shell->WIN1APP->Close->SKI->X ... DOS free stale.
+
 ETAP 21 - Prawdziwa kolejka komunikatow (jak Windows 3.1)              [TODO]
 ---------------------------------------------------------------------------
 Cel: Zastapic bezposredni odczyt mouse/keyboard z KCB prawdziwa kolejka

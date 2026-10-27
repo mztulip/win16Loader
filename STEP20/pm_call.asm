@@ -197,6 +197,22 @@ dbg_printhex4:
     ret
 ; =====================================================================
 pm_call_app_:
+    ; Rejestry zachowywane przez callee w konwencji Watcom (main() trzyma w nich
+    ; zmienne lokalne / BP ramki) - zdejmowane w rm_real przed RETF.
+    push bp
+    push si
+    push di
+    push bx
+    push cx
+    push dx
+    push es
+
+    ; Zachowaj maski PIC trybu rzeczywistego (przywracane w pm16_app_returned)
+    in   al, 0x21
+    mov  [cs:saved_pic1_mask], al
+    in   al, 0xA1
+    mov  [cs:saved_pic2_mask], al
+
     mov  ax, ss
     mov  [cs:saved_ss], ax
     mov  ax, sp
@@ -529,8 +545,18 @@ pm16_call_app:
     out  0x60, al
     ; PIT: pozostaje domyslny 18.2 Hz (divisor=65536 -> ~55ms/tick)
     ; Przeprogramowanie do wyzszej czestotliwosci powoduje overflow w SKI.EXE.
+    ; Zapamietaj SS:SP sprzed wywolania apki. INT 21h/4Ch (int21_handler .terminate)
+    ; odtwarza je i skacze do pm16_app_returned - tak jakby entry apki zrobilo RETF.
+    push ds
+    mov  ax, SEL_DATA16
+    mov  ds, ax
+    mov  [app_ret_ss], ss
+    mov  [app_ret_sp], sp
+    mov  word [int3f_depth], 0
+    pop  ds
     sti                 ; wlacz przerwania: IRQ0 -> IDT[0x20] -> irq0_handler
     call far [cs:call_ptr]
+pm16_app_returned:
     cli
 
     push ax
@@ -548,6 +574,30 @@ pm16_call_app:
 
     mov  ax, SEL_DATA16
     mov  ds, ax
+    mov  es, ax
+    mov  fs, ax
+    mov  gs, ax
+
+    ; Przywroc PIC do ukladu BIOS (IRQ0-7 -> INT 08h, IRQ8-15 -> INT 70h),
+    ; inaczej po powrocie do DOS IRQ0 trafilby w INT 20h (terminate).
+    mov  al, 0x11
+    out  0x20, al
+    out  0xA0, al
+    mov  al, 0x08
+    out  0x21, al
+    mov  al, 0x70
+    out  0xA1, al
+    mov  al, 0x04
+    out  0x21, al
+    mov  al, 0x02
+    out  0xA1, al
+    mov  al, 0x01
+    out  0x21, al
+    out  0xA1, al
+    mov  al, [saved_pic1_mask]
+    out  0x21, al
+    mov  al, [saved_pic2_mask]
+    out  0xA1, al
 
     mov  eax, cr0
     and  eax, ~1
@@ -557,6 +607,7 @@ pm16_call_app:
 
 ; =====================================================================
 rm_real:
+    lidt [cs:rm_idtr]   ; IVT trybu rzeczywistego (baza 0, limit 0x3FF)
     push ax
     push dx
 .dbg_rm:
@@ -576,6 +627,7 @@ rm_real:
     mov  sp, [saved_sp]
     mov  ax, [saved_ds]
     mov  ds, ax
+    mov  es, ax
     push ax
     push dx
 .dbg_retf:
@@ -588,6 +640,13 @@ rm_real:
     out  dx, al
     pop  dx
     pop  ax
+    pop  es
+    pop  dx
+    pop  cx
+    pop  bx
+    pop  di
+    pop  si
+    pop  bp
     sti
     retf
 
@@ -1771,10 +1830,15 @@ int21_handler:
     out  dx, al
     pop  dx
     pop  ax
+    ; Odwin stos do stanu sprzed "call far [cs:call_ptr]" w pm16_call_app
+    ; (IRET-frame INT 21h i ramki apki sa porzucane) i wroc do trybu rzeczywistego.
     cli
-.terminate_loop:
-    hlt
-    jmp  .terminate_loop
+    mov  dx, SEL_DATA16
+    mov  ds, dx
+    mov  ss, [app_ret_ss]
+    mov  sp, [app_ret_sp]
+    add  sp, 2           ; zdejmij "push ds" sprzed zapisu SS:SP
+    jmp  pm16_app_returned
 
 .get_ver:
     ; DOS 3.30: AL=3 (major), AH=0x1E=30 (minor)
@@ -1799,6 +1863,12 @@ rm_jmp          dw rm_real
                 dw 0
 
 int3f_depth     dw 0
+app_ret_ss      dw 0    ; SS:SP przed wywolaniem entry apki (dla INT 21h/4Ch)
+app_ret_sp      dw 0
+saved_pic1_mask db 0    ; maski PIC trybu rzeczywistego
+saved_pic2_mask db 0
+rm_idtr         dw 0x03FF
+                dd 0
 int3f_stack     times INT3F_MAX_DEPTH * 6  db 0
 
 ; --- Exception panic screen locals ---

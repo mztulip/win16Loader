@@ -1181,7 +1181,10 @@ static unsigned show_sysmenu_popup(int bx, int by, int bh, HWND target_hwnd, int
     }
 
     hover_item    = -1;
-    first_up_done = 0;
+    /* Popup otwierany po puszczeniu '=' (track_nc_button zjadl juz WM_LBUTTONUP),
+     * wiec nie ma "pierwszego UP" do zignorowania - inaczej pierwsze klikniecie
+     * w item przepadaloby. */
+    first_up_done = 1;
     {
     int pressed_item = -1;
 
@@ -1417,10 +1420,16 @@ BOOL __far __pascal GetMessage(MSG __far *pmsg, HWND hwnd,
     unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
 
-    /* PostQuitMessage wywolane: zatrzymaj app */
+    /* PostQuitMessage wywolane: zwroc WM_QUIT -> app wychodzi z petli i WinMain,
+     * startup code robi INT 21h/4Ch -> loader wraca do trybu rzeczywistego. */
     if (g_quit_posted) {
-        serial_puts("USER: QUIT\n");
-        for (;;) do_hlt();
+        serial_puts("USER: QUIT (GetMessage)\n");
+        g_quit_posted   = 0;
+        pmsg->hwnd      = 0;
+        pmsg->message   = WM_QUIT;
+        pmsg->wParam    = (WPARAM)g_quit_code;
+        pmsg->lParam    = 0L;
+        return 0;
     }
 
     /* Sprawdz bufor klawiatury przed kolejka komunikatow */
@@ -1531,11 +1540,16 @@ BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
     unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
 
-    /* PostQuitMessage wywolane: zatrzymaj app.
-     * SKI.EXE nie obsluguje WM_QUIT wiec HLT w petli — nic wiecej nie moze zrobic. */
+    /* PostQuitMessage wywolane: zwroc WM_QUIT (jak Win3.1 - PeekMessage zwraca TRUE).
+     * PM_NOREMOVE zostawia WM_QUIT dla nastepnego GetMessage (SKI.EXE tak robi). */
     if (g_quit_posted) {
-        serial_puts("USER: QUIT\n");
-        for (;;) do_hlt();
+        serial_puts("USER: QUIT (PeekMessage)\n");
+        if (wRemoveMsg) g_quit_posted = 0;
+        pmsg->hwnd      = 0;
+        pmsg->message   = WM_QUIT;
+        pmsg->wParam    = (WPARAM)g_quit_code;
+        pmsg->lParam    = 0L;
+        return 1;
     }
 
     /* Najpierw sprawdz bufor klawiatury (IRQ1 zapisuje VK do KCB) */
