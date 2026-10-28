@@ -8,7 +8,9 @@ Windows 3.1 / Win16 clone written from scratch, running on top of FreeDOS under 
 
 ## Build & Run
 
-Each STEP has its own `Makefile`. Work from within the step directory:
+Development happens in the **repo root** (latest code, single `Makefile`). Historical
+snapshots STEP1..STEP20 live in `steps/` (frozen, each with its own `Makefile` —
+do not develop there; new work is NOT split into new STEP directories). Work from the root:
 
 ```bash
 make            # build everything (compile + create boot.img)
@@ -101,16 +103,16 @@ Each segment entry: offset (in file alignment units), size, flags, min_alloc. Mu
 
 Win16 uses **cooperative** multitasking — tasks yield only via `GetMessage`/`PeekMessage`/`WaitMessage`. No preemptive timer switches between apps (unlike the 13ring3 kernel which uses IRQ0 round-robin).
 
-## GDI / Graphics stack (STEP15+, aktywny w STEP17)
+## GDI / Graphics stack
 
 ### Kluczowe pliki
 
 | Plik | Rola |
 |------|------|
-| `STEP17/gdi.c` | GDI.EXE: PatBlt, BitBlt, TextOut, CreateCompatibleDC, SelectObject |
-| `STEP17/user.c` | USER.EXE: okna, kolejka komunikatów, BeginPaint/EndPaint, DispatchMessage |
-| `STEP17/loader.c` | Ładowanie NE, inicjalizacja PM, IDT, PS/2 |
-| `STEP17/pm_call.asm` | Thunk INT 3Fh, IRQ1 (keyboard), IRQ12 (mouse), PIC maski |
+| `gdi.c` | GDI.EXE: PatBlt, BitBlt, TextOut, CreateCompatibleDC, SelectObject |
+| `user.c` | USER.EXE: okna, kolejka komunikatów, BeginPaint/EndPaint, DispatchMessage |
+| `loader.c` | Ładowanie NE, inicjalizacja PM, IDT, PS/2 |
+| `pm_call.asm` | Thunk INT 3Fh, IRQ1 (keyboard), IRQ12 (mouse), PIC maski |
 | `SKIFREE/skifree_graphics_analysis.txt` | **Pełna analiza** stosu graficznego SKI.EXE: DC map, trace gondola/skoczek, atlas 86 spriteów, adresy kluczowych funkcji |
 
 ### GDI BitBlt — przypadki (gdi.c)

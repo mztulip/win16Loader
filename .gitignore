@@ -13,9 +13,17 @@ FD14-FloppyEdition.zip
 *.log
 
 # Binaria wynikowe (odtwarzalne przez make), ale zachowaj .exe DLL-y i apki testowe
-STEP[0-9]/loader.exe
-STEP1[0-9]/loader.exe
+steps/STEP[0-9]/loader.exe
+steps/STEP1[0-9]/loader.exe
+
+# Biezacy build w katalogu glownym
+/kernel.exe
+/gdi.exe
+/loader.exe
 
 # Python cache
 __pycache__/
 *.pyc
+
+# Lokalne ustawienia Claude Code
+.claude/

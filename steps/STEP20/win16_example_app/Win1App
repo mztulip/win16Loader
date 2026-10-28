@@ -1,0 +1,27 @@
+# This Makefile will build the Win1 Example application
+
+CC=cl
+CFLAGS=/c /D LINT_ARGS /D NDEBUG /AS /G0swf /Os /W2 /Zpe /FPi
+LINK=link4
+RC=rc
+MAPSYM=mapsym
+MARK=mark
+EXE=Win1App.exe
+
+.c.obj:
+    $(CC) $(CFLAGS) $*.c
+
+aboutdlg.obj: aboutdlg.c aboutdlg.h resource.h globals.h
+
+mainwnd.obj: mainwnd.c mainwnd.h aboutdlg.h resource.h globals.h
+
+winmain.obj: winmain.c mainwnd.h resource.h globals.h
+
+resource.res: resource.rc App.ico resource.h
+  $(RC) /r resource.rc
+
+$(EXE): winmain.obj mainwnd.obj aboutdlg.obj resource.res App.ico Win1App.def
+  $(LINK) winmain.obj mainwnd.obj aboutdlg.obj,$(EXE) /align:16,/map,slibw.lib,Win1App.def
+  $(MAPSYM) Win1App.map
+  $(RC) resource.res $(EXE)
+  $(MARK) FONT MEMORY $(EXE)

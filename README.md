@@ -19,7 +19,7 @@ The loader boots from a FreeDOS floppy image. It implements:
 
 ## Current state
 
-STEP15 — SkiFree loads and runs: sprites render, game loop active, status bar with timer/distance/speed displayed correctly.
+SkiFree runs (sprites, game loop, status bar). Graphical shell with NE icons, window manager with title bar/close button/system menu/move, proper app exit back to the shell.
 
 ## Build
 
@@ -38,7 +38,6 @@ Open Watcom is installed at `/opt/watcom`. The Makefile sets the required enviro
 ### Build steps
 
 ```bash
-cd STEP15
 make
 make run-qemu   # run under QEMU, serial output to stdout
 make run        # run under Bochs with GUI debugger
@@ -46,20 +45,23 @@ make run        # run under Bochs with GUI debugger
 
 ## Project structure
 
+Current code lives in the repository root. Historical step-by-step snapshots are in `steps/`:
+
 | Directory | Description |
 |-----------|-------------|
-| `STEP1`   | FreeDOS environment + Hello World COM |
-| `STEP2`   | Protected mode switcher |
-| `STEP3`   | Minimal single-segment NE loader |
-| `STEP4`   | Multi-segment NE loader |
-| `STEP5`   | Import table + minimal KERNEL.EXE |
-| `STEP7`   | INT 3F DLL thunk mechanism |
-| `STEP8`   | USER.EXE: window class, message queue |
-| `STEP9`   | GDI.EXE: VESA framebuffer + TextOut |
-| `STEP10`  | Full-screen TextOut via huge selectors |
-| `STEP11`  | Real Win16 ordinal numbers |
-| `STEP12`  | GlobalAlloc, InitTask, game loop active |
-| `STEP13`  | RT_BITMAP loader, sprite rendering |
-| `STEP14`  | patch_gdt in C (pm_helpers.c) |
-| `STEP15`  | Wsprintf fix, VERTRES=640, NPC analysis |
+| `steps/STEP1` | FreeDOS environment + Hello World COM |
+| `steps/STEP2` | Protected mode switcher |
+| `steps/STEP3` | Minimal single-segment NE loader |
+| `steps/STEP4` | Multi-segment NE loader |
+| `steps/STEP5` | Import table + minimal KERNEL.EXE |
+| `steps/STEP7` | INT 3F DLL thunk mechanism |
+| `steps/STEP8` | USER.EXE: window class, message queue |
+| `steps/STEP9` | GDI.EXE: VESA framebuffer + TextOut |
+| `steps/STEP10` | Full-screen TextOut via huge selectors |
+| `steps/STEP11` | Real Win16 ordinal numbers |
+| `steps/STEP12` | GlobalAlloc, InitTask, game loop active |
+| `steps/STEP13` | RT_BITMAP loader, sprite rendering |
+| `steps/STEP14` | patch_gdt in C (pm_helpers.c) |
+| `steps/STEP15` | Wsprintf fix, VERTRES=640, NPC analysis |
+| `steps/STEP16`..`STEP20` | Keyboard/mouse, GDI blits, NE resource loader, example app, shell + WM |
 | `SKIFREE` | SKI.EXE binary + NE format analysis scripts |
