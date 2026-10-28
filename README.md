@@ -21,6 +21,16 @@ The loader boots from a FreeDOS floppy image. It implements:
 
 SkiFree runs (sprites, game loop, status bar). Graphical shell with NE icons, window manager with title bar/close button/system menu/move, proper app exit back to the shell.
 
+## Screenshots
+
+| SkiFree (original Win16 binary) | Graphical shell with NE icons |
+|---|---|
+| ![SkiFree](docs/screenshots/skifree.png) | ![Shell](docs/screenshots/shell.png) |
+
+| Example Win16 app (menu bar, title bar buttons) |
+|---|
+| ![Example app](docs/screenshots/example_app.png) |
+
 ## Build
 
 ### Tool versions used
