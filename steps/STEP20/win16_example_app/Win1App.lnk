@@ -1,0 +1,14 @@
+system windows
+name Win1App.exe
+file WinMain.obj
+file MainWnd.obj
+file AboutDlg.obj
+library clibs
+option map
+option quiet
+option modname=WIN1APP
+option description 'Windows 1 Example Application'
+option heap=1024
+option stack=4096
+export MAINWNDPROC
+export ABOUTDIALOGPROC
