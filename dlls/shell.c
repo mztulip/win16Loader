@@ -1,6 +1,7 @@
 /* shell.c - SHELL.DLL: rejestr Windows 3.1, Drag&Drop, ShellExecute, ExtractIcon
  *
- * Rejestr 3.1 to jedno drzewo (HKEY_CLASSES_ROOT = 1, 0 tez oznacza korzen),
+ * Rejestr 3.1 to jedno drzewo (HKEY_CLASSES_ROOT = 1, 0 tez oznacza korzen - por.
+ * fix_win16_hkey w Wine dlls/krnl386.exe16/registry.c; koniec RegEnumKey = 259),
  * kazdy klucz ma jedna wartosc tekstowa. Trzymamy go w DGROUP i zapisujemy
  * tekstowo do <windir>\REG.TXT (linie "sciezka\klucza=wartosc").
  */

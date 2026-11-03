@@ -21,6 +21,11 @@ The loader boots from a FreeDOS floppy image. It implements:
 
 SkiFree runs (sprites, game loop, status bar). Graphical shell with NE icons, window manager with title bar/close button/system menu/move, proper app exit back to the shell.
 
+The rewritten `KERNEL`/`USER`/`GDI` (directories `kernel/`, `user/`, `gdi/`) plus small system
+DLLs (`dlls/`: SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG) run the
+**Calmira II** shell (Delphi 1): desktop, taskbar, Start menu, dialogs (`make run-calmira`).
+Every feature has a test app in `example_apps/` (`python3 tools/run_examples.py`).
+
 ## Screenshots
 
 | SkiFree (original Win16 binary) | Graphical shell with NE icons |
@@ -75,3 +80,22 @@ Current code lives in the repository root. Historical step-by-step snapshots are
 | `steps/STEP15` | Wsprintf fix, VERTRES=640, NPC analysis |
 | `steps/STEP16`..`STEP20` | Keyboard/mouse, GDI blits, NE resource loader, example app, shell + WM |
 | `SKIFREE` | SKI.EXE binary + NE format analysis scripts |
+
+## License
+
+win16Loader is free software; you can redistribute it and/or modify it under the terms of
+the **GNU Lesser General Public License, version 2.1 or (at your option) any later version**,
+the same license as Wine. See [`LICENSE`](LICENSE).
+
+## Third-party components and credits
+
+| Component | Where | License | Notes |
+|-----------|-------|---------|-------|
+| Wine bitmap fonts (`sserife`, `vgasys`, `vgafix`, `coure`, `smalle` `.fon`) | `fonts/` | LGPL-2.1+ | Unmodified from Wine 11.20; source and download info in [`fonts/README.md`](fonts/README.md) |
+| Wine `.spec` files (`dlls/*16/*.spec`) | read at build/analysis time from `../wine` (not in the repo) | LGPL-2.1+ | `tools/imports.py`, `gen_lnk.py`, `check_args.py`, `gen_apidb.py` take Win16 ordinals, names and argument sizes from them |
+| Wine behaviour references | comments in the sources | LGPL-2.1+ | No Wine code is copied; some semantics were matched against Wine (NE export prolog patching `NE_FixupSegmentPrologs`, 3.1 registry, `WM_SIZE` on first `ShowWindow`, owner-draw menu sizes, dialog placement) |
+| Win1App example | `win16_example_app/` | Unlicense (public domain) | by Transmission Zero |
+| FreeDOS floppy | `FD14-FloppyEdition/` (not in the repo) | GPL and others | download from <https://www.freedos.org> |
+| SkiFree, Calmira II | not in the repo | their own licenses | test applications only |
+
+Wine: <https://www.winehq.org>, sources <https://gitlab.winehq.org/wine/wine>.

@@ -100,7 +100,8 @@ HWND API CreateDialogIndirectParam(WORD hinst, LPVOID tmpl, HWND owner, WNDPROC 
     MapDialogRect(0, (LPRECT)&r);
     AdjustWindowRectEx((LPRECT)&r, style & ~WS_CHILD, menu != 0, (style & 0x0080) ? WS_EX_DLGMODALFRAME : 0);
     if (!(style & WS_CHILD)) {
-        /* wsp. wzgledem obszaru klienta wlasciciela (chyba ze DS_ABSALIGN), potem w ekran */
+        /* wsp. wzgledem obszaru klienta wlasciciela (chyba ze DS_ABSALIGN), potem w ekran
+         * (jak DIALOG_CreateIndirect w Wine dlls/user32/dialog.c) */
         WND __far *ow = owner ? WP(owner) : 0;
         int w = r.right - r.left, hh = r.bottom - r.top;
         if (ow && !(style & 0x0001)) OffsetRect((LPRECT)&r, ow->cr.left, ow->cr.top);

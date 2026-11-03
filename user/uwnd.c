@@ -406,7 +406,7 @@ HWND API CreateWindowEx(DWORD ex, LPCSTR cname, LPCSTR title, DWORD style, int x
         return 0;
     }
     w = WP(h);
-    w->flags |= WF_CREATED | WF_NEEDSIZE;    /* WM_SIZE/WM_MOVE przy pierwszym ShowWindow (jak Windows) */
+    w->flags |= WF_CREATED | WF_NEEDSIZE;    /* WM_SIZE/WM_MOVE przy pierwszym ShowWindow (jak Windows; Wine: WIN_NEED_SIZE) */
     if ((style & WS_CHILD) && !(ex & 0x0004))           /* WS_EX_NOPARENTNOTIFY */
         send_msg(parent, WM_PARENTNOTIFY, WM_CREATE, MAKELONG(h, w->id));
     if (!(style & WS_CHILD)) {

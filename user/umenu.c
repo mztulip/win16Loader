@@ -351,7 +351,7 @@ static void od_measure(MITEM __far *it)
     if (!(it->flags & MF_OWNERDRAW) || it->odh || !WP(g_mowner)) return;
     mi.type = 1; mi.id = 0; mi.item = it->id; mi.w = 0; mi.h = 18; mi.data = it->data;
     send_msg(g_mowner, WM_MEASUREITEM, 0, (LONG)(LPVOID)&mi);
-    it->odw = mi.w + 14;                     /* jak Windows: + 2 srednie szerokosci znaku */
+    it->odw = mi.w + 14;                     /* jak Windows: + 2 srednie szerokosci znaku (Wine MENU_CalcItemSize) */
     it->odh = mi.h ? mi.h : 1;
 }
 
