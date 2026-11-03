@@ -94,7 +94,7 @@ the same license as Wine. See [`LICENSE`](LICENSE).
 | Wine bitmap fonts (`sserife`, `vgasys`, `vgafix`, `coure`, `smalle` `.fon`) | `fonts/` | LGPL-2.1+ | Unmodified from Wine 11.20; source and download info in [`fonts/README.md`](fonts/README.md) |
 | Wine `.spec` files (`dlls/*16/*.spec`) | read at build/analysis time from `../wine` (not in the repo) | LGPL-2.1+ | `tools/imports.py`, `gen_lnk.py`, `check_args.py`, `gen_apidb.py` take Win16 ordinals, names and argument sizes from them |
 | Wine behaviour references | comments in the sources | LGPL-2.1+ | No Wine code is copied; some semantics were matched against Wine (NE export prolog patching `NE_FixupSegmentPrologs`, 3.1 registry, `WM_SIZE` on first `ShowWindow`, owner-draw menu sizes, dialog placement) |
-| Win1App example | `win16_example_app/` | Unlicense (public domain) | by Transmission Zero |
+| Win1App example | `win16_example_app/` | Unlicense (public domain) | by Transmission Zero, <https://github.com/TransmissionZero/Windows-1-Example-Application>; local changes in [`win16_example_app/UPSTREAM.md`](win16_example_app/UPSTREAM.md) |
 | FreeDOS floppy | `FD14-FloppyEdition/` (not in the repo) | GPL and others | download from <https://www.freedos.org> |
 | SkiFree, Calmira II | not in the repo | their own licenses | test applications only |
 
