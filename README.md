@@ -23,7 +23,8 @@ SkiFree runs (sprites, game loop, status bar). Graphical shell with NE icons, wi
 
 The rewritten `KERNEL`/`USER`/`GDI` (directories `kernel/`, `user/`, `gdi/`) plus small system
 DLLs (`dlls/`: SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG) run the
-**Calmira II** shell (Delphi 1): desktop, taskbar, Start menu, dialogs (`make run-calmira`).
+**Calmira II** shell (Delphi 1): desktop, taskbar, Start menu, dialogs (`make run-calmira`;
+unpack [cal3101p.zip](http://gaby.de/ftp/pub/win3x/cal3101p.zip) into `../win31_apps/cal3101p` first).
 Every feature has a test app in `example_apps/` (`python3 tools/run_examples.py`).
 
 ## Screenshots
@@ -96,6 +97,7 @@ the same license as Wine. See [`LICENSE`](LICENSE).
 | Wine behaviour references | comments in the sources | LGPL-2.1+ | No Wine code is copied; some semantics were matched against Wine (NE export prolog patching `NE_FixupSegmentPrologs`, 3.1 registry, `WM_SIZE` on first `ShowWindow`, owner-draw menu sizes, dialog placement) |
 | Win1App example | `win16_example_app/` | Unlicense (public domain) | by Transmission Zero, <https://github.com/TransmissionZero/Windows-1-Example-Application>; local changes in [`win16_example_app/UPSTREAM.md`](win16_example_app/UPSTREAM.md) |
 | FreeDOS floppy | `FD14-FloppyEdition/` (not in the repo) | GPL and others | download from <https://www.freedos.org> |
-| SkiFree, Calmira II | not in the repo | their own licenses | test applications only |
+| SkiFree | not in the repo (`SKIFREE/SKI.EXE`) | freeware | test application, <https://ski.ihoc.net/> |
+| Calmira II D 3.101.d (German, VVS Berlin) | not in the repo (`../win31_apps/cal3101p`, sources `../win31_apps/calsrc`) | GPL-2.0-or-later | test application; binary <http://gaby.de/ftp/pub/win3x/cal3101p.zip>, sources [cal3101q.zip (Wayback)](http://web.archive.org/web/20101101214316/http://www.vv-soft.de/calmira/cal3101q.zip); project site <http://www.calmira.de/downloads/>, newer 3.3 sources mirrored at <https://github.com/RauliL/calmira> |
 
 Wine: <https://www.winehq.org>, sources <https://gitlab.winehq.org/wine/wine>.

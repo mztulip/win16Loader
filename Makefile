@@ -517,6 +517,8 @@ run-test-rc: boot_test_rc.img
 
 # -------------------------------------------------------
 # Calmira: dysk twardy C: (64MB FAT16) z C:\CALMIRA, start z dyskietki boot.img
+# Calmira II D 3.101.d (GPL-2.0+): http://gaby.de/ftp/pub/win3x/cal3101p.zip -> ../win31_apps/cal3101p
+# zrodla: http://web.archive.org/web/20101101214316/http://www.vv-soft.de/calmira/cal3101q.zip
 # Loader szuka systemowych DLL (KERNEL/USER/GDI) w swoim katalogu (A:\).
 # -------------------------------------------------------
 CALMIRA_DIR = ../win31_apps/cal3101p
