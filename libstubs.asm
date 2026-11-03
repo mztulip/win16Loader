@@ -49,6 +49,7 @@ SEL_PSP_VAL equ 0x38
 COM1_DATA   equ 0x3F8
 COM1_LSR    equ 0x3FD
 
+%ifndef NO_INITTASK
 global INITTASK
 INITTASK:
     ; Read hInst from KCB field 0 (app_hinstance); keep in CX throughout.
@@ -104,6 +105,8 @@ INITTASK:
     pop  ax                 ; AX = hInst
     xor  dx, dx             ; DX = 0 (nCmdShow)
     retf
+
+%endif ; NO_INITTASK
 
 ; __U4M: Watcom 32-bit unsigned multiply runtime helper
 ; Input:  DX:AX = a,  CX:BX = b

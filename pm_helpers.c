@@ -54,11 +54,17 @@ extern unsigned long  g_kcb_phys;
 extern unsigned long  g_psp_phys;
 extern unsigned long  g_bitmaps_phys;
 extern unsigned long  g_ext_mem_kb;
-extern unsigned short g_ndll;
-extern unsigned long  g_dll_code_phys[];
-extern unsigned short g_dll_code_size[];
-extern unsigned long  g_dll_data_phys[];
-extern unsigned short g_dll_has_data[];
+
+/* Lista wpisow GDT od loadera modulow (module.c): segmenty, tablice, okna RM */
+typedef struct {
+    unsigned short sel;
+    unsigned long  base;
+    unsigned long  limit;    /* bajty-1; > 0xFFFFF -> granularnosc 4KB */
+    unsigned char  access;   /* 0x9A kod, 0x92 dane */
+    unsigned char  big;      /* 1 = D/B (32-bit) */
+} GDT_PATCH;
+extern GDT_PATCH      g_gdtp[];
+extern unsigned short g_ngdtp;
 
 /*
  * Pomocnicze - przyjmuja seg i off jako parametry (rejestrowe/stosowe),
@@ -113,19 +119,9 @@ void patch_gdt_c(void)
     unsigned long  l_psp       = g_psp_phys;
     unsigned long  l_bitmaps    = g_bitmaps_phys;
     unsigned long  l_ext_mem_kb = g_ext_mem_kb;
-    unsigned short l_ndll       = g_ndll;
-    unsigned long  l_dcode[4];
-    unsigned short l_dsz[4];
-    unsigned long  l_ddata[4];
-    unsigned short l_dhd[4];
+    unsigned short l_ngdtp      = g_ngdtp;
+    GDT_PATCH __far *l_gdtp    = (GDT_PATCH __far *)g_gdtp;
     unsigned short i;
-
-    for (i = 0; i < 4; i++) {
-        l_dcode[i] = g_dll_code_phys[i];
-        l_dsz[i]   = g_dll_code_size[i];
-        l_ddata[i] = g_dll_data_phys[i];
-        l_dhd[i]   = g_dll_has_data[i];
-    }
 
     /*
      * Krok 2: wszystkie zapisy do GDT przez set_base_p/set_limit_p
@@ -137,18 +133,8 @@ void patch_gdt_c(void)
     set_base_p(SEL_CODE16,  l_cs_phys, l_seg, l_off);
     set_base_p(SEL_DATA16,  l_cs_phys, l_seg, l_off);
 
-    /* SEL_APP_CODE: base = app code, limit = 64KB */
-    set_base_p(SEL_APP_CODE, l_app_phys, l_seg, l_off);
-    set_limit_p(SEL_APP_CODE, 0xFFFF, l_seg, l_off);
-
     /* SEL_PSP: fake PSP */
     set_base_p(SEL_PSP, l_psp, l_seg, l_off);
-
-    /* SEL_APP_DATA: base = app data, limit = 64KB */
-    if (l_has_data) {
-        set_base_p(SEL_APP_DATA, l_adata, l_seg, l_off);
-        set_limit_p(SEL_APP_DATA, 0xFFFF, l_seg, l_off);
-    }
 
     /* SEL_THUNK */
     set_base_p(SEL_THUNK, l_thunk, l_seg, l_off);
@@ -203,25 +189,17 @@ void patch_gdt_c(void)
         gdt_entry_p(SEL_HEAP, l_seg, l_off)[6] = byte6;
     }
 
-    /* DLL code/data selectors: 0x48..0x80 (4 DLLs max) */
-    for (i = 0; i < l_ndll; i++) {
-        unsigned short code_sel = 0x48 + i * 16;
-        unsigned short data_sel = 0x50 + i * 16;
-        unsigned short j;
-
-        set_base_p(code_sel, l_dcode[i], l_seg, l_off);
-        set_limit_p(code_sel, l_dsz[i] - 1, l_seg, l_off);
-        gdt_entry_p(code_sel, l_seg, l_off)[5] = 0x9A;  /* P=1 DPL=0 S=1 code exec-read */
-        gdt_entry_p(code_sel, l_seg, l_off)[6] = 0x00;  /* 16-bit, byte granularity */
-
-        if (l_dhd[i]) {
-            set_limit_p(data_sel, 0xFFFF, l_seg, l_off);
-            set_base_p(data_sel, l_ddata[i], l_seg, l_off);
-            gdt_entry_p(data_sel, l_seg, l_off)[5] = 0x92;  /* P=1 DPL=0 S=1 data RW */
-            gdt_entry_p(data_sel, l_seg, l_off)[6] = 0x00;
-        } else {
-            /* Zero out unused data entry */
-            for (j = 0; j < 8; j++) gdt_entry_p(data_sel, l_seg, l_off)[j] = 0;
-        }
+    /* Wpisy od loadera modulow (segmenty modulow, MODTAB, okna pamieci RM) */
+    for (i = 0; i < l_ngdtp; i++) {
+        GDT_PATCH p = l_gdtp[i];
+        unsigned char __far *e = gdt_entry_p(p.sel, l_seg, l_off);
+        unsigned long lim = p.limit;
+        unsigned char b6 = p.big ? 0x40 : 0x00;
+        if (lim > 0xFFFFFUL) { lim >>= 12; b6 |= 0x80; }
+        set_base_p(p.sel, p.base, l_seg, l_off);
+        e[0] = (unsigned char)lim;
+        e[1] = (unsigned char)(lim >> 8);
+        e[5] = p.access;
+        e[6] = (unsigned char)(b6 | ((lim >> 16) & 0x0F));
     }
 }

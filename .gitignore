@@ -27,3 +27,19 @@ __pycache__/
 
 # Lokalne ustawienia Claude Code
 .claude/
+
+# Wyniki budowania nowych modulow i aplikacji przykladowych (make / make example_apps)
+gdi/GDI.EXE
+user/USER.EXE
+dlls/*.DLL
+dlls/*.DRV
+example_apps/*/*.EXE
+*.map
+*.res
+# eksporty generowane przez tools/gen_lnk.py (*_imp.lnk sa pisane recznie)
+gdi/gdi.lnk
+user/user.lnk
+dlls/[a-z]*.lnk
+!dlls/dll_imp.lnk
+WIN16API.DB
+qemu_out/

@@ -119,7 +119,7 @@ typedef unsigned short HDC;
 
 /* ETAP 15: pixel bufory memDC z dynamicznymi wymiarami (z CreateCompatibleBitmap) */
 #define SEL_GDT_ACCESS  0x120   /* samoodniesienie GDT */
-#define GDYN_MAX_SEL    0x528   /* max selektor dynamiczny */
+#define GDYN_MAX_SEL    (*(unsigned short __far *)MK_FP(SEL_KCB, 512))  /* max selektor (KCB, loader) */
 
 
 #pragma pack(push, 1)

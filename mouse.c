@@ -35,6 +35,11 @@ unsigned char io_inb(unsigned port);
 #define KCB_MOUSE_BTN     289   /* BYTE: bity przyciskow (bit 0=LButton) */
 #define KCB_MOUSE_CHANGED 290   /* BYTE: flaga: nowe zdarzenie myszy */
 
+#define KCB_MEV_HEAD      1160  /* BYTE: indeks odczytu kolejki zdarzen przyciskow */
+#define KCB_MEV_TAIL      1161  /* BYTE: indeks zapisu */
+#define KCB_MEV_BUF       1162  /* 16 x {WORD x, WORD y, WORD przyciski} */
+#define KCB_MEV_N         16
+
 #define SCREEN_W  640
 #define SCREEN_H  480
 
@@ -98,7 +103,16 @@ void mouse_c(void)
         *px = ux;
         *py = uy;
 
-        kcb[KCB_MOUSE_BTN]     = b0 & 0x01;   /* bit 0 = LButton */
+        /* Zmiana przyciskow -> do kolejki (z pozycja), zeby nie zgubic krotkich klikniec */
+        if ((b0 & 0x07) != kcb[KCB_MOUSE_BTN]) {
+            unsigned char t = kcb[KCB_MEV_TAIL], nt = (unsigned char)((t + 1) % KCB_MEV_N);
+            if (nt != kcb[KCB_MEV_HEAD]) {
+                unsigned short __far *e = (unsigned short __far *)MK_FP(SEL_KCB, KCB_MEV_BUF + t * 6);
+                e[0] = ux; e[1] = uy; e[2] = b0 & 0x07;
+                kcb[KCB_MEV_TAIL] = nt;
+            }
+        }
+        kcb[KCB_MOUSE_BTN]     = b0 & 0x07;   /* bit 0 = lewy, 1 = prawy, 2 = srodkowy */
         kcb[KCB_MOUSE_CHANGED] = 1;
         kcb[KCB_MOUSE_STATE]   = 0;
     }

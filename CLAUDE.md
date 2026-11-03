@@ -16,8 +16,15 @@ do not develop there; new work is NOT split into new STEP directories). Work fro
 make            # build everything (compile + create boot.img)
 make run-qemu   # run under QEMU (fast, no GUI debugger)
 make run        # run under Bochs (with GUI debugger)
+make run-calmira  # Calmira II na drugim dysku (calmira.img = C:)
+make OLDGUI=1 boot.img   # stare user.exe/gdi.exe (tylko SkiFree)
 make clean
+python3 tools/run_examples.py   # testy aplikacji przykladowych (example_apps/) w QEMU bez okna
 ```
+
+Headless: `tools/qemu_headless.py --fd boot.img [--hd calmira.img] --run "LOADER.EXE X.EXE" KROKI`
+(`w` czekaj, `p` zrzut PNG, `k` klawisz, `a x,y` mysz bezwzglednie, `m dx,dy`, `c` klik).
+Opcja loadera `-t` = trace wywolan API na COM1 (`>mod off cs:ip`, nazwy z map: `*/*.map`).
 
 **QEMU debug log** (crash diagnosis):
 ```bash
@@ -99,11 +106,54 @@ MZ stub → NE header (at MZ.e_lfanew) → Segment Table → Resource Table → 
 ```
 Each segment entry: offset (in file alignment units), size, flags, min_alloc. Must set up LDT selectors per segment and apply fixups (relocations).
 
+## Moduly systemowe (stan biezacy)
+
+Uruchamia `LOADER.EXE` (loader.c + module.c, tryb rzeczywisty -ml): laduje aplikacje NE i
+rekurencyjnie jej DLL do XMS, selektory GDT od 0x600 (segment n -> first_sel+(n-1)*8),
+wpisy MODTAB (0x530), thunki INT 3Fh dla importow; z katalogu apki preloaduje `*.DLL`,
+z katalogu systemowego (`A:\`) `*.FON`. Potem przechodzi do PM i woła LibEntry DLL + wejscie apki.
+
+| Katalog | Modul | Model | Uwagi |
+|---------|-------|-------|-------|
+| `kernel/` | KERNEL.EXE | -ms -zu | pamiec (XMS, selektory, LocalHeap), DOS3Call z tlumaczeniem wskaznikow, INI, moduly/zasoby, INT 21h z PM |
+| `gdi/` | GDI.EXE | -mm -zu | DC, obiekty, ROP2/ROP3, regiony, bitmapy DIB/DDB, fonty .FON (FNT 2/3), kursor myszy (prywatne Gdi* 900-914) |
+| `user/` | USER.EXE | -mm -zu | okna, klasy, kolejka, malowanie NC w stylu 3.1, menu (owner-draw), dialogi, kontrolki (uctl.c), schowek, DCE (dce_update), prywatne UserIcon* 950-951 |
+| `dlls/` | SHELL.DLL, KEYBOARD.DRV, TOOLHELP.DLL, DDEML.DLL, VER.DLL, MMSYSTEM.DLL, COMMDLG.DLL | -ms -zu | rejestr 3.1 w `<windir>\REG.TXT`, ExtractIcon, ANSI<->OEM; reszta zwraca "brak/anuluj" |
+| `example_apps/` | testy | aplikacje | po jednej na funkcjonalnosc, wyniki `TEST ...` na COM1 (README.md) |
+
+Eksporty: `tools/gen_lnk.py MODUL pliki.c` (ordynaly z .spec Wine, prywatne w PRIVATE),
+weryfikacja `retf N` vs .spec: `tools/check_args.py plik:MODUL` (KERNEL.354 = falszywy alarm).
+Calmira II (`../win31_apps/cal3101p`) dziala: pulpit, pasek zadan, menu Start, dialogi.
+Brak: wielozadaniowosci (ShellExecute/WinExec zwracaja blad), COMMDLG (zawsze "Anuluj"), DDE.
+
+### Wyglad: wlasny styl, NIE kopiujemy Windows
+
+Zgodnosc dotyczy API (komunikaty, metryki, zachowanie), nie wygladu. Styl projektu:
+pulpit ciemny teal (0x1C5058), ramka 1 px czarna + 3 px jasny teal (0x88C8D0), pasek tytulu
+0x0A6E7E z bialym tytulem od lewej (font Fixedsys = VGA), przyciski 0x60A8B4 ze znakami
+`=` (menu systemowe), `-`, `+`, `X` (zamknij); pasek menu 0x88C0C8, menu rozwijane 0xC0E4E8
+z ramka 0x004048, zaznaczenie 0x0A6E7E. Paleta kolorow systemowych: `g_col` w `user/umisc.c`
+i `[colors]` w `windir/WIN.INI`. Nie zmieniac na kolory/ksztalty Windows bez prosby uzytkownika.
+
+### Pulapki (Watcom / Win16) - juz naprawione, nie powtarzac
+
+- **MK_FP/MAKELONG**: tylko `((DWORD)(WORD)seg << 16) | (DWORD)(WORD)off`. Wersja `|` bez
+  `(DWORD)` przy seg=0 daje DS:off; wersja z `+` generuje `lea` + `adc` z losowym CF.
+- **rt386**: moduly -mm wolaja `__U4M/__U4D` far -> `kernel/rt386f.obj` (`-DFARCODE`, retf).
+- **`__InitRtns/__FiniRtns`** (stuby dla libentry.obj) musza konczyc sie `ret`, nie `retf`.
+- **Prologi eksportow** (jak Wine NE_FixupSegmentPrologs): flaga 2 -> `mov ax,DGROUP`;
+  eksport (flaga 1) modulu MULTIPLEDATA -> `nop nop nop`; nieeksportowanych nie ruszac.
+- **DLGPROC zwraca BOOL** (tylko AX) - wynik obcinac do WORD. GetSystemDebugState = DWORD.
+- **-zu (SS != DS)**: wskazniki do zmiennych lokalnych musza byc far; dlugosci > 0x7FFF
+  przekazywane jako `int` robia sie ujemne (bufor EDIT = 0x7FF0).
+- **WM_SIZE/WM_MOVE** wysylane przy pierwszym ShowWindow (WF_NEEDSIZE), nie w CreateWindow.
+- **CREATESTRUCT**: lpszName @22, lpszClass @26 (CS_NAME_OFF).
+
 ## Multitasking model
 
 Win16 uses **cooperative** multitasking — tasks yield only via `GetMessage`/`PeekMessage`/`WaitMessage`. No preemptive timer switches between apps (unlike the 13ring3 kernel which uses IRQ0 round-robin).
 
-## GDI / Graphics stack
+## Stare GDI (gdi.c, `OLDGUI=1`) - historia SkiFree
 
 ### Kluczowe pliki
 

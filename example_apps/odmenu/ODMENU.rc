@@ -1,0 +1,15 @@
+#include <windows.h>
+
+MAINMENU MENU
+BEGIN
+    POPUP "&Plik"
+    BEGIN
+        MENUITEM "&Nowy", 101
+        MENUITEM SEPARATOR
+        MENUITEM "&Koniec", 230
+    END
+    POPUP "&Pomoc"
+    BEGIN
+        MENUITEM "&O programie", 102
+    END
+END

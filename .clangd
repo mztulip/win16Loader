@@ -1,0 +1,15 @@
+# Kod 16-bit Open Watcom: neutralizuj slowa kluczowe Watcoma dla clangd (IDE)
+CompileFlags:
+  Add:
+    - -D__far=
+    - -D__near=
+    - -D__huge=
+    - -D__pascal=
+    - -D__cdecl=
+    - -D__interrupt=
+    - -D_far=
+    - -D_near=
+    - -I/opt/watcom/h
+    - -Wno-everything
+Diagnostics:
+  Suppress: ['*']

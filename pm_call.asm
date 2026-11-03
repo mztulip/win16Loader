@@ -58,11 +58,26 @@ GDYN_FIRST      equ 0x130
 GDYN_COUNT      equ 127
 SEL_HEAP        equ 0x528   ; 16-bit/32-bit data, base=0x100000 (XMS GlobalHeap)
 
-; GDT size: 0x130 + 127*8 + 8 = 0x530 bytes (dodany SEL_HEAP na 0x528)
-GDT_TOTAL_SIZE  equ 0x530
+; GDT: stala czesc 0x00..0x52F (jak dotad) + rozszerzenie do GDT_TOTAL_SIZE.
+; Rozszerzenie (wypelniane przez loader, module.c):
+;   0x530        SEL_MODTAB   tablica modulow (MT_SIZE B/modul) - DS dla thunkow
+;   0x538..0x5F8 stale selektory (okna pamieci RM, bufory)
+;   0x600..      segmenty modulow (kolejne selektory per modul), potem
+;                dynamiczne GlobalAlloc (KCB[512] = max selektor)
+GDT_TOTAL_SIZE  equ 0x4000
 GDT_LIMIT       equ GDT_TOTAL_SIZE - 1
 
-INT3F_MAX_DEPTH equ 8
+SEL_MODTAB      equ 0x530
+PIC_BASE_M      equ 0x50    ; IRQ0-7  -> INT 50h-57h
+PIC_BASE_S      equ 0x58    ; IRQ8-15 -> INT 58h-5Fh
+KCB_INT_CB      equ 538     ; DWORD: far ptr dyspozytora przerwan programowych (KERNEL)
+KCB_CALLER_DS   equ 520     ; WORD: DS wolajacego ostatnie API (int3f_handler)
+KCB_TRACE       equ 536     ; WORD: !=0 -> int3f_handler loguje kazde wywolanie API
+MT_SHIFT        equ 7       ; 128 B na wpis tablicy modulow
+MT_DGROUP       equ 10      ; offset WORD dgroup (DS modulu) we wpisie
+
+INT3F_MAX_DEPTH equ 32
+MAX_DLLINIT     equ 16      ; max DLL z procedura inicjalizacji (LibEntry)
 
 ; DEBUG_STACK=1: przy wyjatku zrzuc rejestry, stos i lancuch ramek BP
 ; (serial + ekran paniki). Koszt tylko w chwili wyjatku.
@@ -86,6 +101,9 @@ segment _TEXT public class=CODE use16
 
 global pm_call_app_
 global get_int3f_off_
+global get_rmint_off_
+global get_softint_off_
+global get_iretstub_off_
 global get_int21_off_
 global get_irq0_off_
 global get_irq1_off_
@@ -102,6 +120,11 @@ global get_exc0E_off_
 extern _g_app_phys
 extern _g_code_size
 extern _g_entry_ip
+extern _g_entry_cs      ; selektor segmentu wejscia apki (module.c)
+extern _g_rmbuf_seg     ; segment RM bufora transferowego (RMREGS + dane)
+extern _g_app_ds        ; selektor DGROUP apki (= hInstance)
+extern _g_ndllinit      ; liczba DLL do zainicjalizowania
+extern _g_dllinit       ; {cs, ip, ds, heap} x MAX_DLLINIT
 extern _g_cs_phys
 extern _g_orig_cs
 extern _g_orig_ss
@@ -110,13 +133,6 @@ extern _g_app_data_phys
 extern _g_data_size
 extern _g_has_data
 extern _g_init_sp
-
-extern _g_dll_code_phys
-extern _g_dll_code_size
-extern _g_dll_data_phys
-extern _g_dll_data_size
-extern _g_dll_has_data
-extern _g_ndll
 
 extern _g_thunk_phys
 extern _g_thunk_size
@@ -138,6 +154,18 @@ extern mouse_c_         ; C near: mouse_c() w mouse.c  -> symbol 'mouse_c_'
 ; =====================================================================
 get_int3f_off_:
     mov  ax, int3f_handler
+    ret
+
+get_rmint_off_:
+    mov  ax, rm_int_service
+    ret
+
+get_softint_off_:
+    mov  ax, softint_stubs
+    ret
+
+get_iretstub_off_:
+    mov  ax, iret_stub
     ret
 
 get_int21_off_:
@@ -240,6 +268,29 @@ pm_call_app_:
 
     mov  ax, [_g_entry_ip]
     mov  [cs:local_entry_ip], ax
+    mov  ax, [_g_entry_cs]
+    mov  [cs:local_entry_cs], ax
+    mov  ax, [_g_app_ds]
+    mov  [cs:local_app_ds], ax
+    mov  ax, [_g_ndllinit]
+    mov  [cs:local_ndllinit], ax
+
+    ; Tablica inicjalizacji DLL (DGROUP loadera -> segment kodu)
+    push es
+    push si
+    push di
+    push cx
+    mov  ax, cs
+    mov  es, ax
+    mov  di, local_dllinit
+    mov  si, _g_dllinit
+    mov  cx, MAX_DLLINIT * 8
+    rep  movsb
+    pop  cx
+    pop  di
+    pop  si
+    pop  es
+
     mov  ax, [_g_init_sp]
     mov  [cs:local_init_sp], ax
     mov  ax, [_g_has_data]
@@ -248,6 +299,9 @@ pm_call_app_:
     ; patch rm_jmp.CS = g_orig_cs so RETF to real mode works
     mov  ax, [_g_orig_cs]
     mov  [cs:rm_jmp + 2], ax
+    mov  [cs:rmi_rm_ptr + 2], ax
+    mov  ax, [_g_rmbuf_seg]
+    mov  [cs:rmi_buf_seg], ax
 
     ; Przekaz offsets potrzebne przez patch_gdt_c_ (leza w _TEXT, nie DGROUP)
     ; g_gdt_off_c: offset tablicy GDT w segmencie kodu
@@ -505,14 +559,14 @@ pm16_call_app:
 
     mov  ax, [local_entry_ip]
     mov  [call_ptr], ax
-    mov  word [call_ptr + 2], SEL_APP_CODE
+    mov  ax, [local_entry_cs]
+    mov  [call_ptr + 2], ax
 
-    cmp  word [local_has_data], 0
-    je   .call_app
-    mov  ax, SEL_APP_DATA
-    mov  ds, ax
-    ; Win16: SS=DS=DGROUP before entering WinMain
-    mov  ss, ax          ; SS = app data segment (DGROUP)
+    ; Win16: SS=DS=DGROUP apki przed wejsciem (DLL init tez biegnie na tym stosie)
+    mov  ax, [local_app_ds]
+    test ax, ax
+    jz   .call_app           ; brak DGROUP: zostaje stos SEL_DATA16
+    mov  ss, ax
     mov  sp, [cs:local_init_sp]  ; SP obliczony z ne_heap+ne_stack
 
 .call_app:
@@ -521,9 +575,9 @@ pm16_call_app:
     mov  al, 0x11       ; ICW1: cascade, ICW4 needed
     out  0x20, al
     out  0xA0, al
-    mov  al, 0x20       ; ICW2 master: base INT 0x20 (IRQ0 -> INT 0x20)
-    out  0x21, al
-    mov  al, 0x28       ; ICW2 slave: base INT 0x28
+    mov  al, PIC_BASE_M ; ICW2 master: IRQ0-7 -> INT 50h-57h (jak Windows;
+    out  0x21, al       ;   wektory 20h-2Fh wolne dla programowych INT 21h/25h/2Fh)
+    mov  al, PIC_BASE_S ; ICW2 slave: IRQ8-15 -> INT 58h-5Fh
     out  0xA1, al
     mov  al, 0x04       ; ICW3 master: slave on IRQ2
     out  0x21, al
@@ -556,14 +610,52 @@ pm16_call_app:
     ; Przeprogramowanie do wyzszej czestotliwosci powoduje overflow w SKI.EXE.
     ; Zapamietaj SS:SP sprzed wywolania apki. INT 21h/4Ch (int21_handler .terminate)
     ; odtwarza je i skacze do pm16_app_returned - tak jakby entry apki zrobilo RETF.
-    push ds
     mov  ax, SEL_DATA16
     mov  ds, ax
     mov  [app_ret_ss], ss
     mov  [app_ret_sp], sp
     mov  word [int3f_depth], 0
-    pop  ds
     sti                 ; wlacz przerwania: IRQ0 -> IDT[0x20] -> irq0_handler
+
+    ; Inicjalizacja DLL (LibEntry) w kolejnosci zaleznosci. Rejestry jak w Win16:
+    ; DS=DGROUP DLL, DI=hInstance, CX=rozmiar local heap, ES:SI=linia polecen.
+    xor  bx, bx
+.dll_init_loop:
+    cmp  bx, [local_ndllinit]
+    jae  .dll_init_done
+    push bx
+    mov  si, bx
+    shl  si, 3
+    mov  ax, [local_dllinit + si + 2]   ; ip
+    mov  [init_ptr], ax
+    mov  ax, [local_dllinit + si]       ; cs
+    mov  [init_ptr + 2], ax
+    mov  cx, [local_dllinit + si + 6]   ; heap
+    mov  di, [local_dllinit + si + 4]   ; DGROUP = hInstance
+    mov  ax, SEL_PSP
+    mov  es, ax
+    mov  si, 0x80
+    mov  ds, di
+    xor  bp, bp
+    call far [cs:init_ptr]
+    mov  dx, SEL_DATA16
+    mov  ds, dx
+    pop  bx
+    inc  bx
+    jmp  .dll_init_loop
+.dll_init_done:
+
+    ; Wejscie apki: DS=DGROUP, DI=hInstance, SI=hPrevInstance=0, ES=PSP, BP=0
+    mov  ax, SEL_PSP
+    mov  es, ax
+    mov  di, [local_app_ds]
+    xor  si, si
+    xor  bp, bp
+    mov  ax, di
+    test ax, ax
+    jz   .no_app_ds
+    mov  ds, ax
+.no_app_ds:
     call far [cs:call_ptr]
 pm16_app_returned:
     cli
@@ -665,6 +757,11 @@ rm_real:
 ; to access loader data (int3f_depth, int3f_stack) without touching SS.
 ; =====================================================================
 int3f_handler:
+    ; Thunk (8 B, w SEL_THUNK): CD 3F | mod | off16 | sel16 | 0
+    ;   mod < 0xFF: wywolanie funkcji modulu mod pod sel:off, DS = MODTAB[mod].dgroup
+    ;   mod = 0xFF: stub niezaimplementowanej funkcji:
+    ;               off16 = ordinal, sel16 lo = bajty argumentow, hi = modul docelowy
+    ; Stos: [bp+2]=IP(thunk+2) [bp+4]=CS [bp+6]=FLAGS [bp+8]=ret IP [bp+10]=ret CS
     push bp
     mov  bp, sp
     push ax
@@ -673,449 +770,88 @@ int3f_handler:
     push si
     push es
 
-    ; Read thunk: [BP+2]=IP in thunk, [BP+4]=CS of thunk
     mov  si, [bp+2]
-    mov  bx, [bp+4]
-    mov  es, bx            ; ES = CS of thunk (code seg with thunk bytes)
-    mov  bl, byte [es:si]  ; BL = dll_idx
-    xor  bh, bh
-    mov  cx, [es:si + 3]   ; CX = ordinal (bytes at si+3,si+4; saved before SI overwrite)
-    mov  si, [es:si + 1]   ; SI = DLL function offset (from thunk)
+    mov  es, [bp+4]
+    mov  bl, [es:si]
+    cmp  bl, 0xFF
+    je   .stub
 
-    ; Debug: WYLACZONY (powoduje saturacje serial -> QEMU 2% prędkości)
-%if 0
-    push ax
-    push dx
-    ; print DLL letter
-.dbg_dw0: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw0
-    mov  al, byte [cs:dbg_dll_letters + bx]
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print ':'
-.dbg_dw1: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw1
+    mov  ax, [es:si+1]
+    mov  [bp+2], ax          ; nowy IP = funkcja modulu
+    mov  ax, [es:si+3]
+    mov  [bp+4], ax          ; nowy CS
+
+    ; Trace API: "> mm off ret_cs:ret_ip\n" (KCB_TRACE)
+    push es
+    mov  ax, SEL_KCB
+    mov  es, ax
+    cmp  word [es:KCB_TRACE], 0
+    pop  es
+    je   .no_trace
+    mov  al, '>'
+    call ser_putc
+    mov  al, bl
+    call ser_hex8
+    mov  al, ' '
+    call ser_putc
+    mov  ax, [bp+2]
+    xchg al, ah
+    call ser_hex8
+    xchg al, ah
+    call ser_hex8
+    mov  al, ' '
+    call ser_putc
+    mov  ax, [bp+10]
+    xchg al, ah
+    call ser_hex8
+    xchg al, ah
+    call ser_hex8
     mov  al, ':'
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print ordinal high byte high nybble
-.dbg_dw2: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw2
-    mov  al, ch
-    shr  al, 4
-    add  al, '0'
-    cmp  al, ':'
-    jl   .dbg_n3
-    add  al, 7
-.dbg_n3:
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print ordinal high byte low nybble
-.dbg_dw3: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw3
-    mov  al, ch
-    and  al, 0x0F
-    add  al, '0'
-    cmp  al, ':'
-    jl   .dbg_n2
-    add  al, 7
-.dbg_n2:
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print ordinal low byte high nybble
-.dbg_dw4: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw4
-    mov  al, cl
-    shr  al, 4
-    add  al, '0'
-    cmp  al, ':'
-    jl   .dbg_n1
-    add  al, 7
-.dbg_n1:
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print ordinal low byte low nybble
-.dbg_dw5: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw5
-    mov  al, cl
-    and  al, 0x0F
-    add  al, '0'
-    cmp  al, ':'
-    jl   .dbg_n0
-    add  al, 7
-.dbg_n0:
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print ' ' + [bp+0] (saved app BP) as 4 hex + '=' + [ss:[bp+0]+4] (outer ret_CS) as 4 hex
-    ; BX=dll_idx, CX=ordinal -- push CX to free it; use SI for outer_bp
-    push cx
-    push si
-    ; print space separator
-.dbg_sp: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_sp
-    mov  al, ' '
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print [bp+0] (saved app BP) as 4 hex nibbles
-    mov  ax, [bp+0]
-    mov  cl, ah
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bp3
-    add  cl, 7
-.dbg_bp3:
-.dbg_bpw3: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpw3
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+0]
-    mov  cl, ah
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bp2
-    add  cl, 7
-.dbg_bp2:
-.dbg_bpw2: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpw2
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+0]
-    mov  cl, al
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bp1
-    add  cl, 7
-.dbg_bp1:
-.dbg_bpw1: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpw1
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+0]
-    mov  cl, al
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bp0
-    add  cl, 7
-.dbg_bp0:
-.dbg_bpw0: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpw0
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print space + [ss:[bp+0]+2] (ret_IP) as 4 hex nibbles
-    mov  si, [bp+0]            ; SI = app's BP (function frame pointer)
-    mov  ax, [ss:si+2]         ; AX = ret_IP
-.dbg_ipsp: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_ipsp
-    mov  al, ' '
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  cl, ah
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_ipn3
-    add  cl, 7
-.dbg_ipn3:
-.dbg_ipw3: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_ipw3
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  si, [bp+0]
-    mov  ax, [ss:si+2]
-    mov  cl, ah
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_ip2
-    add  cl, 7
-.dbg_ip2:
-.dbg_ipw2: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_ipw2
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  si, [bp+0]
-    mov  ax, [ss:si+2]
-    mov  cl, al
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_ip1
-    add  cl, 7
-.dbg_ip1:
-.dbg_ipw1: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_ipw1
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  si, [bp+0]
-    mov  ax, [ss:si+2]
-    mov  cl, al
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_ip0
-    add  cl, 7
-.dbg_ip0:
-.dbg_ipw0: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_ipw0
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    ; now print '=' and [ss:[bp+0]+4]
-    mov  si, [bp+0]            ; SI = app's BP (function frame pointer)
-    mov  ax, [ss:si+4]         ; AX = outer function's ret_CS (what RETF will load as CS)
-    ; nibble 3 (bits 15-12)
-    mov  cl, ah
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_csn3
-    add  cl, 7
-.dbg_csn3:
-.dbg_cseq: mov dx, 0x3FD        ; print '=' first
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_cseq
-    mov  al, '='
-    mov  dx, 0x3F8
-    out  dx, al
-.dbg_csw3: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_csw3
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    ; nibble 2 (bits 11-8)
-    mov  si, [bp+0]
-    mov  ax, [ss:si+4]
-    mov  cl, ah
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_cs2
-    add  cl, 7
-.dbg_cs2:
-.dbg_csw2: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_csw2
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    ; nibble 1 (bits 7-4)
-    mov  si, [bp+0]
-    mov  ax, [ss:si+4]
-    mov  cl, al
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_cs1
-    add  cl, 7
-.dbg_cs1:
-.dbg_csw1: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_csw1
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    ; nibble 0 (bits 3-0)
-    mov  si, [bp+0]
-    mov  ax, [ss:si+4]
-    mov  cl, al
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_cs0
-    add  cl, 7
-.dbg_cs0:
-.dbg_csw0: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_csw0
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    pop  si                    ; restore SI = DLL func offset
-    pop  cx                    ; restore CX = ordinal
-    ; print '/' + [bp+10] (CS inside 0x5910 at thunk call) as 4 hex
-.dbg_bpcs_sl: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpcs_sl
-    mov  al, '/'
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+10]
-    mov  cl, ah
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bpcs3
-    add  cl, 7
-.dbg_bpcs3:
-.dbg_bpcsw3: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpcsw3
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+10]
-    mov  cl, ah
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bpcs2
-    add  cl, 7
-.dbg_bpcs2:
-.dbg_bpcsw2: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpcsw2
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+10]
-    mov  cl, al
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bpcs1
-    add  cl, 7
-.dbg_bpcs1:
-.dbg_bpcsw1: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpcsw1
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [bp+10]
-    mov  cl, al
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .dbg_bpcs0
-    add  cl, 7
-.dbg_bpcs0:
-.dbg_bpcsw0: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_bpcsw0
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    ; print newline
-.dbg_dw6: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .dbg_dw6
-    mov  al, 0x0A
-    mov  dx, 0x3F8
-    out  dx, al
-    pop  dx
-    pop  ax
-%endif
-    ; CX still holds ordinal; gets overwritten during DLL sel computation below (that's fine)
+    call ser_putc
+    mov  ax, [bp+8]
+    xchg al, ah
+    call ser_hex8
+    xchg al, ah
+    call ser_hex8
+    mov  al, 10
+    call ser_putc
+.no_trace:
 
-    ; Compute DLL selectors: code=dll_idx*16+0x48, data=dll_idx*16+0x50
+    xor  bh, bh
+    mov  ax, SEL_MODTAB
+    mov  es, ax
+    mov  cl, MT_SHIFT
+    shl  bx, cl
+    mov  cx, [es:bx + MT_DGROUP]   ; CX = DS modulu (0 = zostaw DS wolajacego)
+
+    ; Zapisz DS wolajacego + adres powrotu na stosie int3f (trampolina odtworzy)
+    mov  ax, SEL_DATA16
+    mov  es, ax
+    mov  bx, [es:int3f_depth]
+    cmp  bx, INT3F_MAX_DEPTH
+    jb   .depth_ok
+    int  0x06                ; przepelnienie zagniezdzen -> #UD panic
+.depth_ok:
     mov  ax, bx
-    shl  ax, 4
-    add  ax, 0x48          ; AX = DLL code selector
-    mov  cx, bx
-    shl  cx, 4
-    add  cx, 0x50          ; CX = DLL data selector
-
-    push ax                ; save DLL code sel
-    push cx                ; save DLL data sel
-
-    ; Switch ES to SEL_DATA16 for loader data (int3f_depth, int3f_stack)
-    ; BX is free (was dll_idx, no longer needed for DLL sel computation)
-    mov  bx, SEL_DATA16
-    mov  es, bx
-
-    ; Get current depth and compute offset into int3f_stack
-    mov  ax, [es:int3f_depth]
-    mov  bx, ax
     shl  bx, 1
-    mov  cx, bx
-    shl  cx, 1
-    add  bx, cx            ; BX = depth * 6 (6 bytes per stack slot)
-
-    ; Save: caller DS, caller return IP (after CALL FAR to thunk), caller CS
-    mov  [es:int3f_stack + bx + 0], ds   ; DS = caller's DGROUP (SS=DS for app)
-    mov  cx, [bp+8]                       ; [SS:BP+8] = return IP in app (after CALL FAR)
-    mov  [es:int3f_stack + bx + 2], cx
-    mov  cx, [bp+10]                      ; [SS:BP+10] = return CS in app
-    mov  [es:int3f_stack + bx + 4], cx
-
+    shl  ax, 2
+    add  bx, ax              ; BX = depth * 6
+    mov  [es:int3f_stack + bx + 0], ds
+    mov  ax, [bp+8]
+    mov  [es:int3f_stack + bx + 2], ax
+    mov  ax, [bp+10]
+    mov  [es:int3f_stack + bx + 4], ax
     inc  word [es:int3f_depth]
+    mov  ax, SEL_KCB
+    mov  es, ax
+    mov  [es:KCB_CALLER_DS], ds    ; DS wolajacego (DOS3Call, LocalAlloc...)
 
-    pop  cx                ; DLL data selector
-    pop  ax                ; DLL code selector
-
-    ; Patch IRET frame: redirect to DLL function, trampoline as return addr
-    mov  [bp+2], si        ; new IP = DLL function offset
-    mov  [bp+4], ax        ; new CS = DLL code selector
     mov  word [bp+8],  int3f_trampoline
     mov  word [bp+10], SEL_CODE16
 
-    mov  ds, cx            ; DS = DLL data selector
-
-    ; Trace: WYLACZONE - powoduje saturacje serial -> QEMU 2% predkosci
-
+    jcxz .keep_ds
+    mov  ds, cx
+.keep_ds:
     pop  es
     pop  si
     pop  cx
@@ -1124,35 +860,366 @@ int3f_handler:
     pop  bp
     iret
 
+.stub:
+    ; Log na COM1: "UNIMPL mm:oooo\n" (mm = indeks modulu, oooo = ordinal)
+    push dx
+    mov  al, 'U'
+    call ser_putc
+    mov  al, '!'
+    call ser_putc
+    mov  al, [es:si+4]
+    call ser_hex8
+    mov  al, ':'
+    call ser_putc
+    mov  ax, [es:si+1]
+    xchg al, ah
+    call ser_hex8
+    xchg al, ah
+    call ser_hex8
+    mov  al, 10
+    call ser_putc
+    pop  dx
+
+    ; Powrot do wolajacego z AX=DX=0, zdejmujac N bajtow argumentow (pascal)
+    xor  ch, ch
+    mov  cl, [es:si+3]       ; N
+    mov  si, cx
+    mov  ax, [bp+8]          ; przesun adres powrotu nad argumenty
+    mov  cx, [bp+10]         ; (najpierw odczyt obu - obszary moga sie nakladac)
+    mov  [bp+si+8], ax
+    mov  [bp+si+10], cx
+    mov  dx, si              ; DX = N (wartosc zwracana i tak zerowana nizej)
+    pop  es
+    pop  si
+    pop  cx
+    pop  bx
+    pop  ax
+    pop  bp                  ; SP -> ramka IRET (IP, CS, FLAGS)
+    add  sp, 6
+    add  sp, dx              ; SP -> przesuniety adres powrotu
+    xor  ax, ax
+    xor  dx, dx
+    sti
+    retf
+
+; ser_hex8: AL -> 2 cyfry hex na COM1. Zachowuje wszystkie rejestry.
+ser_hex8:
+    push ax
+    push ax
+    shr  al, 4
+    call .nib
+    pop  ax
+    and  al, 0x0F
+    call .nib
+    pop  ax
+    ret
+.nib:
+    add  al, '0'
+    cmp  al, '9'
+    jbe  .nib_ok
+    add  al, 7
+.nib_ok:
+    jmp  ser_putc
+
+; ser_putc: AL -> COM1. Zachowuje wszystkie rejestry poza flagami.
+ser_putc:
+    push dx
+    push ax
+    mov  dx, 0x3FD
+.sp_wait:
+    in   al, dx
+    test al, 0x20
+    jz   .sp_wait
+    pop  ax
+    mov  dx, 0x3F8
+    out  dx, al
+    pop  dx
+    ret
+
+; =====================================================================
+; Przerwania programowe z PM (INT 21h/25h/2Fh/10h... wolane przez apki).
+; Stub wektora N (6 bajtow): push ax / mov al,N / jmp softint_common.
+; softint_common buduje ramke i wola dyspozytor KERNEL (KCB_INT_CB):
+;   AX=wektor, DX:BX = SS:SP ramki
+;   ramka: BX CX DX SI DI ES DS BP AX IP CS FLAGS (rosnaco od SP)
+;   wynik AX: 0 = IRET (FLAGS z ramki), 1 = RETF z FLAGS zostawionymi na stosie
+;   (semantyka INT 25h/26h).
+; Bez dyspozytora (KERNEL jeszcze nie zainicjalizowany): INT 21h -> stary
+; int21_handler, pozostale -> CF=1.
+; =====================================================================
+softint_stubs:
+%assign vec 0
+%rep 256
+    push ax
+    mov  al, vec
+    jmp  strict near softint_common
+%assign vec vec+1
+%endrep
+
+softint_common:
+    push bp
+    mov  bp, sp
+    push ds
+    push es
+    push di
+    push si
+    push dx
+    push cx
+    push bx
+
+    cmp  al, 0x21
+    jne  .not_exit
+    cmp  byte [bp+3], 0x4C          ; AH oryginalnego AX
+    je   .to_int21
+.not_exit:
+    mov  bx, SEL_KCB
+    mov  es, bx
+    cmp  word [es:KCB_INT_CB + 2], 0
+    je   .no_cb
+    xor  ah, ah
+    mov  dx, ss
+    mov  bx, sp
+    call far [es:KCB_INT_CB]
+    cmp  ax, 1
+    je   .keep_flags
+    pop  bx
+    pop  cx
+    pop  dx
+    pop  si
+    pop  di
+    pop  es
+    pop  ds
+    pop  bp
+    pop  ax
+    iret
+
+.keep_flags:                        ; INT 25h/26h: FLAGS zostaja na stosie
+    pop  bx
+    pop  cx
+    pop  dx
+    pop  si
+    pop  di
+    pop  es
+    pop  ds
+    pop  bp
+    pop  ax
+    push bp
+    mov  bp, sp
+    push word [bp+6]                ; FLAGS z ramki -> rejestr flag (CF, IF)
+    popf
+    pop  bp
+    retf
+
+.no_cb:
+    cmp  al, 0x21
+    je   .to_int21
+    or   word [bp+8], 1             ; CF=1 w FLAGS
+    pop  bx
+    pop  cx
+    pop  dx
+    pop  si
+    pop  di
+    pop  es
+    pop  ds
+    pop  bp
+    pop  ax
+    iret
+
+.to_int21:
+    pop  bx
+    pop  cx
+    pop  dx
+    pop  si
+    pop  di
+    pop  es
+    pop  ds
+    pop  bp
+    pop  ax
+    jmp  int21_handler
+
+; IRQ zamaskowane / falszywe (IRQ7, IRQ15): nic nie rob
+iret_stub:
+    iret
+
+; =====================================================================
+; rm_int_service: wywolaj przerwanie w trybie rzeczywistym (DOS/BIOS) z PM.
+; Far call z 16-bit PM; AL = numer przerwania.
+; Rejestry przerwania w RMREGS na poczatku bufora RMBUF (segment RM rmi_buf_seg,
+; w PM selektor SEL_RMBUF):
+;   +0 AX +2 BX +4 CX +6 DX +8 SI +10 DI +12 BP +14 DS +16 ES +18 FLAGS
+;   (DS/ES to segmenty RM; 0 = segment RMBUF). Po powrocie RMREGS = wynik.
+; W RM: PIC w ukladzie BIOS (08h/70h), IRQ1 i IRQ12 zamaskowane (bajty klawiatury
+; i myszy czekaja w kontrolerze na powrot do PM). Zachowuje rejestry PM.
+; =====================================================================
+rm_int_service:
+    pushf
+    push ds
+    push es
+    push fs
+    push gs
+    pusha
+    cli
+    mov  bx, SEL_DATA16
+    mov  ds, bx
+    mov  [rmi_int_op + 1], al
+    mov  [rmi_pm_ss], ss
+    mov  [rmi_pm_sp], sp
+    mov  ss, bx
+    mov  sp, rmi_stack_top
+    mov  es, bx
+    mov  fs, bx
+    mov  gs, bx
+
+    mov  al, 0x11
+    out  0x20, al
+    out  0xA0, al
+    mov  al, 0x08
+    out  0x21, al
+    mov  al, 0x70
+    out  0xA1, al
+    mov  al, 0x04
+    out  0x21, al
+    mov  al, 0x02
+    out  0xA1, al
+    mov  al, 0x01
+    out  0x21, al
+    out  0xA1, al
+    mov  al, [saved_pic1_mask]
+    or   al, 0x02
+    out  0x21, al
+    mov  al, [saved_pic2_mask]
+    or   al, 0x10
+    out  0xA1, al
+
+    mov  eax, cr0
+    and  eax, ~1
+    mov  cr0, eax
+    jmp  far [rmi_rm_ptr]
+
+rmi_rm_entry:
+    mov  ax, cs
+    mov  ds, ax
+    mov  ss, ax
+    lidt [rm_idtr]
+    mov  es, [rmi_buf_seg]
+    mov  ax, [es:14]
+    test ax, ax
+    jnz  .ds_ok
+    mov  ax, [rmi_buf_seg]
+.ds_ok:
+    mov  [rmi_tmp_ds], ax
+    mov  ax, [es:16]
+    test ax, ax
+    jnz  .es_ok
+    mov  ax, [rmi_buf_seg]
+.es_ok:
+    push ax
+    mov  ax, [es:0]
+    mov  bx, [es:2]
+    mov  cx, [es:4]
+    mov  dx, [es:6]
+    mov  si, [es:8]
+    mov  di, [es:10]
+    mov  bp, [es:12]
+    pop  es
+    mov  ds, [cs:rmi_tmp_ds]
+    sti
+rmi_int_op:
+    int  0x21              ; numer przerwania patchowany na wejsciu
+    cli
+    pushf
+    push es
+    push ds
+    push ax
+    mov  ax, cs
+    mov  ds, ax
+    mov  es, [rmi_buf_seg]
+    pop  ax
+    mov  [es:0], ax
+    mov  [es:2], bx
+    mov  [es:4], cx
+    mov  [es:6], dx
+    mov  [es:8], si
+    mov  [es:10], di
+    mov  [es:12], bp
+    pop  ax
+    mov  [es:14], ax
+    pop  ax
+    mov  [es:16], ax
+    pop  ax
+    mov  [es:18], ax
+
+    lidt [idtr]
+    mov  eax, cr0
+    or   eax, 1
+    mov  cr0, eax
+    jmp  SEL_CODE16:rmi_pm_entry
+
+rmi_pm_entry:
+    mov  ax, SEL_DATA16
+    mov  ds, ax
+    mov  al, 0x11
+    out  0x20, al
+    out  0xA0, al
+    mov  al, PIC_BASE_M
+    out  0x21, al
+    mov  al, PIC_BASE_S
+    out  0xA1, al
+    mov  al, 0x04
+    out  0x21, al
+    mov  al, 0x02
+    out  0xA1, al
+    mov  al, 0x01
+    out  0x21, al
+    out  0xA1, al
+    mov  al, 0xF8
+    out  0x21, al
+    mov  al, 0xEF
+    out  0xA1, al
+    mov  ss, [rmi_pm_ss]
+    mov  sp, [rmi_pm_sp]
+    popa
+    pop  gs
+    pop  fs
+    pop  es
+    pop  ds
+    popf
+    retf
+
+rmi_rm_ptr      dw rmi_rm_entry, 0     ; CS = segment RM loadera (patch)
+rmi_buf_seg     dw 0
+rmi_tmp_ds      dw 0
+rmi_pm_ss       dw 0
+rmi_pm_sp       dw 0
+rmi_stack       times 2048 db 0
+rmi_stack_top:
+
 ; =====================================================================
 ; int3f_trampoline: called when a DLL function returns.
 ; Uses ES=SEL_DATA16 to access loader data (same base as CS=SEL_CODE16).
 ; tramp_ret_ip/cs/saved_ds are read back via CS prefix (CS is readable).
 ; =====================================================================
 int3f_trampoline:
+    ; Flagi z funkcji DLL (np. CF z DOS3Call) musza wrocic do wolajacego.
+    pushf
     push ax
     push bx
     push cx
     push es
 
-    ; Load loader data segment into ES
     mov  ax, SEL_DATA16
     mov  es, ax
-
     dec  word [es:int3f_depth]
-    mov  ax, [es:int3f_depth]
-
-    mov  bx, ax
+    mov  bx, [es:int3f_depth]
+    mov  ax, bx
     shl  bx, 1
-    mov  cx, bx
-    shl  cx, 1
-    add  bx, cx            ; BX = depth * 6
+    shl  ax, 2
+    add  bx, ax            ; BX = depth * 6
 
-    ; Read saved state from int3f_stack
-    mov  cx, [es:int3f_stack + bx + 0]   ; CX = caller's saved DS
-    mov  ax, [es:int3f_stack + bx + 2]   ; AX = return IP
+    mov  cx, [es:int3f_stack + bx + 0]   ; DS wolajacego
+    mov  ax, [es:int3f_stack + bx + 2]
     mov  [es:tramp_ret_ip], ax
-    mov  ax, [es:int3f_stack + bx + 4]   ; AX = return CS
+    mov  ax, [es:int3f_stack + bx + 4]
     mov  [es:tramp_ret_cs], ax
     mov  [es:tramp_saved_ds], cx
 
@@ -1161,99 +1228,16 @@ int3f_trampoline:
     pop  bx
     pop  ax
 
-    ; (debug trampoline wylaczony)
-%if 0
-    push ax
-    push cx
-    push dx
-    mov  ax, [cs:tramp_ret_cs]
-    mov  cl, ah
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .tr_n3
-    add  cl, 7
-.tr_n3:
-.tr_w3: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .tr_w3
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [cs:tramp_ret_cs]
-    mov  cl, ah
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .tr_n2
-    add  cl, 7
-.tr_n2:
-.tr_w2: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .tr_w2
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [cs:tramp_ret_cs]
-    mov  cl, al
-    shr  cl, 4
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .tr_n1
-    add  cl, 7
-.tr_n1:
-.tr_w1: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .tr_w1
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-    mov  ax, [cs:tramp_ret_cs]
-    mov  cl, al
-    and  cl, 0x0F
-    add  cl, '0'
-    cmp  cl, ':'
-    jl   .tr_n0
-    add  cl, 7
-.tr_n0:
-.tr_w0: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .tr_w0
-    mov  al, cl
-    mov  dx, 0x3F8
-    out  dx, al
-.tr_nl: mov dx, 0x3FD
-    in   al, dx
-    test al, 0x20
-    jz   .tr_nl
-    mov  al, 0x0A
-    mov  dx, 0x3F8
-    out  dx, al
-    pop  dx
-    pop  cx
-    pop  ax
-%endif
-    ; Restore caller's DS without clobbering AX (which holds DLL return value).
+    ; Odtworz DS wolajacego bez psucia AX (wartosc zwracana)
     push ax
     mov  ax, [cs:tramp_saved_ds]
     mov  ds, ax
     pop  ax
 
-    ; Gwarantuj IF=1 przed powrotem do app.
-    ; INT 3F to interrupt gate (IF=0 przy wejsciu). DLL funkcje moga zostawic
-    ; IF=0 (np. cli w PeekMessage/GetMessage). Bez sti tutaj app biegnie z IF=0
-    ; -> IRQ0/IRQ1 zablokowane -> game loop zawieszony.
+    ; IF=1 przed powrotem do apki (funkcje DLL moga zostawic IF=0)
+    popf
     sti
-
-    ; Jump to caller's return address (CS prefix: tramp_ret_ip/cs in loader seg)
-    db   0x2E, 0xFF, 0x2E
-    dw   tramp_ret_ip
+    jmp  far [cs:tramp_ret_ip]
 
 tramp_ret_ip:   dw 0
 tramp_ret_cs:   dw 0
@@ -1956,9 +1940,14 @@ saved_ss        dw 0
 saved_sp        dw 0
 saved_ds        dw 0
 local_entry_ip  dw 0
+local_entry_cs  dw 0
+local_app_ds    dw 0
 local_init_sp   dw 0xFFFE
 local_has_data  dw 0
 call_ptr        dw 0, 0
+init_ptr        dw 0, 0
+local_ndllinit  dw 0
+local_dllinit   times MAX_DLLINIT * 8 db 0
 local_lfb_phys  dd 0    ; kopia g_lfb_phys (dla pm32_entry w PM gdzie DS=SEL_DATASEG=code seg)
 local_font_phys dd 0    ; kopia g_font_phys
 local_ext_mem_kb dd 0   ; kopia g_ext_mem_kb (KB pamieci rozszerzonej)
@@ -2140,8 +2129,8 @@ gdt_vesa:                   ; 0x90 SEL_VESA (32-bit, base=g_lfb_phys, limit=1MB)
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 01001111b, 0x00
 
-gdt_kcb:                    ; 0x98 SEL_KCB (16-bit data, base=g_kcb_phys, limit=511)
-    dw 0x01FF, 0x0000
+gdt_kcb:                    ; 0x98 SEL_KCB (16-bit data, base=g_kcb_phys, limit=2047)
+    dw 0x07FF, 0x0000
     db 0x00, 10010010b, 00000000b, 0x00
 
 ; 15 okien VESA (0xA0..0x110)
@@ -2203,12 +2192,13 @@ gdt_heap:                   ; 0x528 SEL_HEAP (data, base=0x100000, limit patchow
     dw 0xFFFF, 0x0000
     db 0x00, 10010010b, 01000000b, 0x00  ; P=1 DPL=0 S=1 data-RW, D/B=1
 
-; GDT konczy sie na 0x130 + 127*8 + 8 = 0x530 bajtow -> GDT_LIMIT = 0x52F
+gdt_ext:                    ; 0x530.. rozszerzenie (patrz GDT_TOTAL_SIZE)
+    times (GDT_TOTAL_SIZE - 0x530) db 0
 
 gdtr:
     dw GDT_LIMIT
     dd 0
 
 idtr:
-    dw 64 * 8 - 1
+    dw 256 * 8 - 1
     dd 0

@@ -54,7 +54,8 @@ static void serial_puthex16(unsigned short v)
  * ============================================================ */
 #define SEL_KCB        ((unsigned short)0x98)
 #define SEL_GDT_ACCESS ((unsigned short)0x120)
-#define GDYN_MAX_SEL   ((unsigned short)0x528)  /* 0x130 + 127*8 */
+/* Max selektor dla GlobalAlloc: KCB[512] (loader, rozszerzony GDT) */
+#define GDYN_MAX_SEL   (*(unsigned short __far *)MK_FP(SEL_KCB, 512))
 #define SEL_PSP        ((unsigned short)0x38)   /* fake PSP (256 B zeroed) */
 
 /* Set ES to given selector - used by InitTask to return ES=PSP (Win16 ABI) */

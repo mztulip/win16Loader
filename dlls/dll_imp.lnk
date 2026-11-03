@@ -1,0 +1,3 @@
+# prywatne importy malych DLL z USER (ordinale 950+, patrz tools/gen_lnk.py)
+import USERICONFROMDIB    USER.950
+import USERICONSIZE       USER.951

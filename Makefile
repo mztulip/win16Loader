@@ -13,7 +13,20 @@ export WATCOM INCLUDE PATH
 
 SKIFREE_DIR = SKIFREE
 
-all: kernel.exe user.exe gdi.exe loader.exe win16_example_app/Win1App.exe boot.img
+# Domyslnie nowe GDI/USER (gdi/, user/); OLDGUI=1: stare user.exe/gdi.exe (SkiFree-only)
+ifeq ($(OLDGUI),1)
+USER_BIN = user.exe
+GDI_BIN  = gdi.exe
+else
+USER_BIN = user/USER.EXE
+GDI_BIN  = gdi/GDI.EXE
+endif
+
+# Fonty bitmapowe z Wine (GDI laduje je jako moduly .FON z katalogu systemowego)
+WINE_FONTS = /usr/share/wine/fonts
+FONTS = sserife vgasys vgafix coure smalle
+
+all: kernel.exe $(USER_BIN) $(GDI_BIN) loader.exe win16_example_app/Win1App.exe boot.img
 
 # panic screen (32-bit C, gcc)
 panic.bin: panic.c panic.ld
@@ -32,7 +45,7 @@ serial.obj: serial.c serial.h
 	$(WCC) -ml -q $< -fo=$@
 
 # PM helpers (C implementation of pm_call.asm helpers)
-pm_helpers.obj: pm_helpers.c
+pm_helpers.obj: pm_helpers.c module.h
 	$(WCC) -ml -q $< -fo=$@
 
 # Keyboard IRQ1 handler (C czesc; -ms zeby trafic do _TEXT razem z pm_call.asm)
@@ -51,8 +64,15 @@ rc_loader.obj: rc_loader.c rc_loader.h
 shell.obj: shell.c
 	$(WCC) -ml -q shell.c -fo=shell.obj
 
-loader.exe: loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj
-	$(WCL) -ml -l=dos -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj -fe=loader.exe
+module.obj: module.c module.h ne.h serial.h
+	$(WCC) -ml -q $< -fo=$@
+
+loader.exe: loader.c module.h ne.h pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj
+	$(WCL) -ml -l=dos -k32768 -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
+
+# Baza sygnatur API Win16 (z .spec Wine) dla stubow niezaimplementowanych funkcji
+WIN16API.DB: tools/gen_apidb.py tools/imports.py
+	python3 tools/gen_apidb.py > $@
 
 # -------------------------------------------------------
 # KERNEL.EXE - prawdziwe Win16 ordynaly
@@ -64,31 +84,22 @@ kernel.obj: kernel.c
 libstubs.obj: libstubs.asm
 	$(NASM) -f obj $< -o $@
 
-kernel.exe: kernel.obj libstubs.obj
-	$(WLINK) system windows_dll name $@ file kernel.obj,libstubs.obj \
-	    export FATALEXIT.1 \
-	    export GETCURRENTTASK.3 \
-	    export KERNELSTUB4.4 \
-	    export LOCALALLOC.5 \
-	    export LOCALREALLOC.6 \
-	    export LOCALFREE.7 \
-	    export GLOBALALLOC.15 \
-	    export GLOBALREALLOC.16 \
-	    export GLOBALFREE.17 \
-	    export LOCKSEGMENT.23 \
-	    export UNLOCKSEGMENT.24 \
-	    export WAITEVENT.30 \
-	    export LSTRCPY.88 \
-	    export LSTRLEN.90 \
-	    export INITTASK.91 \
-	    export KERNELSTUB113.113 \
-	    export OUTPUTDEBUGSTRING.115 \
-	    export GETPRIVATEPROFILESTRING.128 \
-	    export WRITEPRIVATEPROFILESTRING.129 \
-	    export FATALAPPEXIT.137 \
-	    export LIBMAIN.200 \
-	    export GETMODULEFILENAME.49 \
-	    option nodefaultlibs option quiet
+KOBJS = kernel/kmain.obj kernel/kmem.obj kernel/kdos.obj kernel/kmod.obj \
+        kernel/kint.obj kernel/kasm.obj kernel/rt386.obj
+
+kernel/%.obj: kernel/%.c kernel/kernel.h
+	$(WCC) -ms -zu -zl -s -q -3 $< -fo=$@
+
+kernel/%.obj: kernel/%.asm
+	$(NASM) -f obj $< -o $@
+
+# rt386 w wersji far dla modulow -mm (GDI, USER)
+kernel/rt386f.obj: kernel/rt386.asm
+	$(NASM) -f obj -DFARCODE $< -o $@
+
+kernel.exe: $(KOBJS) kernel/kernel.lnk
+	$(WLINK) system windows_dll name $@ file {$(KOBJS)} \
+	    @kernel/kernel.lnk option nodefaultlibs option quiet option map=kernel/kernel.map
 
 # -------------------------------------------------------
 # USER.EXE - prawdziwe Win16 ordynaly
@@ -152,6 +163,74 @@ user.exe: user.obj mouse_msg.obj libstubs.obj
 # GDI.EXE - prawdziwe Win16 ordynaly
 # 29,33,34,45,48,51,52,68,69,80,82,87,91,93,200
 # -------------------------------------------------------
+GOBJS = gdi/gobj.obj gdi/gdc.obj gdi/gsurf.obj gdi/grgn.obj gdi/gdraw.obj \
+        gdi/gbmp.obj gdi/gtext.obj gdi/gmisc.obj gdi/gstubs.obj kernel/rt386f.obj
+
+gdi/%.obj: gdi/%.c gdi/gdi.h
+	$(WCC) -mm -zu -zl -s -q -3 -ox $< -fo=$@
+
+gdi/%.obj: gdi/%.asm
+	$(NASM) -f obj $< -o $@
+
+gdi/gdi.lnk: $(wildcard gdi/*.c) tools/gen_lnk.py
+	python3 tools/gen_lnk.py GDI gdi/*.c > $@
+
+# Nowy USER.EXE (user/) - para z nowym GDI (prywatne eksporty Gdi*)
+UOBJS = user/umisc.obj user/uwnd.obj user/umsg.obj user/upaint.obj user/ures.obj \
+        user/umenu.obj user/udlg.obj user/uctl.obj user/uasm.obj kernel/rt386f.obj
+
+user/%.obj: user/%.c user/user.h
+	$(WCC) -mm -zu -zl -s -q -3 -ox $< -fo=$@
+
+user/%.obj: user/%.asm
+	$(NASM) -f obj $< -o $@
+
+user/user.lnk: $(wildcard user/*.c) tools/gen_lnk.py
+	python3 tools/gen_lnk.py USER user/*.c > $@
+	echo "export WSPRINTF.420=_wsprintf" >> $@
+
+user/USER.EXE: $(UOBJS) user/user.lnk user/user_imp.lnk
+	$(WLINK) system windows_dll name $@ file {$(UOBJS)} \
+	    @user/user.lnk @user/user_imp.lnk option nodefaultlibs option quiet option map=user/user.map
+
+# Male DLL systemowe (dlls/): SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG
+DLLCOMMON = dlls/w16lib.obj dlls/dllstub.obj kernel/rt386.obj
+DLLS = dlls/SHELL.DLL dlls/KEYBOARD.DRV dlls/TOOLHELP.DLL dlls/DDEML.DLL \
+       dlls/VER.DLL dlls/MMSYSTEM.DLL dlls/COMMDLG.DLL
+
+dlls/%.obj: dlls/%.c dlls/w16.h
+	$(WCC) -ms -zu -zl -s -q -3 -ox $< -fo=$@
+
+dlls/%.obj: dlls/%.asm
+	$(NASM) -f obj $< -o $@
+
+# $(1) = plik wynikowy, $(2) = zrodlo (bez .c), $(3) = nazwa modulu NE
+define DLL_RULE
+dlls/$(2).lnk: dlls/$(2).c tools/gen_lnk.py
+	python3 tools/gen_lnk.py $(3) $$< > $$@
+dlls/$(1): dlls/$(2).obj $(DLLCOMMON) dlls/$(2).lnk dlls/dll_imp.lnk
+	$(WLINK) system windows_dll name $$@ file {dlls/$(2).obj $(DLLCOMMON)} \
+	    @dlls/$(2).lnk @dlls/dll_imp.lnk option modname=$(3) \
+	    option nodefaultlibs option quiet option map=dlls/$(2).map
+endef
+$(eval $(call DLL_RULE,SHELL.DLL,shell,SHELL))
+$(eval $(call DLL_RULE,KEYBOARD.DRV,keyboard,KEYBOARD))
+$(eval $(call DLL_RULE,TOOLHELP.DLL,toolhelp,TOOLHELP))
+$(eval $(call DLL_RULE,DDEML.DLL,ddeml,DDEML))
+$(eval $(call DLL_RULE,VER.DLL,ver,VER))
+$(eval $(call DLL_RULE,MMSYSTEM.DLL,mmsystem,MMSYSTEM))
+$(eval $(call DLL_RULE,COMMDLG.DLL,commdlg,COMMDLG))
+
+dlls: $(DLLS)
+.PHONY: dlls
+
+# Aplikacje przykladowe/testowe (example_apps/README.md); testy: python3 tools/run_examples.py
+EXAMPLES = controls odmenu shell sysdll fonts
+example_apps:
+	for d in $(EXAMPLES); do $(MAKE) -s -C example_apps/$$d || exit 1; done
+.PHONY: example_apps
+
+# Stare GDI (domyslne do czasu ukonczenia nowego USER)
 gdi.obj: gdi.c
 	$(WCC) -ms -q -zl -s $< -fo=$@
 
@@ -173,6 +252,11 @@ gdi.exe: gdi.obj libstubs.obj
 	    export GETTEXTMETRICS.93 \
 	    export LIBMAIN.200 \
 	    option nodefaultlibs option quiet
+
+# Nowe GDI (w budowie, wymaga nowego USER) - cel osobny
+gdi/GDI.EXE: $(GOBJS) gdi/gdi.lnk gdi/gdi_imp.lnk
+	$(WLINK) system windows_dll name $@ file {$(GOBJS)} \
+	    @gdi/gdi.lnk @gdi/gdi_imp.lnk option nodefaultlibs option quiet option map=gdi/gdi.map
 
 # -------------------------------------------------------
 # WIN16APP.EXE - importy pod prawdziwymi Win16 numerami
@@ -303,15 +387,18 @@ win16_example_app/Win1App.exe:
 	$(MAKE) -C win16_example_app
 
 # -------------------------------------------------------
-boot.img: kernel.exe user.exe gdi.exe loader.exe win16_example_app/Win1App.exe fdauto.bat fdconfig.sys $(FDBOOT)
+boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe fdauto.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot.img
 	mcopy -i boot.img -o fdconfig.sys               ::fdconfig.sys
 	mdel  -i boot.img ::fdauto.bat 2>/dev/null || true
 	mcopy -i boot.img fdauto.bat                    ::fdauto.bat
 	mcopy -i boot.img kernel.exe                    ::kernel.exe
-	mcopy -i boot.img user.exe                      ::user.exe
-	mcopy -i boot.img gdi.exe                       ::gdi.exe
+	mcopy -i boot.img $(USER_BIN)                   ::user.exe
+	mcopy -i boot.img $(GDI_BIN)                    ::gdi.exe
 	mcopy -i boot.img loader.exe                    ::loader.exe
+	mcopy -i boot.img WIN16API.DB                   ::win16api.db
+	for f in $(DLLS); do mcopy -i boot.img $$f ::$$(basename $$f); done
+	for f in $(FONTS); do mcopy -i boot.img $(WINE_FONTS)/$$f.fon ::$$(echo $$f | tr a-z A-Z).FON; done
 	mcopy -i boot.img win16_example_app/Win1App.exe ::win1app.exe
 	mcopy -i boot.img $(SKIFREE_DIR)/SKI.EXE        ::ski.exe
 	@echo "[OK] boot.img gotowy"
@@ -426,6 +513,36 @@ run-test-rc: boot_test_rc.img
 	    -serial stdio \
 	    -display none \
 	    -d cpu_reset,guest_errors -D qemu.log 2>/dev/null
+
+# -------------------------------------------------------
+# Calmira: dysk twardy C: (64MB FAT16) z C:\CALMIRA, start z dyskietki boot.img
+# Loader szuka systemowych DLL (KERNEL/USER/GDI) w swoim katalogu (A:\).
+# -------------------------------------------------------
+CALMIRA_DIR = ../win31_apps/cal3101p
+HDD_MB      = 64
+
+calmira.img: $(wildcard $(CALMIRA_DIR)/*) windir/WIN.INI windir/SYSTEM.INI
+	rm -f $@
+	truncate -s $(HDD_MB)M $@
+	echo 'start=2048, type=6, bootable' | sfdisk -q $@
+	mkfs.fat -F 16 -n CALMIRA --offset 2048 $@ $$(( ($(HDD_MB)*1024*1024 - 2048*512) / 1024 )) >/dev/null
+	mmd   -i $@@@1M ::CALMIRA
+	mcopy -i $@@@1M $(CALMIRA_DIR)/* ::CALMIRA/
+	mmd   -i $@@@1M ::WINDOWS
+	mcopy -i $@@@1M windir/WIN.INI windir/SYSTEM.INI ::WINDOWS/
+	@echo "[OK] calmira.img gotowy"
+
+boot_calmira.img: boot.img
+	cp boot.img $@
+	printf '@echo off\r\nC:\r\ncd \\CALMIRA\r\nA:\\LOADER.EXE CALMIRA.EXE\r\n' | mcopy -o -i $@ - ::fdauto.bat
+	@echo "[OK] boot_calmira.img gotowy"
+
+run-calmira: boot_calmira.img calmira.img
+	qemu-system-i386 -drive file=boot_calmira.img,if=floppy,format=raw \
+	    -drive file=calmira.img,if=ide,format=raw -boot a -m 16 \
+	    -no-reboot -no-shutdown \
+	    -serial stdio \
+	    -d cpu_reset,guest_errors -D qemu.log
 
 clean:
 	rm -f kernel.exe kernel.obj

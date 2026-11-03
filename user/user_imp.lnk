@@ -1,0 +1,10 @@
+# prywatne importy USER.EXE z GDI (ordinale 900+, patrz tools/gen_lnk.py)
+import GDIMOVECURSOR      GDI.900
+import GDISHOWCURSOR      GDI.901
+import GDISETCURSOR       GDI.902
+import GDICURSORDEFAULT   GDI.903
+import GDICREATEWINDOWDC  GDI.910
+import GDISETDCVIS        GDI.911
+import GDIINTERSECTVIS    GDI.912
+import GDIDCWINDOW        GDI.913
+import GDIGETRGNRECTS     GDI.914

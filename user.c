@@ -2243,9 +2243,11 @@ int __far __pascal MessageBox(HWND hwnd, const char __far *text,
     return 1;   /* IDOK */
 }
 
-int __far __pascal InitApp(unsigned hInstance, unsigned hPrevInstance)
+/* InitApp(HINSTANCE) - 1 argument (startup Watcoma pushuje dwa razy DI:
+ * drugie slowo zostaje na stosie jako hInstance dla GetModuleFileName) */
+int __far __pascal InitApp(unsigned hInstance)
 {
-    (void)hInstance; (void)hPrevInstance;
+    (void)hInstance;
     return 1;
 }
 

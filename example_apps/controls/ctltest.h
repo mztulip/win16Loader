@@ -1,0 +1,15 @@
+#define IDI_APP        1
+#define IDD_MAIN       100
+#define IDC_CHECK      101
+#define IDC_RADIO1     102
+#define IDC_RADIO2     103
+#define IDC_3STATE     104
+#define IDC_EDIT       105
+#define IDC_MULTI      106
+#define IDC_NUMBER     107
+#define IDC_LIST       108
+#define IDC_COMBO      109
+#define IDC_COMBOEDIT  110
+#define IDC_SCROLL     111
+#define IDC_APPICON       112
+#define IDC_STATUS     113
