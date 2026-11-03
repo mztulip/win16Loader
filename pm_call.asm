@@ -64,6 +64,15 @@ GDT_LIMIT       equ GDT_TOTAL_SIZE - 1
 
 INT3F_MAX_DEPTH equ 8
 
+; DEBUG_STACK=1: przy wyjatku zrzuc rejestry, stos i lancuch ramek BP
+; (serial + ekran paniki). Koszt tylko w chwili wyjatku.
+; Wylaczenie: make DEBUG_STACK=0
+%ifndef DEBUG_STACK
+%define DEBUG_STACK 1
+%endif
+STACK_DUMP_WORDS equ 256
+FRAME_DUMP_MAX   equ 8
+
 VESA_COLS       equ 640
 VESA_ROWS       equ 480
 VESA_BPP        equ 3
@@ -1473,27 +1482,115 @@ exc_common:
     out  dx, al
     pop  dx
     pop  ax
-    mov  ax, SEL_DATA16      ; set ES = writable alias of code seg
-    mov  es, ax              ;   (3+2=5 bytes)
-    nop                      ; padding (6th byte)
+    push es                  ; oryginalny ES (dla zrzutu rejestrow)
     push ax
     push bx
     push cx
     push dx
-    ; Stos: [SP+0]=DX [SP+2]=CX [SP+4]=BX [SP+6]=AX
-    ;       [SP+8]=exc [SP+10]=err [SP+12]=faultIP [SP+14]=faultCS [SP+16]=FLAGS
+    mov  ax, SEL_DATA16      ; set ES = writable alias of code seg
+    mov  es, ax
+    ; Stos: [SP+0]=DX [SP+2]=CX [SP+4]=BX [SP+6]=AX [SP+8]=ES
+    ;       [SP+10]=exc [SP+12]=err [SP+14]=faultIP [SP+16]=faultCS [SP+18]=FLAGS
     mov  bx, sp
-    mov  ax, [ss:bx+8]
-    mov  [es:local_fault_exc], ax
     mov  ax, [ss:bx+10]
-    mov  [es:local_fault_err], ax
+    mov  [es:local_fault_exc], ax
     mov  ax, [ss:bx+12]
-    mov  [es:local_fault_ip], ax
+    mov  [es:local_fault_err], ax
     mov  ax, [ss:bx+14]
+    mov  [es:local_fault_ip], ax
+    mov  ax, [ss:bx+16]
     mov  [es:local_fault_cs], ax
     mov  ax, bx
-    add  ax, 18              ; SP przy wyjatku (przed pushami CPU)
+    add  ax, 20              ; SP przy wyjatku (przed pushami CPU)
     mov  [es:local_fault_sp], ax
+
+%if DEBUG_STACK
+    ; --- Zrzut rejestrow + stosu + lancucha BP do exc_dbg (czyta panic.c) ---
+    ; SI, DI, BP, DS, SS sa nietkniete od chwili wyjatku.
+    mov  ax, [ss:bx+6]
+    mov  [es:dbg_ax], ax
+    mov  ax, [ss:bx+4]
+    mov  [es:dbg_bx], ax
+    mov  ax, [ss:bx+2]
+    mov  [es:dbg_cx], ax
+    mov  ax, [ss:bx+0]
+    mov  [es:dbg_dx], ax
+    mov  [es:dbg_si], si
+    mov  [es:dbg_di], di
+    mov  [es:dbg_bp], bp
+    mov  [es:dbg_ds], ds
+    mov  ax, [ss:bx+8]
+    mov  [es:dbg_es], ax
+    mov  [es:dbg_ss], ss
+    mov  ax, [ss:bx+18]
+    mov  [es:dbg_flags], ax
+    ; Limit SS (lsl) - czytamy stos tylko w jego granicach, inaczej #GP w handlerze
+    mov  ax, ss
+    lsl  cx, ax
+    jz   .dbg_lim_ok
+    xor  cx, cx
+.dbg_lim_ok:
+    mov  [es:dbg_sslim], cx
+    xor  dx, dx
+    mov  [es:dbg_nstack], dx
+    cmp  word [es:local_fault_exc], 0x0C   ; #SS: stos niewiarygodny
+    je   .dbg_frames_done
+    ; Surowy zrzut: STACK_DUMP_WORDS slow od SS:faultSP w gore
+    mov  si, [es:local_fault_sp]
+    mov  di, dbg_stack
+.dbg_sl:
+    cmp  dx, STACK_DUMP_WORDS
+    jae  .dbg_sd
+    mov  ax, si
+    inc  ax
+    jz   .dbg_sd
+    cmp  ax, cx
+    ja   .dbg_sd
+    mov  ax, [ss:si]
+    mov  [es:di], ax
+    add  di, 2
+    inc  dx
+    add  si, 2
+    jnc  .dbg_sl
+.dbg_sd:
+    mov  [es:dbg_nstack], dx
+    ; Lancuch ramek BP. Konwencja Win16: far frame = "inc bp; push bp; mov bp,sp"
+    ; => zapisany BP nieparzysty oznacza ramke far (ret CS:IP), parzysty - near (ret IP).
+    mov  si, [es:dbg_bp]
+    mov  di, dbg_frames
+    xor  dx, dx
+.dbg_fl:
+    cmp  dx, FRAME_DUMP_MAX
+    jae  .dbg_frames_done
+    cmp  si, [es:local_fault_sp]
+    jb   .dbg_frames_done
+    test si, 1
+    jnz  .dbg_frames_done
+    mov  ax, si
+    add  ax, 5
+    jc   .dbg_frames_done
+    cmp  ax, cx
+    ja   .dbg_frames_done
+    mov  ax, [ss:si]         ; zapisany BP wywolujacego
+    mov  [es:di], si
+    mov  bx, [ss:si+2]
+    mov  [es:di+2], bx       ; ret IP
+    xor  bx, bx
+    test ax, 1
+    jz   .dbg_near
+    mov  bx, [ss:si+4]       ; ret CS (far frame)
+    dec  ax
+.dbg_near:
+    mov  [es:di+4], bx
+    add  di, 6
+    inc  dx
+    cmp  ax, si              ; ramki musza rosnac w gore stosu
+    jbe  .dbg_frames_done
+    mov  si, ax
+    jmp  .dbg_fl
+.dbg_frames_done:
+    mov  [es:dbg_nframes], dx
+%endif
 
     ; Serial: "EX" + exc(4hex) + ":" + cs(4hex) + ":" + ip(4hex) + "\n"
     ; AX, BX, CX, DX juz na stosie (push na poczatku exc_common) - mozemy uzywac
@@ -1556,7 +1653,14 @@ panic_entry_32:
     mov  ss, ax
     mov  esp, 0x0009F000     ; bezpieczny flat stos ponizej 640KB
 
-    ; Wrzuc argumenty cdecl (prawo do lewa): sp, err, ip, cs, exc, font_a, lfb
+    ; Wrzuc argumenty cdecl (prawo do lewa): dbg, sp, err, ip, cs, exc, font_a, lfb
+%if DEBUG_STACK
+    mov  eax, [local_cs_phys]
+    add  eax, exc_dbg        ; fizyczny adres rekordu zrzutu
+%else
+    xor  eax, eax
+%endif
+    push eax
     movzx eax, word [local_fault_sp]
     push eax
     movzx eax, word [local_fault_err]
@@ -1878,6 +1982,27 @@ local_fault_err dw 0    ; kod bledu
 local_fault_ip  dw 0    ; IP w chwili wyjatku
 local_fault_cs  dw 0    ; CS w chwili wyjatku
 local_fault_sp  dw 0    ; SP w chwili wyjatku (po CPU push + stubpush)
+
+%if DEBUG_STACK
+; Rekord zrzutu wyjatku - uklad musi zgadzac sie z ExcDbg w panic.c
+exc_dbg:
+dbg_ax          dw 0
+dbg_bx          dw 0
+dbg_cx          dw 0
+dbg_dx          dw 0
+dbg_si          dw 0
+dbg_di          dw 0
+dbg_bp          dw 0
+dbg_ds          dw 0
+dbg_es          dw 0
+dbg_ss          dw 0
+dbg_flags       dw 0
+dbg_sslim       dw 0    ; limit SS z lsl (0 = nieznany)
+dbg_nstack      dw 0    ; ile slow w dbg_stack
+dbg_nframes     dw 0    ; ile wpisow w dbg_frames
+dbg_stack       times STACK_DUMP_WORDS dw 0
+dbg_frames      times FRAME_DUMP_MAX * 3 dw 0   ; {bp, ret_ip, ret_cs(0=near)}
+%endif
 
 ; =====================================================================
 ; Pomocnicze rutyny seryjne (real mode) dla debugowania

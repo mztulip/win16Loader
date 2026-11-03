@@ -161,6 +161,25 @@ Eliminuje nawarstwianie napisów (trail effect).
 Case2B (atlas→DC6) kopiuje tylko opaque piksele, pomija transparent → stale alpha=1 zostaje
 → Case C zapisuje je na ekran → flag/NPC widoczny przez przezroczyste obszary skoczka.
 
-**Fix (gdi.c, Case2B)**: dla transparent src (`sp[3]==0`) jawnie zeruj `dp[3]=0` w dst.
-Dzięki temu Case C poprawnie pomija te piksele. Prawdziwa przezroczystość (gondola) działa
-dalej — przezroczyste obszary pokazują to co było na ekranie (tło z FillRect = biel).
+(Opisany wcześniej fix "zeruj `dp[3]` dla transparent src" nigdy nie trafił do kodu.)
+
+### Ślad narciarza przy zmianie pozy (naprawione, gdi.c Case2B)
+
+Gdy nowa poza narciarza ma ten sam rozmiar co stara, SKI.EXE **nie** robi `PatBlt(DC6)` —
+tylko `BitBlt(DC6 ← DC2, SRCCOPY)` + Case C. W prawdziwym GDI białe tło sprite'a zamazuje
+starą pozę. U nas transparent src był pomijany → w DC6 zostawało alpha=0 → Case C nie
+rysował → stara poza zostawała na ekranie.
+
+**Fix**: w Case2B dla transparent src (`sp[3]==0`): jeśli dst ma alpha=0 (nic tu nie
+narysowano w tej kompozycji) → wpisz biel z alpha=1 (jak SRCCOPY); jeśli alpha=1
+(PatBlt / inny sprite) → nie zmieniaj (nakładanie obiektów działa jak dotąd).
+Atlas (DC2/DC4) budowany jest przez Case 1 (src = prawdziwy sprite), nie Case2B — nietknięty.
+
+## Debug wyjątków (DEBUG_STACK)
+
+`pm_call.asm` przy #DE/#UD/#NP/#SS/#GP/#PF zrzuca do `exc_dbg` rejestry (AX..BP, DS, ES,
+SS, FLAGS, limit SS), 256 słów stosu od SP w chwili błędu (przycięte do limitu SS, pomijane
+przy #SS) i łańcuch ramek BP (nieparzysty zapisany BP = far frame Win16 → ret CS:IP).
+`panic.c` wypisuje całość na serial, na ekran paniki pierwsze 48 słów.
+Domyślnie włączone; `make clean && make DEBUG_STACK=0` wyłącza.
+Trace GDI (BB/PB/SO na serial): `#define TC_MAX` w gdi.c (0 = wyłączony).

@@ -9,7 +9,31 @@
 #define FONT_W   8
 #define FONT_H   16
 
+/* Rekord zrzutu wyjatku (DEBUG_STACK) - uklad = exc_dbg w pm_call.asm */
+#define STACK_DUMP_WORDS 256   /* serial: wszystkie; ekran: SCREEN_STACK_WORDS */
+#define SCREEN_STACK_WORDS 48
+#define FRAME_DUMP_MAX   8
+typedef struct __attribute__((packed)) {
+    unsigned short ax, bx, cx, dx, si, di, bp, ds, es, ss, flags;
+    unsigned short sslim;
+    unsigned short nstack;
+    unsigned short nframes;
+    unsigned short stack[STACK_DUMP_WORDS];
+    unsigned short frames[FRAME_DUMP_MAX][3];   /* bp, ret_ip, ret_cs (0=near) */
+} ExcDbg;
+
+/* Linia tekstu wysylana jednoczesnie na serial i na ekran paniki */
+typedef struct {
+    unsigned char *fb;
+    const unsigned char *font;
+    int row;
+    char buf[81];
+    int pos;
+} Line;
+
 /* Forward declarations statycznych helperow */
+static void dump_dbg(unsigned char *fb, const unsigned char *font,
+                     int *row, const ExcDbg *d, unsigned sp);
 static void serial_char(char c);
 static void serial_strn(const char *s, int n);
 static void hex4_buf(unsigned v, char *out);
@@ -32,10 +56,12 @@ static void draw_str(unsigned char *fb, const unsigned char *font,
  *   ip     - IP w chwili bledu
  *   err    - kod bledu (0 jesli brak)
  *   sp     - SP w chwili bledu
+ *   dbg    - fizyczny adres ExcDbg (0 gdy DEBUG_STACK=0)
  * DS = SEL_DATA32 (flat, base=0) gdy wywolywane z panic_entry_32.
  * ================================================================ */
 void panic_screen(unsigned lfb, unsigned font_a, unsigned exc,
-                  unsigned cs, unsigned ip, unsigned err, unsigned sp)
+                  unsigned cs, unsigned ip, unsigned err, unsigned sp,
+                  unsigned dbg)
 {
     unsigned char *fb   = (unsigned char *)lfb;
     const unsigned char *font = (const unsigned char *)font_a;
@@ -63,15 +89,19 @@ void panic_screen(unsigned lfb, unsigned font_a, unsigned exc,
         serial_strn(s6, sizeof(s6)-1);
     }
 
-    if (!lfb) goto hlt;
+    if (!lfb || !font_a) {
+        /* Bez ekranu/fontu: zrzut tylko na serial */
+        if (lfb) fill_rect(fb, 0, 0, VESA_W, VESA_H, 0xFF, 0xA0, 0x00);
+        row = 0;
+        if (dbg) dump_dbg(0, 0, &row, (const ExcDbg *)dbg, sp);
+        goto hlt;
+    }
 
     /* Pomaranczowe tlo: R=0xFF G=0xA0 B=0x00 (zapisane jako BGR: 0x00 0xA0 0xFF) */
     fill_rect(fb, 0, 0, VESA_W, VESA_H, 0xFF, 0xA0, 0x00);
 
     /* Ciemnoczerwony pasek tytulowy */
     fill_rect(fb, 0, 0, VESA_W, 34, 0xBB, 0x00, 0x00);
-
-    if (!font_a) goto hlt;
 
     /* Tytul */
     {
@@ -165,7 +195,12 @@ void panic_screen(unsigned lfb, unsigned font_a, unsigned exc,
         draw_str(fb, font, 10, row, lbl,       0xFF, 0xFF, 0xFF);
         draw_str(fb, font, 10 + (int)(sizeof(lbl)-1)*FONT_W, row, tmp, 0xFF, 0xFF, 0x00);
     }
-    row += 30;
+    row += 24;
+
+    if (dbg) {
+        dump_dbg(fb, font, &row, (const ExcDbg *)dbg, sp);
+        row += 8;
+    }
 
     {
         char msg[] = "System halted. Reset to restart.";
@@ -208,6 +243,93 @@ static void hex4_buf(unsigned v, char *out) {
         out[i] = (char)(n < 10 ? '0' + n : 'A' + n - 10);
     }
     out[4] = 0;
+}
+
+/* ---- Line: bufor linii -> serial + (opcjonalnie) ekran ---- */
+static void ln_str(Line *l, const char *s) {
+    while (*s && l->pos < 80) l->buf[l->pos++] = *s++;
+}
+static void ln_hex(Line *l, unsigned v) {
+    char t[5];
+    hex4_buf(v, t);
+    ln_str(l, t);
+}
+static void ln_flush(Line *l) {
+    char crlf[] = "\r\n";
+    l->buf[l->pos] = 0;
+    serial_strn(l->buf, l->pos);
+    serial_strn(crlf, 2);
+    if (l->fb && l->row + FONT_H <= VESA_H) {
+        draw_str(l->fb, l->font, 10, l->row, l->buf, 0xFF, 0xFF, 0xFF);
+        l->row += FONT_H;
+    }
+    l->pos = 0;
+}
+
+/* Zrzut rejestrow, surowego stosu i lancucha ramek BP (DEBUG_STACK) */
+static void dump_dbg(unsigned char *fb, const unsigned char *font,
+                     int *row, const ExcDbg *d, unsigned sp)
+{
+    Line l;
+    unsigned i;
+    l.fb = fb; l.font = font; l.row = *row; l.pos = 0;
+
+    {
+        char ax[] = "AX=", bx[] = " BX=", cx[] = " CX=", dx[] = " DX=";
+        char si[] = " SI=", di[] = " DI=", bp[] = " BP=";
+        ln_str(&l, ax); ln_hex(&l, d->ax);
+        ln_str(&l, bx); ln_hex(&l, d->bx);
+        ln_str(&l, cx); ln_hex(&l, d->cx);
+        ln_str(&l, dx); ln_hex(&l, d->dx);
+        ln_str(&l, si); ln_hex(&l, d->si);
+        ln_str(&l, di); ln_hex(&l, d->di);
+        ln_str(&l, bp); ln_hex(&l, d->bp);
+        ln_flush(&l);
+    }
+    {
+        char ds[] = "DS=", es[] = " ES=", ss[] = " SS=", fl[] = " FL=";
+        char lim[] = " SSLIM=";
+        ln_str(&l, ds); ln_hex(&l, d->ds);
+        ln_str(&l, es); ln_hex(&l, d->es);
+        ln_str(&l, ss); ln_hex(&l, d->ss);
+        ln_str(&l, fl); ln_hex(&l, d->flags);
+        ln_str(&l, lim); ln_hex(&l, d->sslim);
+        ln_flush(&l);
+    }
+    {
+        char hdr[] = "Stack SS:SP=", col[] = ":", words[] = " words:";
+        char sep[] = ": ", spc[] = " ";
+        ln_str(&l, hdr); ln_hex(&l, d->ss); ln_str(&l, col); ln_hex(&l, sp);
+        ln_str(&l, spc); ln_hex(&l, d->nstack); ln_str(&l, words);
+        ln_flush(&l);
+        for (i = 0; i < d->nstack && i < STACK_DUMP_WORDS; i++) {
+            if ((i & 7) == 0) {
+                /* Ekran miesci tylko poczatek stosu; reszta tylko na serial */
+                l.fb = (i < SCREEN_STACK_WORDS) ? fb : 0;
+                ln_hex(&l, sp + i * 2); ln_str(&l, sep);
+            }
+            ln_hex(&l, d->stack[i]);
+            ln_str(&l, spc);
+            if ((i & 7) == 7) ln_flush(&l);
+        }
+        if (l.pos) ln_flush(&l);
+        l.fb = fb;
+    }
+    {
+        char hdr[] = "BP chain (bp ret_cs:ip):", bp[] = "BP=", spc[] = " ";
+        char nr[] = "near", col[] = ":", gap[] = "  ";
+        ln_str(&l, hdr);
+        ln_flush(&l);
+        for (i = 0; i < d->nframes && i < FRAME_DUMP_MAX; i++) {
+            ln_str(&l, bp); ln_hex(&l, d->frames[i][0]); ln_str(&l, spc);
+            if (d->frames[i][2]) ln_hex(&l, d->frames[i][2]); else ln_str(&l, nr);
+            ln_str(&l, col); ln_hex(&l, d->frames[i][1]);
+            ln_str(&l, gap);
+            if ((i & 3) == 3) ln_flush(&l);
+        }
+        if (l.pos) ln_flush(&l);
+    }
+    *row = l.row;
 }
 
 static void fill_rect(unsigned char *fb, int x, int y, int w, int h,

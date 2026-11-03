@@ -22,8 +22,10 @@ panic.bin: panic.c panic.ld
 	    -nostdlib -Tpanic.ld panic.c -o panic.bin
 
 # PM glue
+# DEBUG_STACK=1: zrzut rejestrow/stosu/ramek BP przy wyjatku (make DEBUG_STACK=0 wylacza)
+DEBUG_STACK ?= 1
 pm_call.obj: pm_call.asm panic.bin
-	$(NASM) -f obj pm_call.asm -o pm_call.obj
+	$(NASM) -f obj -DDEBUG_STACK=$(DEBUG_STACK) pm_call.asm -o pm_call.obj
 
 # Serial
 serial.obj: serial.c serial.h

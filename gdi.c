@@ -715,8 +715,21 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                                               + (unsigned long)dx2 * 4u;
                         if (sp[3]) {
                             draw_dc_pixel(dst_buf, dst_off, sp[2], sp[1], sp[0]);
+                        } else {
+                            /* Przezroczysty src (biale tlo sprite'a).
+                             * dst alpha=1 (PatBlt / inny sprite w tej kompozycji):
+                             * nie zmieniaj dst — nakladanie obiektow.
+                             * dst alpha=0 (nic tu nie narysowano): zachowaj sie
+                             * jak prawdziwe SRCCOPY i wpisz biel. SKI.EXE przy
+                             * zmianie pozy narciarza o tym samym rozmiarze nie
+                             * robi PatBlt(DC6) — liczy na to, ze biale tlo nowej
+                             * pozy zamaze stara na ekranie (inaczej zostaje slad). */
+                            unsigned char __far *dp = (unsigned char __far *)MK_FP(
+                                    dst_buf + (unsigned)(dst_off >> 16) * 8u,
+                                    (unsigned)(dst_off & 0xFFFFUL));
+                            if (!dp[3])
+                                draw_dc_pixel(dst_buf, dst_off, 0xFF, 0xFF, 0xFF);
                         }
-                        /* przezroczysty src: nie zmieniaj dst */
                     }
                 }
             }
