@@ -329,8 +329,8 @@ HMENU API GetSystemMenu(HWND h, BOOL revert)
     }
     EnableMenuItem(g_sysmenu, SC_RESTORE, (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) ? 0 : MF_GRAYED);
     EnableMenuItem(g_sysmenu, SC_MAXIMIZE, ((w->style & WS_MAXIMIZEBOX) && !(w->flags & WF_MAXIMIZED)) ? 0 : MF_GRAYED);
-    EnableMenuItem(g_sysmenu, SC_MINIMIZE, (w->style & WS_MINIMIZEBOX) ? 0 : MF_GRAYED);
-    EnableMenuItem(g_sysmenu, SC_SIZE, (w->style & WS_THICKFRAME) ? 0 : MF_GRAYED);
+    EnableMenuItem(g_sysmenu, SC_MINIMIZE, ((w->style & WS_MINIMIZEBOX) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
+    EnableMenuItem(g_sysmenu, SC_SIZE, ((w->style & WS_THICKFRAME) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
     EnableMenuItem(g_sysmenu, SC_MOVE, MF_GRAYED);
     return g_sysmenu;
 }
@@ -547,6 +547,15 @@ static void popup_select(HWND pw, int sel)
 
 /* Petla menu rozwijanego; wynik: ID wybranej pozycji, 0 = anulowano,
  * -1/-2 = zamkniete strzalka w lewo/prawo (dla nawigacji po pasku) */
+/* Wysokosc rozwijanego menu (menu systemowe ikony otwiera sie nad nia) */
+int menu_popup_height(HMENU hm)
+{
+    int cw, ch;
+    if (!mptr(hm)) return 0;
+    popup_size(hm, (int __far *)&cw, (int __far *)&ch);
+    return ch;
+}
+
 int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
 {
     MENU __far *m = mptr(hm);

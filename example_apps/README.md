@@ -16,6 +16,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `shell`    | SHELLTST.EXE | SHELL.DLL: rejestr 3.1 (RegCreateKey/SetValue/QueryValue/EnumKey/DeleteKey), ExtractIcon z NE i .ICO, Drag* |
 | `sysdll`   | SYSDLL.EXE   | KEYBOARD.DRV (AnsiToOem/OemToAnsi, VkKeyScan, MapVirtualKey), atomy globalne USER, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG |
 | `fonts`    | FONTTEST.EXE | Fonty .FON (EnumFonts, CreateFont, GetTextFace/Metrics/Extent, pogrubienie, tło tekstu) |
+| `iconic`   | ICONTEST.EXE | Okna zminimalizowane: ikony na dole ekranu, WM_PAINTICON/WM_ICONERASEBKGND, ArrangeIconicWindows, WM_QUERYOPEN, powrót do maksymalizacji, ptMinPosition, WS_MINIMIZE, tytuł ikony, dwuklik przywraca |
 
 ## Budowanie i uruchamianie
 

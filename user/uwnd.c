@@ -176,7 +176,7 @@ void wnd_calc_client(HWND h)
     int f;
     if (!w) return;
     w->cr = w->wr;
-    if (h == HDESKTOP) return;
+    if (h == HDESKTOP || (w->flags & WF_MINIMIZED)) return;    /* ikona: caly prostokat = klient */
     f = frame_w(w);
     w->cr.left += f; w->cr.right -= f; w->cr.top += f; w->cr.bottom -= f;
     if ((w->style & WS_CAPTION) == WS_CAPTION) w->cr.top += 19 - (f == 1 ? 0 : 1) + (f > 1 ? 1 : 0);
@@ -246,6 +246,7 @@ void wnd_vis_rects(HWND h, BOOL client, LPRECT out, int __far *pn, int max)
     out[0] = client ? w->cr : w->wr;
     /* przytnij do obszarow klienta przodkow */
     for (cur = w->parent; (a = WP(cur)) != 0; cur = a->parent) {
+        if (a->flags & WF_MINIMIZED) return;                    /* potomkowie ikony sa niewidoczni */
         if (!rect_and(&out[0], &out[0], &a->cr)) return;
         if (cur == HDESKTOP) break;
     }
@@ -257,8 +258,8 @@ void wnd_vis_rects(HWND h, BOOL client, LPRECT out, int __far *pn, int max)
         for (s = WP(cw->parent)->child; s && s != cur; s = WP(s)->next)
             if (WP(s)->style & WS_VISIBLE) n = sub_rect(out, n, max, &WP(s)->wr);
     }
-    /* odejmij potomkow (WS_CLIPCHILDREN; pulpit zawsze) */
-    if (client && ((w->style & WS_CLIPCHILDREN) || h == HDESKTOP))
+    /* odejmij potomkow (WS_CLIPCHILDREN; pulpit zawsze; ikona nie ma widocznych potomkow) */
+    if (client && ((w->style & WS_CLIPCHILDREN) || h == HDESKTOP) && !(w->flags & WF_MINIMIZED))
         for (s = w->child; s; s = WP(s)->next)
             if (WP(s)->style & WS_VISIBLE) n = sub_rect(out, n, max, &WP(s)->wr);
     *pn = n;
@@ -327,6 +328,7 @@ typedef struct {
 } CREATESTRUCT;
 
 static int g_cascade;
+static void iconize(HWND h, WORD swp);
 
 HWND API CreateWindowEx(DWORD ex, LPCSTR cname, LPCSTR title, DWORD style, int x, int y,
                         int cx, int cy, HWND parent, HMENU menu, WORD hinst, LPVOID param)
@@ -409,12 +411,15 @@ HWND API CreateWindowEx(DWORD ex, LPCSTR cname, LPCSTR title, DWORD style, int x
     w->flags |= WF_CREATED | WF_NEEDSIZE;    /* WM_SIZE/WM_MOVE przy pierwszym ShowWindow (jak Windows; Wine: WIN_NEED_SIZE) */
     if ((style & WS_CHILD) && !(ex & 0x0004))           /* WS_EX_NOPARENTNOTIFY */
         send_msg(parent, WM_PARENTNOTIFY, WM_CREATE, MAKELONG(h, w->id));
-    if (!(style & WS_CHILD)) {
+    if (!(style & WS_CHILD) && !w->owner) {
         extern void shell_hook(int code, WORD w);
         shell_hook(1, h);                               /* HSHELL_WINDOWCREATED */
     }
     if (style & WS_MAXIMIZE) ShowWindow(h, 3);
-    else if (style & WS_MINIMIZE) ShowWindow(h, 6);
+    else if (style & WS_MINIMIZE) {                     /* od razu jako ikona; widoczna gdy WS_VISIBLE */
+        iconize(h, 0);
+        if (WP(h) && (style & WS_VISIBLE)) ShowWindow(h, 5);
+    }
     else if (style & WS_VISIBLE) ShowWindow(h, 5);
     return WP(h) ? h : 0;
 }
@@ -471,9 +476,12 @@ BOOL API DestroyWindow(HWND h)
         if (o->used && o->owner == h && !(o->flags & WF_DESTROYING)) DestroyWindow(wnd_handle(i));
     }
     if (!(w = WP(h))) return TRUE;
+    if (w->title && WP(w->title) && (WP(w->title)->flags & WF_ICONTITLE) && WP(w->title)->title == h)
+        DestroyWindow(w->title);                         /* tytul ikony okna potomnego (nieposiadany) */
+    if (!(w = WP(h))) return TRUE;
     vis = wnd_visible(h);
     r = w->wr;
-    if (!(w->style & WS_CHILD)) {
+    if (!(w->style & WS_CHILD) && !w->owner) {
         extern void shell_hook(int code, WORD w);
         shell_hook(2, h);                               /* HSHELL_WINDOWDESTROYED */
     }
@@ -552,6 +560,12 @@ BOOL API SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, WORD fl)
     }
     if (moved || sized || (fl & (SWP_SHOWWINDOW | SWP_HIDEWINDOW | SWP_FRAMECHANGED)) || !(fl & SWP_NOZORDER))
         dce_update();
+    if (moved && (w->flags & WF_MINIMIZED)) {             /* zapamietaj miejsce ikony */
+        w->iconpos.x = w->wr.left - p->cr.left; w->iconpos.y = w->wr.top - p->cr.top;
+        w->flags |= WF_ICONPOS;
+    }
+    if ((w->flags & WF_MINIMIZED) || w->title) icon_title_sync(h);
+    if (!(w = WP(h))) return FALSE;
     wp.x = w->wr.left - ((w->style & WS_CHILD) ? p->cr.left : 0);
     wp.y = w->wr.top - ((w->style & WS_CHILD) ? p->cr.top : 0);
     wp.cx = w->wr.right - w->wr.left; wp.cy = w->wr.bottom - w->wr.top;
@@ -588,6 +602,20 @@ BOOL API BringWindowToTop(HWND h) { return SetWindowPos(h, 0, 0, 0, 0, 0, SWP_NO
 
 static BOOL show_window(HWND h, int cmd);
 
+/* Okno -> ikona: stan, prostokat ikony (miejsce z icon_place), dodatkowe flagi SWP */
+static void iconize(HWND h, WORD swp)
+{
+    WND __far *w = WP(h);
+    RECT r;
+    if (w->flags & WF_MAXIMIZED) w->flags |= WF_RESTOREMAX;
+    else { w->flags &= ~WF_RESTOREMAX; w->normal = w->wr; }
+    w->flags = (w->flags | WF_MINIMIZED) & ~WF_MAXIMIZED;
+    w->style = (w->style | WS_MINIMIZE) & ~WS_MAXIMIZE;
+    icon_place(h, (LPRECT)&r);
+    SetWindowPos(h, 0, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | swp);
+}
+
 /* ordinal 42 */
 BOOL API ShowWindow(HWND h, int cmd)
 {
@@ -608,11 +636,17 @@ BOOL API ShowWindow(HWND h, int cmd)
 
 static BOOL show_window(HWND h, int cmd)
 {
+    extern void wnd_minimized(HWND h, BOOL next);
     WND __far *w = WP(h);
     BOOL was;
     WORD fl = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER;
     if (!w || h == HDESKTOP) return FALSE;
     was = (w->style & WS_VISIBLE) != 0;
+    if ((w->flags & WF_MINIMIZED) && (cmd == 1 || cmd == 3 || cmd == 4 || cmd == 9)) {
+        if (!send_msg(h, WM_QUERYOPEN, 0, 0)) return was;     /* aplikacja nie pozwala otworzyc ikony */
+        if (!(w = WP(h))) return FALSE;
+        if (cmd == 9 && (w->flags & WF_RESTOREMAX)) cmd = 3;  /* wroc do maksymalizacji */
+    }
     switch (cmd) {
     case 0:                                             /* SW_HIDE */
         if (!was) return FALSE;
@@ -623,7 +657,7 @@ static BOOL show_window(HWND h, int cmd)
         if (!(w->flags & WF_MAXIMIZED)) {
             RECT a;
             if (!(w->flags & WF_MINIMIZED)) w->normal = w->wr;
-            w->flags = (w->flags | WF_MAXIMIZED) & ~WF_MINIMIZED;
+            w->flags = (w->flags | WF_MAXIMIZED) & ~(WF_MINIMIZED | WF_RESTOREMAX);
             w->style |= WS_MAXIMIZE; w->style &= ~WS_MINIMIZE;
             if (w->style & WS_CHILD) a = WP(w->parent)->cr;
             else { a.left = 0; a.top = 0; a.right = SCR_W; a.bottom = SCR_H; }
@@ -637,27 +671,27 @@ static BOOL show_window(HWND h, int cmd)
             return was;
         }
         break;
-    case 2: case 6: case 7:                             /* minimalizacja */
-        if (!(w->flags & WF_MAXIMIZED) && !(w->flags & WF_MINIMIZED)) w->normal = w->wr;
-        w->flags = (w->flags | WF_MINIMIZED) & ~WF_MAXIMIZED;
-        w->style = (w->style | WS_MINIMIZE) & ~WS_MAXIMIZE;
-        if (was) {
-            send_msg(h, WM_SHOWWINDOW, 0, 0);
-            SetWindowPos(h, 0, 0, 0, 0, 0, fl | SWP_HIDEWINDOW | SWP_NOACTIVATE);
-            if (WP(h)) { WP(h)->style |= WS_VISIBLE; }   /* ikona: logicznie widoczne */
-            if (WP(h)) send_msg(h, WM_SIZE, 1, 0);
-        }
+    case 2: case 6: case 7:                             /* minimalizacja -> ikona na dole rodzica */
+        if (!was) { send_msg(h, WM_SHOWWINDOW, 1, 0); if (!(w = WP(h))) return FALSE; }
+        if (!(w->flags & WF_MINIMIZED)) iconize(h, SWP_SHOWWINDOW);
+        else if (!was) SetWindowPos(h, 0, 0, 0, 0, 0, fl | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+        if (!WP(h)) return was;
+        wnd_minimized(h, cmd == 6);                     /* SW_MINIMIZE: aktywne nastepne okno */
+        if (cmd == 2 && WP(h) && !(WP(h)->style & WS_CHILD)) activate_window(h, FALSE);
         return was;
-    case 1: case 9:                                     /* SW_SHOWNORMAL / SW_RESTORE */
+    case 1: case 4: case 9:                             /* SW_SHOWNORMAL / SW_SHOWNOACTIVATE / SW_RESTORE */
         if (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) {
             RECT n = w->normal;
             BOOL wasmin = (w->flags & WF_MINIMIZED) != 0;
-            w->flags &= ~(WF_MAXIMIZED | WF_MINIMIZED);
+            w->flags &= ~(WF_MAXIMIZED | WF_MINIMIZED | WF_RESTOREMAX);
             w->style &= ~(WS_MAXIMIZE | WS_MINIMIZE);
-            if (wasmin) w->style &= ~WS_VISIBLE;
             if (w->style & WS_CHILD) OffsetRect((LPRECT)&n, -WP(w->parent)->cr.left, -WP(w->parent)->cr.top);
-            send_msg(h, WM_SHOWWINDOW, 1, 0);
-            SetWindowPos(h, 0, n.left, n.top, n.right - n.left, n.bottom - n.top, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+            if (!was) send_msg(h, WM_SHOWWINDOW, 1, 0);
+            if (!WP(h)) return was;
+            SetWindowPos(h, 0, n.left, n.top, n.right - n.left, n.bottom - n.top,
+                         SWP_SHOWWINDOW | SWP_FRAMECHANGED | (cmd == 4 ? SWP_NOACTIVATE : 0));
+            /* ikona byla juz aktywna - activate_window nic nie zrobi, fokus trzeba oddac */
+            if (wasmin && cmd != 4 && WP(h) && GetActiveWindow() == h && !GetFocus()) SetFocus(h);
             return was;
         }
         break;
@@ -804,6 +838,7 @@ HWND wnd_from_point(int x, int y, int __far *hit)
         WND __far *w = WP(h);
         if (h != HDESKTOP && !(x >= w->cr.left && x < w->cr.right && y >= w->cr.top && y < w->cr.bottom))
             break;                                   /* w obszarze nieklienta - nie schodz nizej */
+        if (w->flags & WF_MINIMIZED) break;          /* ikona: potomkowie niewidoczni */
         c = child_at(h, x, y);
         if (!c || (WP(c)->style & WS_DISABLED)) {
             if (c) h = c;
@@ -1136,6 +1171,8 @@ BOOL API GetWindowPlacement(HWND h, WINDOWPLACEMENT __far *p)
     p->flags = 0;
     p->showCmd = (w->flags & WF_MINIMIZED) ? 2 : (w->flags & WF_MAXIMIZED) ? 3 : (w->style & WS_VISIBLE) ? 1 : 0;
     p->ptMin.x = p->ptMin.y = -1;
+    if (w->flags & WF_ICONPOS) p->ptMin = w->iconpos;
+    if (w->flags & WF_RESTOREMAX) p->flags |= 2;                   /* WPF_RESTORETOMAXIMIZED */
     p->ptMax.x = p->ptMax.y = -1;
     p->rcNormal = (w->flags & (WF_MINIMIZED | WF_MAXIMIZED)) ? w->normal : w->wr;
     return TRUE;
@@ -1145,6 +1182,7 @@ BOOL API SetWindowPlacement(HWND h, WINDOWPLACEMENT __far *p)
 {
     WND __far *w = WP(h);
     if (!w) return FALSE;
+    if (p->flags & 1) { w->iconpos = p->ptMin; w->flags |= WF_ICONPOS; }   /* WPF_SETMINPOSITION */
     if (w->flags & (WF_MINIMIZED | WF_MAXIMIZED)) w->normal = p->rcNormal;
     else MoveWindow(h, p->rcNormal.left, p->rcNormal.top, p->rcNormal.right - p->rcNormal.left,
                     p->rcNormal.bottom - p->rcNormal.top, TRUE);
@@ -1152,7 +1190,6 @@ BOOL API SetWindowPlacement(HWND h, WINDOWPLACEMENT __far *p)
     return TRUE;
 }
 
-WORD API ArrangeIconicWindows(HWND h) { (void)h; return 0; }
 BOOL API CloseWindow(HWND h)          { ShowWindow(h, 6); return TRUE; }
 BOOL API OpenIcon(HWND h)             { ShowWindow(h, 9); return TRUE; }
 

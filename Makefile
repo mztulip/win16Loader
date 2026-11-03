@@ -178,7 +178,7 @@ gdi/gdi.lnk: $(wildcard gdi/*.c) tools/gen_lnk.py
 
 # Nowy USER.EXE (user/) - para z nowym GDI (prywatne eksporty Gdi*)
 UOBJS = user/umisc.obj user/uwnd.obj user/umsg.obj user/upaint.obj user/ures.obj \
-        user/umenu.obj user/udlg.obj user/uctl.obj user/uasm.obj kernel/rt386f.obj
+        user/umenu.obj user/udlg.obj user/uctl.obj user/uicon.obj user/uasm.obj kernel/rt386f.obj
 
 user/%.obj: user/%.c user/user.h
 	$(WCC) -mm -zu -zl -s -q -3 -ox $< -fo=$@
@@ -226,7 +226,7 @@ dlls: $(DLLS)
 .PHONY: dlls
 
 # Aplikacje przykladowe/testowe (example_apps/README.md); testy: python3 tools/run_examples.py
-EXAMPLES = controls odmenu shell sysdll fonts
+EXAMPLES = controls odmenu shell sysdll fonts iconic
 example_apps:
 	for d in $(EXAMPLES); do $(MAKE) -s -C example_apps/$$d || exit 1; done
 .PHONY: example_apps

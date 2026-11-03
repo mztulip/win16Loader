@@ -85,6 +85,8 @@ typedef struct {
     HRGN    upd;                   /* region do odswiezenia (wsp. ekranu), 0 = brak */
     WORD    flags;                 /* WF_* */
     RECT    normal;                /* polozenie przed min/max */
+    POINT   iconpos;               /* polozenie ikony (wsp. klienta rodzica), wazne gdy WF_ICONPOS */
+    HWND    title;                 /* okno tytulu ikony; w oknie tytulu: jego ikona */
     int     sbpos[2], sbmin[2], sbmax[2];   /* paski przewijania: 0 = poziomy, 1 = pionowy */
     WORD    textlen;
     char    text[MAX_TITLE];
@@ -103,6 +105,9 @@ typedef struct {
 #define WF_CREATED    0x0200       /* WM_CREATE zakonczony */
 #define WF_HIDDENPOPUP 0x0800      /* ukryte przez ShowOwnedPopups(FALSE) */
 #define WF_NEEDSIZE   0x0400       /* WM_SIZE/WM_MOVE jeszcze nie wyslane (pierwszy ShowWindow) */
+#define WF_RESTOREMAX 0x1000       /* zminimalizowane z maksymalizacji: SW_RESTORE -> maksymalizuj */
+#define WF_ICONPOS    0x2000       /* iconpos zapamietane (jak WINDOWPLACEMENT.ptMinPosition) */
+#define WF_ICONTITLE  0x4000       /* okno tytulu ikony (klasa #32772) */
 
 extern WORD g_wndmem;
 #define WP(h)       wnd_ptr(h)
@@ -420,6 +425,14 @@ BOOL   rect_and(LPRECT o, const RECT __far *a, const RECT __far *b);
 void   ctl_register_classes(void);
 void   dce_update(void);
 WORD   chrome_font(void);                  /* font ramek okien i menu (Fixedsys) */
+void   chrome_text(HDC dc, LPCSTR s, int n, LPRECT r, WORD fmt, COLORREF c);
+void   xor_frame(LPRECT r);
+/* Ikony (uicon.c) */
+void   icon_init(void);
+void   icon_place(HWND h, LPRECT r);       /* miejsce ikony (wsp. klienta rodzica) */
+void   icon_title_sync(HWND h);            /* pokaz/ukryj/przesun okno tytulu ikony */
+void   icon_track(HWND h, int x, int y);   /* mysz na ikonie: przeciaganie, menu, dwuklik */
+WORD   paint_msg(HWND h);                  /* WM_PAINT albo WM_PAINTICON (ikona z ikona klasy) */
 
 /* Kolory wlasnego stylu menu (pasek menu i ramka rozwijanego; tlo rozwijanego = COLOR_MENU) */
 #define MENUBAR_BG    RGB(0x88, 0xC0, 0xC8)

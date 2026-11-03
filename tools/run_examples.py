@@ -21,6 +21,8 @@ APPS = {
     'shell':    ('example_apps/shell', 'SHELLTST.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
     'sysdll':   ('example_apps/sysdll', 'SYSDLL.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
     'fonts':    ('example_apps/fonts', 'FONTTEST.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
+    # ikona A czeka w (300,200) na dwuklik
+    'iconic':   ('example_apps/iconic', 'ICONTEST.EXE', ['w6', 'pshot', 'a316,216', 'c', 'c', 'w2', 'kalt-f4', 'w1']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

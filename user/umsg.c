@@ -244,7 +244,8 @@ static void mouse_msg(WORD cmsg, BOOL isdown)
     msg = cmsg;
     if (isdown) {                                                /* dwuklik */
         DWORD t = tick();
-        if ((g_cls[w->cls].style & 0x0008) && g_clickmsg == cmsg && g_clickhwnd == h &&
+        /* CS_DBLCLKS potrzebne tylko w obszarze klienta (WM_NCxBUTTONDBLCLK zawsze) */
+        if (((g_cls[w->cls].style & 0x0008) || (hit != HTCLIENT && !g_capture)) && g_clickmsg == cmsg && g_clickhwnd == h &&
             t - g_clicktime <= GetDoubleClickTime() &&
             g_mx - g_clickx < 4 && g_clickx - g_mx < 4 && g_my - g_clicky < 4 && g_clicky - g_my < 4) {
             msg = cmsg + 2;
@@ -369,10 +370,20 @@ static HWND next_active(HWND except)
     for (c = WP(HDESKTOP)->child; c; c = WP(c)->next) {
         WND __far *w = WP(c);
         if (c != except && (w->style & WS_VISIBLE) && !(w->style & WS_DISABLED) &&
-            !(w->flags & (WF_DESTROYING | WF_MINIMIZED)))
+            !(w->flags & (WF_DESTROYING | WF_MINIMIZED | WF_ICONTITLE)))
             return c;
     }
     return 0;
+}
+
+/* Minimalizacja: fokus wychodzi z okna; SW_MINIMIZE aktywuje nastepne okno (o ile jest) */
+void wnd_minimized(HWND h, BOOL next)
+{
+    if (g_focus && (g_focus == h || IsChild(h, g_focus))) set_focus_internal(0);
+    if (next && g_active == h) {
+        HWND n = next_active(h);
+        if (n) activate_window(n, FALSE);
+    }
 }
 
 void wnd_hidden(HWND h)
@@ -568,7 +579,7 @@ static BOOL get_msg(LPMSG m, HWND filt, WORD mn, WORD mx, BOOL remove)
     if (in_filter(WM_PAINT, mn, mx)) {
         HWND p = paint_pending(filt);
         if (p) {
-            m->hwnd = p; m->message = WM_PAINT; m->wParam = 0; m->lParam = 0;
+            m->hwnd = p; m->message = paint_msg(p); m->wParam = 0; m->lParam = 0;
             m->time = tick(); m->pt.x = g_mx; m->pt.y = g_my;
             return TRUE;
         }
@@ -651,8 +662,8 @@ LONG API DispatchMessage(LPMSG m)
         return 0;
     }
     if (!m->hwnd) return 0;
-    if (m->message == WM_PAINT) {
-        LONG r = send_msg(m->hwnd, WM_PAINT, m->wParam, m->lParam);
+    if (m->message == WM_PAINT || m->message == WM_PAINTICON) {
+        LONG r = send_msg(m->hwnd, m->message, m->wParam, m->lParam);
         {   /* aplikacja nie wywolala BeginPaint - uznaj obszar za odswiezony */
             WND __far *w = WP(m->hwnd);
             if (w && w->upd) { DeleteObject(w->upd); w->upd = 0; w->flags &= ~WF_ERASE; }
@@ -689,7 +700,7 @@ BOOL modal_next(LPMSG m)
             if ((m->message >= WM_MOUSEMOVE && m->message <= WM_MBUTTONUP) ||
                 (m->message >= WM_NCMOUSEMOVE && m->message <= WM_NCRBUTTONUP) ||
                 (m->message >= WM_KEYDOWN && m->message <= WM_SYSCHAR)) return TRUE;
-            if (m->message == WM_PAINT) { send_msg(m->hwnd, WM_PAINT, 0, 0); continue; }
+            if (m->message == WM_PAINT || m->message == WM_PAINTICON) { DispatchMessage(m); continue; }
             if (m->message == WM_QUIT) { post_msg(0, WM_QUIT, m->wParam, 0); g_quit = TRUE; return FALSE; }
             DispatchMessage(m);
             continue;

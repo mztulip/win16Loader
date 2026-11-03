@@ -108,7 +108,11 @@ static HWND find_paint(HWND h, HWND filt)
     WND __far *w = WP(h);
     HWND c, list[64];
     int n = 0, i;
-    if (!w || !(w->style & WS_VISIBLE) || (w->flags & WF_MINIMIZED)) return 0;
+    if (!w || !(w->style & WS_VISIBLE)) return 0;
+    if (w->flags & WF_MINIMIZED) {                           /* ikona: bez ramki i bez okien potomnych */
+        w->flags &= ~WF_NCPAINT;
+        return (w->upd && (!filt || filt == h)) ? h : 0;
+    }
     if (w->flags & WF_NCPAINT) {
         w->flags &= ~WF_NCPAINT;
         if (h != HDESKTOP) send_msg(h, WM_NCPAINT, 1, 0);
@@ -124,6 +128,10 @@ static HWND find_paint(HWND h, HWND filt)
 }
 
 HWND paint_pending(HWND filt) { return find_paint(HDESKTOP, filt); }
+
+/* Okno zminimalizowane z ikona klasy dostaje WM_PAINTICON i WM_ICONERASEBKGND (Win 3.x) */
+static BOOL class_icon_paint(WND __far *w) { return (w->flags & WF_MINIMIZED) && g_cls[w->cls].icon; }
+WORD paint_msg(HWND h) { WND __far *w = WP(h); return (w && class_icon_paint(w)) ? WM_PAINTICON : WM_PAINT; }
 
 HDC API BeginPaint(HWND h, PAINTSTRUCT __far *ps)
 {
@@ -149,7 +157,7 @@ HDC API BeginPaint(HWND h, PAINTSTRUCT __far *ps)
     GdiIntersectVis(dc, (LPRECT)ur, n);
     if (w->flags & WF_ERASE) {
         w->flags &= ~WF_ERASE;
-        ps->fErase = !send_msg(h, WM_ERASEBKGND, dc, 0);
+        ps->fErase = !send_msg(h, class_icon_paint(w) ? WM_ICONERASEBKGND : WM_ERASEBKGND, dc, 0);
     }
     return dc;
 }
@@ -215,7 +223,7 @@ void API UpdateWindow(HWND h)
     WND __far *w = WP(h);
     if (!w || !wnd_visible(h)) return;
     if (w->flags & WF_NCPAINT) { w->flags &= ~WF_NCPAINT; send_msg(h, WM_NCPAINT, 1, 0); }
-    if ((w = WP(h)) != 0 && w->upd) send_msg(h, WM_PAINT, 0, 0);
+    if ((w = WP(h)) != 0 && w->upd) send_msg(h, paint_msg(h), 0, 0);
     if ((w = WP(h)) != 0 && w->upd) { DeleteObject(w->upd); w->upd = 0; }
 }
 
@@ -610,7 +618,7 @@ WORD chrome_font(void)
     return f;
 }
 
-static void chrome_text(HDC dc, LPCSTR s, int n, LPRECT r, WORD fmt, COLORREF c)
+void chrome_text(HDC dc, LPCSTR s, int n, LPRECT r, WORD fmt, COLORREF c)
 {
     WORD of = SelectObject(dc, chrome_font());
     SetBkMode(dc, 1);
@@ -710,7 +718,7 @@ void nc_paint(HWND h)
     WND __far *w = WP(h);
     HDC dc;
     int f, W, H, y;
-    if (!w || !wnd_visible(h) || h == HDESKTOP) return;
+    if (!w || !wnd_visible(h) || h == HDESKTOP || (w->flags & WF_MINIMIZED)) return;
     dc = GetWindowDC(h);
     f = nc_frame(w);
     W = w->wr.right - w->wr.left; H = w->wr.bottom - w->wr.top;
@@ -764,6 +772,7 @@ int nc_hittest(HWND h, int x, int y)
     if (!w) return HTNOWHERE;
     if (h == HDESKTOP) return HTCLIENT;
     if (x < w->wr.left || x >= w->wr.right || y < w->wr.top || y >= w->wr.bottom) return HTNOWHERE;
+    if (w->flags & WF_MINIMIZED) return HTCAPTION;                /* ikona: cala jak pasek tytulu */
     if (x >= w->cr.left && x < w->cr.right && y >= w->cr.top && y < w->cr.bottom) return HTCLIENT;
     lx = x - w->wr.left; ly = y - w->wr.top;
     W = w->wr.right - w->wr.left; H = w->wr.bottom - w->wr.top;
@@ -798,7 +807,7 @@ int nc_hittest(HWND h, int x, int y)
 }
 
 /* Prostokat XOR podczas przesuwania / zmiany rozmiaru */
-static void xor_frame(LPRECT r)
+void xor_frame(LPRECT r)
 {
     HDC dc = GetDC(0);
     int w = r->right - r->left, h = r->bottom - r->top;
@@ -903,7 +912,7 @@ static void track_scroll(HWND h, int bar, int x, int y)
         for (;;) {
             if (PeekMessage((LPMSG)&m, 0, 0, 0, 1)) {
                 if (m.message == WM_LBUTTONUP || m.message == WM_NCLBUTTONUP) break;
-                if (m.message == WM_PAINT) send_msg(m.hwnd, WM_PAINT, 0, 0);
+                if (m.message == WM_PAINT || m.message == WM_PAINTICON) DispatchMessage((LPMSG)&m);
             }
             if (!(mouse_btn() & 1)) break;
             if ((long)(tick() - next) >= 0) { send_msg(h, msg, code, 0); next = tick() + 60; }
@@ -919,6 +928,11 @@ void nc_buttondown(HWND h, int hit, int x, int y)
     RECT cap, sys, mn, mx, cl;
     if (!w) return;
     if (!(w->style & WS_CHILD)) activate_window(h, TRUE);
+    if (!(w = WP(h))) return;
+    if (w->flags & WF_MINIMIZED) {
+        if (hit == HTCAPTION || hit == HTSYSMENU) icon_track(h, x, y);
+        return;
+    }
     switch (hit) {
     case HTCAPTION:
         if (!(w->flags & WF_MAXIMIZED)) track_frame(h, hit, x, y);
@@ -1052,6 +1066,7 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
     case WM_NCACTIVATE:
         if (wp) w->flags |= WF_ACTIVE; else w->flags &= ~WF_ACTIVE;
         nc_paint(h);
+        if (w->flags & WF_MINIMIZED) icon_title_sync(h);     /* kolor i szerokosc tytulu ikony */
         return 1;
     case WM_NCHITTEST:
         return nc_hittest(h, (int)LOWORD(lp), (int)HIWORD(lp));
@@ -1059,7 +1074,8 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
         nc_buttondown(h, wp, (int)LOWORD(lp), (int)HIWORD(lp));
         return 0;
     case WM_NCLBUTTONDBLCLK:
-        if (wp == HTSYSMENU) send_msg(h, WM_SYSCOMMAND, SC_CLOSE, lp);
+        if (w->flags & WF_MINIMIZED) send_msg(h, WM_SYSCOMMAND, SC_RESTORE, lp);
+        else if (wp == HTSYSMENU) send_msg(h, WM_SYSCOMMAND, SC_CLOSE, lp);
         else if (wp == HTCAPTION && (w->style & WS_MAXIMIZEBOX))
             send_msg(h, WM_SYSCOMMAND, (w->flags & WF_MAXIMIZED) ? SC_RESTORE : SC_MAXIMIZE, lp);
         else return DefWindowProc(h, WM_NCLBUTTONDOWN, wp, lp);
@@ -1084,11 +1100,25 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
         FillRect((HDC)wp, (LPRECT)&r, b);
         return 1;
     }
-    case WM_ICONERASEBKGND:
+    case WM_ICONERASEBKGND: {                                /* tlo ikony = tlo rodzica */
+        RECT r;
+        HBRUSH b = sysbrush(COLOR_BACKGROUND);
+        if (w->style & WS_CHILD) b = WP(w->parent) ? g_cls[WP(w->parent)->cls].brush : 0;
+        if (!b) return 0;
+        GetClientRect(h, (LPRECT)&r);
+        FillRect((HDC)wp, (LPRECT)&r, b);
         return 1;
-    case WM_PAINT: {
+    }
+    case WM_PAINTICON:
+    case WM_PAINT: {                                          /* ikona: ikona klasy na srodku */
         PAINTSTRUCT ps;
-        BeginPaint(h, (PAINTSTRUCT __far *)&ps);
+        HDC dc = BeginPaint(h, (PAINTSTRUCT __far *)&ps);
+        if (dc && (w = WP(h)) != 0 && class_icon_paint(w)) {
+            extern BOOL API DrawIcon(HDC, int, int, HICON);
+            RECT r;
+            GetClientRect(h, (LPRECT)&r);
+            DrawIcon(dc, (r.right - sysmetric(11)) / 2, (r.bottom - sysmetric(12)) / 2, g_cls[w->cls].icon);
+        }
         EndPaint(h, (PAINTSTRUCT __far *)&ps);
         return 0;
     }
@@ -1103,7 +1133,8 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
         return w->textlen;
     case WM_SETTEXT:
         set_text(h, (LPCSTR)lp);
-        if (has_caption(w) && wnd_visible(h)) nc_paint(h);
+        if (w->flags & WF_MINIMIZED) icon_title_sync(h);
+        else if (has_caption(w) && wnd_visible(h)) nc_paint(h);
         return 1;
     case WM_CLOSE:
         DestroyWindow(h);
@@ -1205,6 +1236,7 @@ void user_init(void)
     g_wndmem = GlobalAlloc(0x40, (DWORD)MAX_WND * sizeof(WND));
     misc_init();
     register_system_class("#32769", 0, (WNDPROC)DesktopProc, 0, 0, 0);
+    icon_init();
     ctl_register_classes();
     d = (WND __far *)MK_FP(g_wndmem, 0);
     d->used = 1;
