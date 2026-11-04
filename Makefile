@@ -226,7 +226,7 @@ dlls: $(DLLS)
 .PHONY: dlls
 
 # Aplikacje przykladowe/testowe (example_apps/README.md); testy: python3 tools/run_examples.py
-EXAMPLES = controls odmenu shell sysdll fonts iconic
+EXAMPLES = controls odmenu shell sysdll fonts iconic irqregs
 example_apps:
 	for d in $(EXAMPLES); do $(MAKE) -s -C example_apps/$$d || exit 1; done
 .PHONY: example_apps

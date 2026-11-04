@@ -21,6 +21,9 @@ APPS = {
     'shell':    ('example_apps/shell', 'SHELLTST.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
     'sysdll':   ('example_apps/sysdll', 'SYSDLL.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
     'fonts':    ('example_apps/fonts', 'FONTTEST.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
+    # ruch mysza i klawisze w trakcie petli sprawdzajacej rejestry (IRQ12/IRQ1)
+    'irqregs':  ('example_apps/irqregs', 'IRQTEST.EXE',
+                 ['w3'] + ['m25,15', 'w0.03', 'm-25,-15', 'w0.03', 'kshift', 'w0.03'] * 100 + ['w2', 'pshot', 'kalt-f4', 'w1']),
     # ikona A czeka w (300,200) na dwuklik
     'iconic':   ('example_apps/iconic', 'ICONTEST.EXE', ['w6', 'pshot', 'a316,216', 'c', 'c', 'w2', 'kalt-f4', 'w1']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku

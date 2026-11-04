@@ -1746,13 +1746,13 @@ irq1_handler:
     push dx
     push es
     call irq1_c_        ; C: czytaj scan code 0x60, przelicz VK, zapisz do KCB
+    mov  al, 0x20       ; EOI do master PIC - PRZED pop ax (inaczej AL przerwanego kodu = 0x20)
+    out  0x20, al
     pop  es
     pop  dx
     pop  cx
     pop  bx
     pop  ax
-    mov  al, 0x20       ; EOI do master PIC
-    out  0x20, al
     iret
 
 ; =====================================================================
@@ -1768,15 +1768,14 @@ irq12_handler:
     push dx
     push es
     call mouse_c_       ; C: czytaj bajt 0x60, aktualizuj pakiet PS/2, zapisz do KCB
+    mov  al, 0x20       ; EOI do slave i master PIC - PRZED pop ax (inaczej AL przerwanego
+    out  0xA0, al       ; kodu = 0x20: losowe bledy w GDI/USER przy ruchu mysza)
+    out  0x20, al
     pop  es
     pop  dx
     pop  cx
     pop  bx
     pop  ax
-    mov  al, 0x20       ; EOI do slave PIC
-    out  0xA0, al
-    mov  al, 0x20       ; EOI do master PIC
-    out  0x20, al
     iret
 
 ; =====================================================================

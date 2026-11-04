@@ -80,6 +80,13 @@ static void tests(HINSTANCE hi)
     CHECK(g_paint_b_iconic, "klasa bez ikony: WM_PAINT gdy IsIconic");
     GetWindowRect(g_b, &rb);
     CHECK(!IntersectRect(&rt, &r, &rb), "druga ikona w innym miejscu");
+    {   /* WS_CLIPCHILDREN + okno potomne: ikona malowana w calosci (potomkowie ikony
+         * niewidoczni i nie wycinani - dawniej zostawal tam stary obraz ekranu) */
+        HDC sdc = GetDC(NULL);
+        COLORREF px = GetPixel(sdc, rb.left + 20, rb.top + 26);   /* pod przyciskiem potomnym */
+        ReleaseDC(NULL, sdc);
+        CHECK(px == RGB(255, 200, 0), "ikona z WS_CLIPCHILDREN: obszar pod oknem potomnym namalowany");
+    }
 
     /* ArrangeIconicWindows po przesunieciu ikony */
     SetWindowPos(g_a, 0, 200, 150, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -211,7 +218,8 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         wc.lpszClassName = "NoIcon";
         RegisterClass(&wc);
     }
-    g_b = CreateWindow("NoIcon", "Bez ikony klasy", WS_OVERLAPPEDWINDOW, 330, 60, 260, 160, NULL, NULL, hi, NULL);
+    g_b = CreateWindow("NoIcon", "Bez ikony klasy", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 330, 60, 260, 160, NULL, NULL, hi, NULL);
+    CreateWindow("BUTTON", "Potomne", WS_CHILD | WS_VISIBLE, 0, 0, 200, 100, g_b, (HMENU)1, hi, NULL);
     ShowWindow(g_b, SW_SHOWNORMAL);
     g_a = CreateWindow("IconTest", "Ikony - test", WS_OVERLAPPEDWINDOW, 40, 40, 300, 200, NULL, NULL, hi, NULL);
     ShowWindow(g_a, SW_SHOWNORMAL);

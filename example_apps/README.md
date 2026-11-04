@@ -17,6 +17,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `sysdll`   | SYSDLL.EXE   | KEYBOARD.DRV (AnsiToOem/OemToAnsi, VkKeyScan, MapVirtualKey), atomy globalne USER, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG |
 | `fonts`    | FONTTEST.EXE | Fonty .FON (EnumFonts, CreateFont, GetTextFace/Metrics/Extent, pogrubienie, tło tekstu) |
 | `iconic`   | ICONTEST.EXE | Okna zminimalizowane: ikony na dole ekranu, WM_PAINTICON/WM_ICONERASEBKGND, ArrangeIconicWindows, WM_QUERYOPEN, powrót do maksymalizacji, ptMinPosition, WS_MINIMIZE, tytuł ikony, dwuklik przywraca |
+| `irqregs`  | IRQTEST.EXE  | Regresja: przerwania myszy/klawiatury (IRQ12/IRQ1) nie zmieniają rejestrów przerwanego kodu (dawniej AL=20h po EOI → losowe #GP przy ruchu myszą) |
 
 ## Budowanie i uruchamianie
 
