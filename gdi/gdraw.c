@@ -15,7 +15,11 @@ typedef struct {
 static DRAW g_d;                     /* jedna operacja naraz (GDI jednowatkowe) */
 static DRAW g_src;                   /* zrodlo dla BitBlt */
 
-static DRAW *draw_begin(HDC hdc)
+#define BLT_LINE 256
+static DWORD g_ls[BLT_LINE], g_ld[BLT_LINE];  /* bufory wiersza */
+
+/* Bez kursora: wolajacy zna prostokat rysowania i wola draw_excl */
+static DRAW *draw_open(HDC hdc)
 {
     DRAW *d = &g_d;
     d->dc = dc_get(hdc);
@@ -27,7 +31,20 @@ static DRAW *draw_begin(HDC hdc)
         rgn_and_rect((RGNDATA16 __far *)&d->clip, (RECT __far *)&r);
     }
     d->scr = !d->dc->is_mem;
-    if (d->scr) cursor_exclude(d->clip.box.left, d->clip.box.top, d->clip.box.right, d->clip.box.bottom);
+    return d;
+}
+
+/* Kursor przeszkadza tylko, gdy lezy w rysowanym prostokacie (nie w calym clipie DC);
+ * kazde draw_excl paruje sie z cursor_restore w draw_end */
+static void draw_excl(DRAW *d, int l, int t, int r, int b)
+{
+    if (d->scr) cursor_exclude(l, t, r, b);
+}
+
+static DRAW *draw_begin(HDC hdc)
+{
+    DRAW *d = draw_open(hdc);
+    if (d) draw_excl(d, d->clip.box.left, d->clip.box.top, d->clip.box.right, d->clip.box.bottom);
     return d;
 }
 
@@ -72,7 +89,10 @@ DWORD brush_px(BRUSHOBJ __far *b, DCOBJ __far *dc, int x, int y, BOOL mono)
 /* Wypelnij prostokat (wsp. powierzchni) pedzlem z ROP3 (wzor = P) */
 static void fill_rop3(DRAW *d, RECT __far *r, HBRUSH hb, BYTE rop)
 {
+    static DWORD g_tile[8][8];
     BRUSHOBJ __far *b = (BRUSHOBJ __far *)obj_ptr(hb, OT_BRUSH);
+    BOOL tile_ok = FALSE, has_transp = FALSE;
+    int brx = d->dc->brx, bry = d->dc->bry;
     WORD i;
     for (i = 0; i < d->clip.n; i++) {
         RECT o;
@@ -88,13 +108,35 @@ static void fill_rop3(DRAW *d, RECT __far *r, HBRUSH hb, BYTE rop)
                 span_rop2((SURF __far *)&d->s, y, o.left, o.right, rop ? 0xFFFFFFUL : 0, 13);
             continue;
         }
-        for (y = o.top; y < o.bottom; y++)
-            for (x = o.left; x < o.right; x++) {
-                DWORD p = b ? brush_px(b, d->dc, x, y, d->s.mono) : 0, dv;
-                if (p & TRANSP) continue;
-                dv = px_get((SURF __far *)&d->s, x, y);
-                px_put((SURF __far *)&d->s, x, y, rop3(rop, p, 0, dv) & 0xFFFFFFUL);
+        if (!tile_ok) {
+            int ty, tx;
+            for (ty = 0; ty < 8; ty++)
+                for (tx = 0; tx < 8; tx++) {
+                    DWORD p = b ? brush_px(b, d->dc, tx + brx, ty + bry, d->s.mono) : 0;
+                    if (p & TRANSP) has_transp = TRUE;
+                    else if (d->s.mono) p = mono_of(p);
+                    g_tile[ty][tx] = p;
+                }
+            tile_ok = TRUE;
+        }
+        for (y = o.top; y < o.bottom; y++) {
+            DWORD *row = g_tile[(y - bry) & 7];
+            for (x = o.left; x < o.right; ) {
+                int n = o.right - x > BLT_LINE ? BLT_LINE : o.right - x, k, ph = x - brx;
+                if (rop == 0xF0 && !has_transp) {
+                    for (k = 0; k < n; k++) g_ld[k] = row[(ph + k) & 7];
+                } else {
+                    row_get((SURF __far *)&d->s, x, y, n, g_ld);
+                    for (k = 0; k < n; k++) {
+                        DWORD p = row[(ph + k) & 7];
+                        if (p & TRANSP) continue;
+                        g_ld[k] = rop == 0xF0 ? p : rop3(rop, p, 0, g_ld[k]) & 0xFFFFFFUL;
+                    }
+                }
+                row_put((SURF __far *)&d->s, x, y, n, g_ld);
+                x += n;
             }
+        }
     }
 }
 
@@ -141,10 +183,11 @@ static void norm_rect(DCOBJ __far *dc, int l, int t, int r, int b, RECT __far *o
 /* ordinal 29 */
 BOOL API PatBlt(HDC hdc, int x, int y, int w, int h, DWORD rop)
 {
-    DRAW *d = draw_begin(hdc);
+    DRAW *d = draw_open(hdc);
     RECT r;
     if (!d) return FALSE;
     norm_rect(d->dc, x, y, x + w, y + h, (RECT __far *)&r);
+    draw_excl(d, r.left, r.top, r.right, r.bottom);
     fill_rop3(d, (RECT __far *)&r, d->dc->brush, (BYTE)(rop >> 16));
     draw_end(d);
     return TRUE;
@@ -167,10 +210,42 @@ static DWORD src_px(SURF __far *ss, DCOBJ __far *sdc, int sx, int sy, DCOBJ __fa
     return v;
 }
 
+/* BitBlt bez skalowania i wzorca: wiersz przez bufor (nakladanie w poziomie bezpieczne) */
+static void blt_row(DRAW *d, DRAW *s, int xx, int yy, int sxx, int syy, int n, BYTE rop)
+{
+    BOOL dmono = d->s.mono, smono = s->s.mono;
+    DWORD text = 0, bk = 0;
+    if (smono != dmono) {
+        text = rgb2px(d->dc->text);
+        bk = smono ? rgb2px(d->dc->bk) : rgb2px(s->dc->bk);
+    }
+    while (n > 0) {
+        int k = n > BLT_LINE ? BLT_LINE : n, i;
+        row_get((SURF __far *)&s->s, sxx, syy, k, g_ls);
+        if (smono && !dmono) {                 /* mono -> kolor: 0 = text, 1 = tlo (DC celu) */
+            for (i = 0; i < k; i++) g_ls[i] = g_ls[i] ? bk : text;
+        } else if (!smono && dmono) {          /* kolor -> mono: kolor tla zrodla = bialy */
+            for (i = 0; i < k; i++) g_ls[i] = g_ls[i] == bk ? 0xFFFFFFUL : 0;
+        }
+        if (rop != 0xCC) {
+            if (rop != 0x33) row_get((SURF __far *)&d->s, xx, yy, k, g_ld);
+            switch (rop) {
+            case 0x88: for (i = 0; i < k; i++) g_ls[i] &= g_ld[i]; break;
+            case 0xEE: for (i = 0; i < k; i++) g_ls[i] |= g_ld[i]; break;
+            case 0x66: for (i = 0; i < k; i++) g_ls[i] ^= g_ld[i]; break;
+            case 0x33: for (i = 0; i < k; i++) g_ls[i] = ~g_ls[i] & 0xFFFFFFUL; break;
+            default:   for (i = 0; i < k; i++) g_ls[i] = rop3(rop, 0, g_ls[i], g_ld[i]) & 0xFFFFFFUL; break;
+            }
+        }
+        row_put((SURF __far *)&d->s, xx, yy, k, g_ls);
+        xx += k; sxx += k; n -= k;
+    }
+}
+
 static BOOL do_blt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, int sy,
                    int sw, int sh, DWORD dwrop)
 {
-    DRAW *d = draw_begin(hd);
+    DRAW *d = draw_open(hd);
     DRAW *s = &g_src;
     BYTE rop = (BYTE)(dwrop >> 16);
     BOOL usesrc = rop_uses_src(rop), usepat = rop_uses_pat(rop);
@@ -182,7 +257,7 @@ static BOOL do_blt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, int sy,
     b = (BRUSHOBJ __far *)obj_ptr(d->dc->brush, OT_BRUSH);
     if (usesrc) {
         s->dc = dc_get(hs);
-        if (!s->dc || !surf_of_dc(s->dc, (SURF __far *)&s->s)) { draw_end(d); return FALSE; }
+        if (!s->dc || !surf_of_dc(s->dc, (SURF __far *)&s->s)) return FALSE;
         dc_lp2dp(s->dc, (int __far *)&sx, (int __far *)&sy);
         sx += s->dc->orgx; sy += s->dc->orgy;
         sw = dc_lenx(s->dc, sw); sh = dc_leny(s->dc, sh);
@@ -190,6 +265,7 @@ static BOOL do_blt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, int sy,
         if (scr_src) cursor_exclude(sx, sy, sx + sw, sy + sh);
     }
     norm_rect(d->dc, x, y, x + w, y + h, (RECT __far *)&dr);
+    draw_excl(d, dr.left, dr.top, dr.right, dr.bottom);
     w = dr.right - dr.left; h = dr.bottom - dr.top;
     if (w <= 0 || h <= 0) goto out;
     if (!usesrc) { sw = w; sh = h; }
@@ -207,14 +283,11 @@ static BOOL do_blt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, int sy,
         for (yy = ystart; yy != yend; yy += ystep) {
             int syy = usesrc ? sy + (int)((long)(yy - dr.top) * sh / h) : 0;
             if (usesrc && (syy < 0 || syy >= s->s.h)) continue;
-            if (rop == 0xCC && sw == w && !s->s.mono == !d->s.mono && s->s.bpp == d->s.bpp
-                && s->s.bpp == 32 && xstep == 1) {
-                /* szybka sciezka: kopiowanie wiersza 32bpp */
-                for (xx = xstart; xx != xend; xx++) {
-                    int sxx = sx + (xx - dr.left);
-                    if (sxx < 0 || sxx >= s->s.w) continue;
-                    px_put((SURF __far *)&d->s, xx, yy, px_get((SURF __far *)&s->s, sxx, syy));
-                }
+            if (usesrc && !usepat && sw == w && sh == h) {
+                int a = o.left, sxx = sx + (a - dr.left), n = o.right - o.left;
+                if (sxx < 0) { a -= sxx; n += sxx; sxx = 0; }
+                if (sxx + n > s->s.w) n = s->s.w - sxx;
+                if (n > 0) blt_row(d, s, a, yy, sxx, syy, n, rop);
                 continue;
             }
             for (xx = xstart; xx != xend; xx += xstep) {
@@ -364,9 +437,10 @@ BOOL API Polyline(HDC hdc, LPPOINT p, int n)
 /* ordinal 31 */
 COLORREF API SetPixel(HDC hdc, int x, int y, COLORREF c)
 {
-    DRAW *d = draw_begin(hdc);
+    DRAW *d = draw_open(hdc);
     if (!d) return (COLORREF)-1;
     lp2surf(d->dc, (int __far *)&x, (int __far *)&y);
+    draw_excl(d, x, y, x + 1, y + 1);
     if (in_clip(d, x, y)) px_put((SURF __far *)&d->s, x, y, rgb2px(c));
     draw_end(d);
     return c;
@@ -375,10 +449,11 @@ COLORREF API SetPixel(HDC hdc, int x, int y, COLORREF c)
 /* ordinal 83 */
 COLORREF API GetPixel(HDC hdc, int x, int y)
 {
-    DRAW *d = draw_begin(hdc);
+    DRAW *d = draw_open(hdc);
     COLORREF r = (COLORREF)-1;
     if (!d) return r;
     lp2surf(d->dc, (int __far *)&x, (int __far *)&y);
+    draw_excl(d, x, y, x + 1, y + 1);
     if (x >= 0 && y >= 0 && x < d->s.w && y < d->s.h) r = px2rgb(px_get((SURF __far *)&d->s, x, y));
     draw_end(d);
     return r;

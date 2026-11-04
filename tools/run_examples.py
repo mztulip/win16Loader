@@ -26,6 +26,8 @@ APPS = {
                  ['w3'] + ['m25,15', 'w0.03', 'm-25,-15', 'w0.03', 'kshift', 'w0.03'] * 100 + ['w2', 'pshot', 'kalt-f4', 'w1']),
     # ikona A czeka w (300,200) na dwuklik
     'iconic':   ('example_apps/iconic', 'ICONTEST.EXE', ['w6', 'pshot', 'a316,216', 'c', 'c', 'w2', 'kalt-f4', 'w1']),
+    # poprawnosc szybkich sciezek GDI + regresja wydajnosci (konczy sie sama)
+    'gdiperf':  ('example_apps/gdiperf', 'GDIPERF.EXE', ['d400', 'w1', 'pshot']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

@@ -94,7 +94,7 @@ kernel/%.obj: kernel/%.c kernel/kernel.h
 kernel/%.obj: kernel/%.asm
 	$(NASM) -f obj $< -o $@
 
-# rt386 w wersji far dla modulow -mm (GDI, USER)
+# rt386 w wersji far dla modulow -mm (USER)
 kernel/rt386f.obj: kernel/rt386.asm
 	$(NASM) -f obj -DFARCODE $< -o $@
 
@@ -165,10 +165,12 @@ user.exe: user.obj mouse_msg.obj libstubs.obj
 # 29,33,34,45,48,51,52,68,69,80,82,87,91,93,200
 # -------------------------------------------------------
 GOBJS = gdi/gobj.obj gdi/gdc.obj gdi/gsurf.obj gdi/grgn.obj gdi/gdraw.obj \
-        gdi/gbmp.obj gdi/gtext.obj gdi/gmisc.obj gdi/gstubs.obj kernel/rt386f.obj
+        gdi/gbmp.obj gdi/gtext.obj gdi/gmisc.obj gdi/gstubs.obj kernel/rt386.obj
 
+# -ms, nie -mm: wywolania wewnetrzne near. Far call/retf w 16-bitowym PM sa bardzo drogie
+# w QEMU TCG (docs/wydajnosc_gdi.md); kod GDI miesci sie w 64KB
 gdi/%.obj: gdi/%.c gdi/gdi.h
-	$(WCC) -mm -zu -zl -s -q -3 -ox $< -fo=$@
+	$(WCC) -ms -zu -zl -s -q -3 -ox $< -fo=$@
 
 gdi/%.obj: gdi/%.asm
 	$(NASM) -f obj $< -o $@
@@ -226,7 +228,7 @@ dlls: $(DLLS)
 .PHONY: dlls
 
 # Aplikacje przykladowe/testowe (example_apps/README.md); testy: python3 tools/run_examples.py
-EXAMPLES = controls odmenu shell sysdll fonts iconic irqregs
+EXAMPLES = controls odmenu shell sysdll fonts iconic irqregs gdiperf
 example_apps:
 	for d in $(EXAMPLES); do $(MAKE) -s -C example_apps/$$d || exit 1; done
 .PHONY: example_apps

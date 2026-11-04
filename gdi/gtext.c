@@ -224,17 +224,20 @@ static void t_fill(RECT __far *r, DWORD c)
 
 static void draw_glyph(FONTSEL __far *fs, int x, int y, BYTE ch, DWORD fg)
 {
-    WORD off;
-    int w = glyph(ch, (WORD __far *)&off), h = fs->f->height, cx, cy, pass;
+    WORD off, i;
+    int w = glyph(ch, (WORD __far *)&off), h = fs->f->height, cy, pass;
+    RGNDATA16 *c = &g_t.clip;
     for (pass = 0; pass < (fs->bold ? 2 : 1); pass++)
         for (cy = 0; cy < h; cy++) {
-            int sh = fs->italic ? (h - cy) / 3 : 0;
-            for (cx = 0; cx < w; cx++) {
-                BYTE b = g_fbits[off + (cx >> 3) * h + cy];
-                if ((b >> (7 - (cx & 7))) & 1) {
-                    int px = x + cx + pass + sh, py = y + cy;
-                    if (t_in(px, py)) px_put((SURF __far *)&g_t.s, px, py, fg);
-                }
+            int py = y + cy, px = x + pass + (fs->italic ? (h - cy) / 3 : 0);
+            if (py < c->box.top || py >= c->box.bottom) continue;
+            for (i = 0; i < c->n; i++) {
+                RECT *r = &c->r[i];
+                int xa, xb;
+                if (py < r->top || py >= r->bottom) continue;
+                xa = px > r->left ? px : r->left;
+                xb = px + w < r->right ? px + w : r->right;
+                if (xa < xb) bits_row((SURF __far *)&g_t.s, py, px, xa, xb, g_fbits + off + cy, h, fg);
             }
         }
 }
@@ -269,11 +272,16 @@ BOOL API ExtTextOut(HDC hdc, int x, int y, WORD opt, LPRECT rc, LPCSTR s, WORD n
         orc.right = r + dc->orgx; orc.bottom = b + dc->orgy;
         if (opt & ETO_CLIPPED) rgn_and_rect((RGNDATA16 __far *)&g_t.clip, (RECT __far *)&orc);
     }
-    if (!g_t.dc->is_mem) cursor_exclude(g_t.clip.box.left, g_t.clip.box.top, g_t.clip.box.right, g_t.clip.box.bottom);
     fg = rgb2px(dc->text);
     bg = rgb2px(dc->bk);
-    if (rc && (opt & ETO_OPAQUE)) t_fill((RECT __far *)&orc, bg);
-    if (!font_of_dc(dc, &fs) || !s || !n) goto done;
+    if (!font_of_dc(dc, &fs) || !s || !n) {
+        if (rc && (opt & ETO_OPAQUE)) {
+            if (!g_t.dc->is_mem) cursor_exclude(orc.left, orc.top, orc.right, orc.bottom);
+            t_fill((RECT __far *)&orc, bg);
+            if (!g_t.dc->is_mem) cursor_restore();
+        }
+        return TRUE;
+    }
     w = text_width(&fs, dc, s, n, dx);
     h = fs.f->height;
     /* wyrownanie poziome: TA_RIGHT=2, TA_CENTER=6; pionowe: TA_BOTTOM=8, TA_BASELINE=24 */
@@ -283,6 +291,19 @@ BOOL API ExtTextOut(HDC hdc, int x, int y, WORD opt, LPRECT rc, LPCSTR s, WORD n
     else if (dc->align & 8) ty = y - h;
     else ty = y;
     box.left = x; box.top = ty; box.right = x + w; box.bottom = ty + h;
+    if (!g_t.dc->is_mem) {                     /* z zapasem: kursywa, pogrubienie, dx[], podkreslenie */
+        RECT e;
+        e.left = x - fs.f->maxw; e.top = ty - 1;
+        e.right = x + w + h / 3 + 2 + fs.f->maxw; e.bottom = ty + h + 2;
+        if (rc && (opt & ETO_OPAQUE)) {
+            if (orc.left < e.left) e.left = orc.left;
+            if (orc.top < e.top) e.top = orc.top;
+            if (orc.right > e.right) e.right = orc.right;
+            if (orc.bottom > e.bottom) e.bottom = orc.bottom;
+        }
+        cursor_exclude(e.left, e.top, e.right, e.bottom);
+    }
+    if (rc && (opt & ETO_OPAQUE)) t_fill((RECT __far *)&orc, bg);
     if (dc->bkmode == 2 && !(rc && (opt & ETO_OPAQUE))) t_fill((RECT __far *)&box, bg);
     for (i = 0, cx = x; i < (int)n; i++) {
         draw_glyph(&fs, cx, ty, (BYTE)s[i], fg);
@@ -297,7 +318,6 @@ BOOL API ExtTextOut(HDC hdc, int x, int y, WORD opt, LPRECT rc, LPCSTR s, WORD n
         if (dc->mapmode != 1 && dc->vex) dx2 = (int)((long)w * dc->wex / dc->vex);
         dc->curx += dx2; dc->cury += dy2;
     }
-done:
     if (!g_t.dc->is_mem) cursor_restore();
     return TRUE;
 }

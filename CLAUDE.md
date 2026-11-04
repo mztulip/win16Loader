@@ -24,7 +24,10 @@ python3 tools/run_examples.py   # testy aplikacji przykladowych (example_apps/) 
 
 Headless: `tools/qemu_headless.py --fd boot.img [--hd calmira.img] --run "LOADER.EXE X.EXE" KROKI`
 (`w` czekaj, `p` zrzut PNG, `k` klawisz, `a x,y` mysz bezwzglednie, `m dx,dy`, `c` klik).
+Dodatkowy krok `d<sek>` = czekaj na linie `TEST ... DONE` w logu COM1.
 Opcja loadera `-t` = trace wywolan API na COM1 (`>mod off cs:ip`, nazwy z map: `*/*.map`).
+Profil kodu goscia: `tools/qemu_prof.py --run "LOADER.EXE SKI.EXE" --mouse --secs 20`
+(CS:IP z monitora QEMU -> symbole z map); analiza wydajnosci: `docs/wydajnosc_gdi.md`.
 
 **QEMU debug log** (crash diagnosis):
 ```bash
@@ -116,7 +119,7 @@ z katalogu systemowego (`A:\`) `*.FON`. Potem przechodzi do PM i woła LibEntry 
 | Katalog | Modul | Model | Uwagi |
 |---------|-------|-------|-------|
 | `kernel/` | KERNEL.EXE | -ms -zu | pamiec (XMS, selektory, LocalHeap), DOS3Call z tlumaczeniem wskaznikow, INI, moduly/zasoby, INT 21h z PM |
-| `gdi/` | GDI.EXE | -mm -zu | DC, obiekty, ROP2/ROP3, regiony, bitmapy DIB/DDB, fonty .FON (FNT 2/3), kursor myszy (prywatne Gdi* 900-914) |
+| `gdi/` | GDI.EXE | -ms -zu | DC, obiekty, ROP2/ROP3, regiony, bitmapy DIB/DDB, fonty .FON (FNT 2/3), kursor myszy (prywatne Gdi* 900-914) |
 | `user/` | USER.EXE | -mm -zu | okna, klasy, kolejka, malowanie NC w stylu 3.1, menu (owner-draw), dialogi, kontrolki (uctl.c), schowek, DCE (dce_update), ikony okien zminimalizowanych jak w 3.1 (uicon.c: miejsca na dole rodzica, ArrangeIconicWindows, tytul #32772, WM_PAINTICON), prywatne UserIcon* 950-951 |
 | `dlls/` | SHELL.DLL, KEYBOARD.DRV, TOOLHELP.DLL, DDEML.DLL, VER.DLL, MMSYSTEM.DLL, COMMDLG.DLL | -ms -zu | rejestr 3.1 w `<windir>\REG.TXT`, ExtractIcon, ANSI<->OEM; reszta zwraca "brak/anuluj" |
 | `example_apps/` | testy | aplikacje | po jednej na funkcjonalnosc, wyniki `TEST ...` na COM1 (README.md) |
@@ -134,6 +137,14 @@ pulpit ciemny teal (0x1C5058), ramka 1 px czarna + 3 px jasny teal (0x88C8D0), p
 `=` (menu systemowe), `-`, `+`, `X` (zamknij); pasek menu 0x88C0C8, menu rozwijane 0xC0E4E8
 z ramka 0x004048, zaznaczenie 0x0A6E7E. Paleta kolorow systemowych: `g_col` w `user/umisc.c`
 i `[colors]` w `windir/WIN.INI`. Nie zmieniac na kolory/ksztalty Windows bez prosby uzytkownika.
+
+### Pulapki wydajnosci (`docs/wydajnosc_gdi.md`) - nie powtarzac
+
+- **Kod i dane nie moga dzielic strony 4KB** (`xms_alloc` wyrownuje do 4KB): w QEMU TCG kazdy zapis
+  do takiej strony, w tym kazdy `push`, idzie wolna sciezka. Roznica 12-20x w calym GUI.
+- **Masowe operacje GDI ida wierszami** (`row_get`/`row_put`/`bits_row`), nie przez `px_get`/`px_put`.
+- **Kursor wykluczaj tylko dla rysowanego prostokata** (`draw_open` + `draw_excl`), nie dla calego clipu.
+- Zmiana progow w `example_apps/gdiperf` wymaga uzasadnienia: to regresja wydajnosci.
 
 ### Pulapki (Watcom / Win16) - juz naprawione, nie powtarzac
 

@@ -10,6 +10,21 @@ static BYTE __far *addr(SURF __far *s, DWORD off)
     return (BYTE __far *)MK_FP(s->sel + (WORD)(off >> 16) * 8, (WORD)off);
 }
 
+/* y*pitch bez wolania __U4M (pitch < 64KB w praktyce zawsze) */
+DWORD mul16(WORD a, WORD b);
+#pragma aux mul16 = "mul dx" parm [ax] [dx] value [dx ax] modify exact [ax dx];
+
+static DWORD row_off(SURF __far *s, int y)
+{
+    if (s->pitch < 0x10000UL) return mul16((WORD)y, (WORD)s->pitch);
+    return (DWORD)y * s->pitch;
+}
+
+/* Ile calych pikseli miesci sie do konca okna 64KB (bez dzielenia DWORD: __U4D) */
+#define ROOM32(lo) ((lo) ? (WORD)(0 - (lo)) >> 2 : 0x4000U)
+#define ROOM24(lo) ((lo) ? (WORD)(0 - (lo)) / 3 : 21845U)
+#define MUL3(n)    (((DWORD)(n) << 1) + (DWORD)(n))
+
 DWORD rgb2px(COLORREF c)
 {
     /* COLORREF 0x00BBGGRR -> piksel 0x00RRGGBB (w pamieci: B G R 0) */
@@ -31,10 +46,10 @@ DWORD px_get(SURF __far *s, int x, int y)
 {
     DWORD off;
     if (s->bpp == 32) {
-        off = (DWORD)y * s->pitch + ((DWORD)x << 2);
+        off = row_off(s, y) + ((DWORD)x << 2);
         return *(DWORD __far *)addr(s, off) & 0xFFFFFFUL;
     }
-    off = (DWORD)y * SCR_PITCH + (DWORD)x * 3;
+    off = row_off(s, y) + MUL3(x);
     if ((WORD)off <= 0xFFFD) {
         BYTE __far *p = addr(s, off);
         return p[0] | ((DWORD)p[1] << 8) | ((DWORD)p[2] << 16);
@@ -47,11 +62,11 @@ void px_put(SURF __far *s, int x, int y, DWORD c)
     DWORD off;
     if (s->bpp == 32) {
         if (s->mono) c = mono_of(c);
-        off = (DWORD)y * s->pitch + ((DWORD)x << 2);
+        off = row_off(s, y) + ((DWORD)x << 2);
         *(DWORD __far *)addr(s, off) = c;
         return;
     }
-    off = (DWORD)y * SCR_PITCH + (DWORD)x * 3;
+    off = row_off(s, y) + MUL3(x);
     if ((WORD)off <= 0xFFFD) {
         BYTE __far *p = addr(s, off);
         p[0] = (BYTE)c; p[1] = (BYTE)(c >> 8); p[2] = (BYTE)(c >> 16);
@@ -59,6 +74,140 @@ void px_put(SURF __far *s, int x, int y, DWORD c)
         *addr(s, off) = (BYTE)c;
         *addr(s, off + 1) = (BYTE)(c >> 8);
         *addr(s, off + 2) = (BYTE)(c >> 16);
+    }
+}
+
+/* Wiersz powierzchni <-> bufor pikseli 0x00RRGGBB, z podzialem na okna 64KB.
+ * Wszystkie masowe operacje ida tedy: px_get/px_put na piksel kosztuja ~100x wiecej. */
+void row_get(SURF __far *s, int x, int y, int n, DWORD *buf)
+{
+    DWORD off;
+    int i;
+    if (s->bpp == 32) {
+        off = row_off(s, y) + ((DWORD)x << 2);
+        while (n > 0) {
+            WORD room = ROOM32((WORD)off);
+            DWORD __far *p = (DWORD __far *)addr(s, off);
+            int k = (WORD)n < room ? n : (int)room;
+            for (i = 0; i < k; i++) buf[i] = p[i] & 0xFFFFFFUL;
+            buf += k; n -= k; off += (DWORD)k << 2;
+        }
+        return;
+    }
+    off = row_off(s, y) + MUL3(x);
+    while (n > 0) {
+        WORD room = ROOM24((WORD)off);
+        if (room == 0) {                       /* piksel rozciety miedzy oknami */
+            *buf++ = *addr(s, off) | ((DWORD)*addr(s, off + 1) << 8) | ((DWORD)*addr(s, off + 2) << 16);
+            n--; off += 3;
+            continue;
+        }
+        {
+            BYTE __far *p = addr(s, off);
+            int k = (WORD)n < room ? n : (int)room;
+            for (i = 0; i < k; i++, p += 3)
+                buf[i] = p[0] | ((DWORD)p[1] << 8) | ((DWORD)p[2] << 16);
+            buf += k; n -= k; off += MUL3(k);
+        }
+    }
+}
+
+void row_put(SURF __far *s, int x, int y, int n, DWORD *buf)
+{
+    DWORD off;
+    int i;
+    if (s->bpp == 32) {
+        off = row_off(s, y) + ((DWORD)x << 2);
+        while (n > 0) {
+            WORD room = ROOM32((WORD)off);
+            DWORD __far *p = (DWORD __far *)addr(s, off);
+            int k = (WORD)n < room ? n : (int)room;
+            for (i = 0; i < k; i++) p[i] = buf[i];
+            buf += k; n -= k; off += (DWORD)k << 2;
+        }
+        return;
+    }
+    off = row_off(s, y) + MUL3(x);
+    while (n > 0) {
+        WORD room = ROOM24((WORD)off);
+        if (room == 0) {
+            *addr(s, off) = (BYTE)*buf; *addr(s, off + 1) = (BYTE)(*buf >> 8); *addr(s, off + 2) = (BYTE)(*buf >> 16);
+            buf++; n--; off += 3;
+            continue;
+        }
+        {
+            BYTE __far *p = addr(s, off);
+            int k = (WORD)n < room ? n : (int)room;
+            for (i = 0; i < k; i++, p += 3) {
+                DWORD v = buf[i];
+                p[0] = (BYTE)v; p[1] = (BYTE)(v >> 8); p[2] = (BYTE)(v >> 16);
+            }
+            buf += k; n -= k; off += MUL3(k);
+        }
+    }
+}
+
+/* Jednolita linia na ekranie 24bpp */
+static void fill24(SURF __far *s, int x, int y, int n, DWORD c)
+{
+    DWORD off = row_off(s, y) + MUL3(x);
+    BYTE b0 = (BYTE)c, b1 = (BYTE)(c >> 8), b2 = (BYTE)(c >> 16);
+    while (n > 0) {
+        WORD room = ROOM24((WORD)off);
+        if (room == 0) {
+            *addr(s, off) = b0; *addr(s, off + 1) = b1; *addr(s, off + 2) = b2;
+            n--; off += 3;
+            continue;
+        }
+        {
+            BYTE __far *p = addr(s, off);
+            int k = (WORD)n < room ? n : (int)room, i;
+            for (i = 0; i < k; i++, p += 3) { p[0] = b0; p[1] = b1; p[2] = b2; }
+            n -= k; off += MUL3(k);
+        }
+    }
+}
+
+/* Wiersz glifu: bit i (MSB pierwszy, bajt i>>3 lezy pod bits[(i>>3)*step]) = piksel
+ * koloru c na x+i, ograniczone do [xa,xb) */
+void bits_row(SURF __far *s, int y, int x, int xa, int xb, BYTE __far *bits, WORD step, DWORD c)
+{
+    int i = xa - x, end = xb - x;
+    BYTE __far *bp;
+    DWORD off0, off1;
+    BYTE b, m;
+    if (i >= end) return;
+    if (s->mono) c = mono_of(c);
+    bp = bits + (WORD)(i >> 3) * step;
+    b = *bp;
+    m = (BYTE)(0x80 >> (i & 7));
+    if (s->bpp == 32) {
+        off0 = row_off(s, y) + ((DWORD)xa << 2);
+        off1 = off0 + ((DWORD)(end - i) << 2) - 1;
+    } else {
+        off0 = row_off(s, y) + MUL3(xa);
+        off1 = off0 + MUL3(end - i) - 1;
+    }
+    if ((WORD)(off0 >> 16) != (WORD)(off1 >> 16)) {     /* wiersz przez granice okna */
+        for (; i < end; i++) {
+            if (b & m) px_put(s, x + i, y, c);
+            if (!(m >>= 1)) { m = 0x80; bp += step; if (i + 1 < end) b = *bp; }
+        }
+        return;
+    }
+    if (s->bpp == 32) {
+        DWORD __far *p = (DWORD __far *)addr(s, off0);
+        for (; i < end; i++, p++) {
+            if (b & m) *p = c;
+            if (!(m >>= 1)) { m = 0x80; bp += step; if (i + 1 < end) b = *bp; }
+        }
+    } else {
+        BYTE __far *p = addr(s, off0);
+        BYTE b0 = (BYTE)c, b1 = (BYTE)(c >> 8), b2 = (BYTE)(c >> 16);
+        for (; i < end; i++, p += 3) {
+            if (b & m) { p[0] = b0; p[1] = b1; p[2] = b2; }
+            if (!(m >>= 1)) { m = 0x80; bp += step; if (i + 1 < end) b = *bp; }
+        }
     }
 }
 
@@ -89,26 +238,32 @@ static DWORD rop2_apply(WORD rop2, DWORD p, DWORD d)
 /* Pozioma linia [x0,x1) na wierszu y (wsp. powierzchni, juz przyciete) */
 void span_rop2(SURF __far *s, int y, int x0, int x1, DWORD c, WORD rop2)
 {
-    int x;
+    static DWORD line[128];
     if (x0 >= x1) return;
     if (s->mono) c = mono_of(c);
     if (rop2 == 13 && s->bpp == 32) {
-        DWORD off = (DWORD)y * s->pitch + ((DWORD)x0 << 2);
+        DWORD off = row_off(s, y) + ((DWORD)x0 << 2);
         int n = x1 - x0;
         while (n > 0) {
-            WORD lo = (WORD)off;
-            DWORD room = (0x10000UL - lo) >> 2;
+            WORD room = ROOM32((WORD)off);
             DWORD __far *p = (DWORD __far *)addr(s, off);
-            int k = (DWORD)n < room ? n : (int)room, i;
+            int k = (WORD)n < room ? n : (int)room, i;
             for (i = 0; i < k; i++) p[i] = c;
             n -= k;
             off += (DWORD)k << 2;
         }
         return;
     }
-    for (x = x0; x < x1; x++) {
-        DWORD v = rop2 == 13 ? c : rop2_apply(rop2, c, px_get(s, x, y)) & 0xFFFFFFUL;
-        px_put(s, x, y, v);
+    if (rop2 == 13) { fill24(s, x0, y, x1 - x0, c); return; }
+    while (x0 < x1) {
+        int k = x1 - x0 > 128 ? 128 : x1 - x0, i;
+        row_get(s, x0, y, k, line);
+        for (i = 0; i < k; i++) {
+            DWORD v = rop2_apply(rop2, c, line[i]) & 0xFFFFFFUL;
+            line[i] = s->mono ? mono_of(v) : v;
+        }
+        row_put(s, x0, y, k, line);
+        x0 += k;
     }
 }
 
@@ -169,7 +324,7 @@ static BYTE  g_cand[CUR_MAX * CUR_MAX / 8];    /* 1 = przezroczysty */
 static BYTE  g_cxor[CUR_MAX * CUR_MAX / 8];    /* 1 = bialy (gdy AND=0) / odwroc (gdy AND=1) */
 static int   g_cw = 16, g_ch = 16, g_chx, g_chy;
 static int   g_cx = SCR_W / 2, g_cy = SCR_H / 2;
-static BYTE  g_cbg[CUR_MAX * CUR_MAX * 3];
+static DWORD g_cbg[CUR_MAX * CUR_MAX];
 static int   g_cbx, g_cby;                     /* lewy-gorny rog zapisanego tla */
 static BOOL  g_cdrawn, g_chave, g_cexcl;
 static int   g_cshow = 0;                      /* >= 0 widoczny */
@@ -194,46 +349,58 @@ static void cur_default(void)
 
 static SURF g_scr = { SEL_VESA_BASE, 24, 0, SCR_W, SCR_H, SCR_PITCH };
 
+/* Wiersze kursora przyciete do ekranu: [*x0,*x1) w wsp. ekranu; FALSE = poza ekranem */
+static BOOL cur_clip(int __far *x0, int __far *x1)
+{
+    *x0 = g_cbx < 0 ? 0 : g_cbx;
+    *x1 = g_cbx + g_cw > SCR_W ? SCR_W : g_cbx + g_cw;
+    return *x0 < *x1;
+}
+
 static void cur_erase(void)
 {
-    int x, y;
+    int y, x0, x1;
     if (!g_cdrawn) return;
-    for (y = 0; y < g_ch; y++)
-        for (x = 0; x < g_cw; x++) {
-            int sx = g_cbx + x, sy = g_cby + y;
-            BYTE *b = &g_cbg[(y * CUR_MAX + x) * 3];
-            if (sx < 0 || sy < 0 || sx >= SCR_W || sy >= SCR_H) continue;
-            px_put((SURF __far *)&g_scr, sx, sy, b[0] | ((DWORD)b[1] << 8) | ((DWORD)b[2] << 16));
+    if (cur_clip((int __far *)&x0, (int __far *)&x1))
+        for (y = 0; y < g_ch; y++) {
+            int sy = g_cby + y;
+            if (sy < 0 || sy >= SCR_H) continue;
+            row_put((SURF __far *)&g_scr, x0, sy, x1 - x0, &g_cbg[y * CUR_MAX + (x0 - g_cbx)]);
         }
     g_cdrawn = FALSE;
 }
 
 static void cur_draw(void)
 {
-    int x, y;
+    static DWORD line[CUR_MAX];
+    int x, y, x0, x1;
     if (g_cdrawn || g_cshow < 0 || !g_chave) return;
     g_cbx = g_cx - g_chx; g_cby = g_cy - g_chy;
-    for (y = 0; y < g_ch; y++)
-        for (x = 0; x < g_cw; x++) {
-            int sx = g_cbx + x, sy = g_cby + y, bit = y * CUR_MAX + x;
-            BYTE a, xo;
-            DWORD v;
-            BYTE *b = &g_cbg[(y * CUR_MAX + x) * 3];
-            if (sx < 0 || sy < 0 || sx >= SCR_W || sy >= SCR_H) continue;
-            v = px_get((SURF __far *)&g_scr, sx, sy);
-            b[0] = (BYTE)v; b[1] = (BYTE)(v >> 8); b[2] = (BYTE)(v >> 16);
-            a  = (BYTE)((g_cand[bit >> 3] >> (7 - (bit & 7))) & 1);
-            xo = (BYTE)((g_cxor[bit >> 3] >> (7 - (bit & 7))) & 1);
-            if (a && !xo) continue;
-            v = a ? (v ^ 0xFFFFFFUL) : (xo ? 0xFFFFFFUL : 0);
-            px_put((SURF __far *)&g_scr, sx, sy, v);
+    if (cur_clip((int __far *)&x0, (int __far *)&x1))
+        for (y = 0; y < g_ch; y++) {
+            int sy = g_cby + y;
+            DWORD *bg = &g_cbg[y * CUR_MAX + (x0 - g_cbx)];
+            if (sy < 0 || sy >= SCR_H) continue;
+            row_get((SURF __far *)&g_scr, x0, sy, x1 - x0, bg);
+            for (x = x0; x < x1; x++) {
+                int bit = y * CUR_MAX + (x - g_cbx);
+                BYTE a = (BYTE)((g_cand[bit >> 3] >> (7 - (bit & 7))) & 1);
+                BYTE xo = (BYTE)((g_cxor[bit >> 3] >> (7 - (bit & 7))) & 1);
+                DWORD v = bg[x - x0];
+                if (a) { if (xo) v ^= 0xFFFFFFUL; }
+                else v = xo ? 0xFFFFFFUL : 0;
+                line[x - x0] = v;
+            }
+            row_put((SURF __far *)&g_scr, x0, sy, x1 - x0, line);
         }
     g_cdrawn = TRUE;
 }
 
+/* Zagniezdzone wywolania (cel + zrodlo BitBlt) kazde sprawdzaja swoj prostokat;
+ * kursor wraca przy ostatnim cursor_restore */
 void cursor_exclude(int x0, int y0, int x1, int y1)
 {
-    if (g_cdepth++) return;
+    g_cdepth++;
     if (g_cdrawn && x0 < g_cbx + g_cw && x1 > g_cbx && y0 < g_cby + g_ch && y1 > g_cby) {
         cur_erase();
         g_cexcl = TRUE;

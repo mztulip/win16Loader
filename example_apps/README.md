@@ -18,6 +18,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `fonts`    | FONTTEST.EXE | Fonty .FON (EnumFonts, CreateFont, GetTextFace/Metrics/Extent, pogrubienie, tło tekstu) |
 | `iconic`   | ICONTEST.EXE | Okna zminimalizowane: ikony na dole ekranu, WM_PAINTICON/WM_ICONERASEBKGND, ArrangeIconicWindows, WM_QUERYOPEN, powrót do maksymalizacji, ptMinPosition, WS_MINIMIZE, tytuł ikony, dwuklik przywraca |
 | `irqregs`  | IRQTEST.EXE  | Regresja: przerwania myszy/klawiatury (IRQ12/IRQ1) nie zmieniają rejestrów przerwanego kodu (dawniej AL=20h po EOI → losowe #GP przy ruchu myszą) |
+| `gdiperf`  | GDIPERF.EXE  | Poprawność szybkich ścieżek GDI (ROP-y, granice 64 KB, nakładanie, mono, clip, kursor, tekst, wzory) i regresja wydajności: progi czasu względem pętli kalibracyjnej, niezależne od hosta (`docs/wydajnosc_gdi.md`). Kończy się sama |
 
 ## Budowanie i uruchamianie
 
@@ -44,4 +45,4 @@ linie `TEST`. Kod wyjścia 1 = jakiś test nie przeszedł, brak `DONE` albo wyj�
 2. `#include "testlog.h"`, ustaw `t_app = "NAZWA";`, sprawdzaj przez
    `CHECK` / `CHECK_INT` / `CHECK_STR`, na końcu `t_done()`.
 3. Dopisz wpis do `APPS` w `tools/run_examples.py` (katalog, plik, kroki: `w` czekaj,
-   `p` zrzut, `k` klawisz, `a` mysz bezwzględnie, `c` klik).
+   `d` czekaj na `DONE`, `p` zrzut, `k` klawisz, `a` mysz bezwzględnie, `c` klik).

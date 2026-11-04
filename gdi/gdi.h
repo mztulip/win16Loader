@@ -209,6 +209,9 @@ DWORD rgb2px(COLORREF c);              /* COLORREF -> 0x00RRGGBB */
 COLORREF px2rgb(DWORD p);
 DWORD mono_of(DWORD p);                /* kolor -> 0 / 0xFFFFFF */
 void  span_rop2(SURF __far *s, int y, int x0, int x1, DWORD c, WORD rop2);
+void  row_get(SURF __far *s, int x, int y, int n, DWORD *buf);
+void  row_put(SURF __far *s, int x, int y, int n, DWORD *buf);
+void  bits_row(SURF __far *s, int y, int x, int xa, int xb, BYTE __far *bits, WORD step, DWORD c);
 DWORD rop3(BYTE rop, DWORD p, DWORD s, DWORD d);
 
 /* Kursor myszy (gsurf.c) - ukryj gdy rysowanie dotyka jego prostokata */
