@@ -393,7 +393,7 @@ win16_example_app/Win1App.exe:
 	$(MAKE) -C win16_example_app
 
 # -------------------------------------------------------
-boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe fdauto.bat fdconfig.sys $(FDBOOT)
+boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe fdauto.bat win.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot.img
 	mcopy -i boot.img -o fdconfig.sys               ::fdconfig.sys
 	mdel  -i boot.img ::fdauto.bat 2>/dev/null || true
@@ -405,6 +405,7 @@ boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16
 	mcopy -i boot.img WIN16API.DB                   ::win16api.db
 	for f in $(DLLS); do mcopy -i boot.img $$f ::$$(basename $$f); done
 	for f in $(FONTS); do mcopy -i boot.img $(WINE_FONTS)/$$f.fon ::$$(echo $$f | tr a-z A-Z).FON; done
+	mcopy -i boot.img win.bat ::WIN.BAT
 	mcopy -i boot.img win16_example_app/Win1App.exe ::win1app.exe
 	mcopy -i boot.img $(SKIFREE_DIR)/SKI.EXE        ::ski.exe
 	@echo "[OK] boot.img gotowy"
@@ -542,7 +543,7 @@ calmira.img: $(wildcard $(CALMIRA_DIR)/*) windir/WIN.INI windir/SYSTEM.INI
 
 boot_calmira.img: boot.img
 	cp boot.img $@
-	printf '@echo off\r\nC:\r\ncd \\CALMIRA\r\nA:\\LOADER.EXE CALMIRA.EXE\r\n' | mcopy -o -i $@ - ::fdauto.bat
+	printf '@echo off\r\nSET PATH=A:\\;A:\\FREEDOS\\BIN\r\nC:\r\ncd \\CALMIRA\r\nWIN CALMIRA.EXE\r\n' | mcopy -o -i $@ - ::fdauto.bat
 	@echo "[OK] boot_calmira.img gotowy"
 
 run-calmira: boot_calmira.img calmira.img
