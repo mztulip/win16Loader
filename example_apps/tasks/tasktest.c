@@ -104,6 +104,34 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     t0 = GetTickCount();
     while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
     CHECK_INT(GetNumTasks(), 1, "drugie dziecko zakonczone");
+    /* wielokrotne uruchomienia: pamiec i uchwyty wracaja, adresy programu te same */
+    {
+        DWORD free0 = 0;
+        int i, bad = 0;
+        UINT first = 0;
+        char d[60];
+        for (i = 0; i < 12; i++) {
+            h = WinExec("A:\\TASKCHLD.EXE quick", SW_SHOWNORMAL);
+            if (h <= 32) { bad++; break; }
+            if (!first) first = h;
+            if (h != first) bad++;
+            t0 = GetTickCount();
+            while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
+            if (!free0) free0 = GetFreeSpace(0);
+        }
+        CHECK_INT(bad, 0, "12 uruchomien: to samo hInstance, zawsze sukces");
+        wsprintf(d, "%ld KB -> %ld KB", free0 / 1024, GetFreeSpace(0) / 1024);
+        t_log("pamiec wraca po koncu zadania", GetFreeSpace(0) >= free0, d);
+    }
+
+    /* wyjatek w dziecku konczy tylko dziecko */
+    h = WinExec("A:\\TASKCHLD.EXE crash", SW_SHOWNORMAL);
+    CHECK(h > 32, "uruchomienie programu z wyjatkiem");
+    t0 = GetTickCount();
+    while (GetNumTasks() > 1 && GetTickCount() - t0 < 30000UL) pump(100);
+    CHECK_INT(GetNumTasks(), 1, "wyjatek konczy tylko winne zadanie");
+    CHECK(FindWindow("TaskCrashW", NULL) == 0, "okno po wyjatku zniszczone");
+    CHECK(IsWindow(me), "rodzic po wyjatku dziecka zyje");
     t_done();
     return 0;
 }

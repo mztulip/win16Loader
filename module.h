@@ -44,6 +44,7 @@
 #define MTF_DLL         0x0001
 #define MTF_VIRTUAL     0x0002  /* brak pliku - wszystkie importy to stuby */
 #define MTF_SYSTEM      0x0004  /* nasz KERNEL/USER/GDI */
+#define MTF_RUNNING     0x0008  /* program dziala (ustawia i kasuje KERNEL) */
 
 /* KCB rozszerzenie (KCB ma teraz 1KB) */
 #define KCB_DYN_MAX_OFF   512   /* WORD max selektor dla GlobalAlloc */

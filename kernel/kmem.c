@@ -29,6 +29,7 @@ typedef struct {
     BYTE  nsel;
     BYTE  lock;
     BYTE  flags;      /* GMEM_* >> 8 */
+    WORD  owner;      /* zadanie, gdy blok przydzielil sam program; 0 = system */
 } SELINFO;
 
 static SELINFO g_sel[MAX_SELS];
@@ -290,9 +291,26 @@ HGLOBAL API GlobalAlloc(WORD flags, DWORD size)
     g_sel[SIDX(s)].size  = size;
     g_sel[SIDX(s)].nsel  = n;
     g_sel[SIDX(s)].flags = (BYTE)(flags >> 8);
+    g_sel[SIDX(s)].owner = task_owner();
     for (i = 1; i < n; i++) g_sel[SIDX(s) + i].type = ST_TAIL;
     if (flags & GMEM_ZEROINIT) phys_zero(base, cap);
     return s;
+}
+
+void kmem_set_owner(WORD h, WORD task)
+{
+    SELINFO *si = head_of(h);
+    if (si) si->owner = task;
+}
+
+/* Koniec zadania: jego bloki znikaja, poza GMEM_DDESHARE (mogly trafic do innych programow) */
+void kmem_free_task(WORD task)
+{
+    WORD i;
+    if (!task) return;
+    for (i = 0; i < MAX_SELS; i++)
+        if (g_sel[i].type == ST_HEAD && g_sel[i].owner == task && !(g_sel[i].flags & 0x20))
+            GlobalFree(g_sel_base + i * 8);
 }
 
 /* ordinal 17 */

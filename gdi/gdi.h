@@ -169,6 +169,7 @@ typedef struct {
     BYTE type;
     BYTE stock;                    /* obiekt magazynowy - DeleteObject ignoruje */
     WORD slot;                     /* indeks w puli danego typu */
+    WORD owner;                    /* zadanie, gdy obiekt utworzyl sam program; 0 = system */
 } GOBJ;
 
 #define MAX_OBJS 1024
@@ -216,6 +217,8 @@ DWORD rop3(BYTE rop, DWORD p, DWORD s, DWORD d);
 
 /* Kursor myszy (gsurf.c) - ukryj gdy rysowanie dotyka jego prostokata */
 void  cursor_exclude(int x0, int y0, int x1, int y1);
+void  cursor_reset(void);
+WORD  API GetCurrentTask(void);
 void  cursor_restore(void);
 
 /* ---- gdraw.c ---- */

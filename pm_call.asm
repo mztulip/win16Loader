@@ -73,6 +73,9 @@ PIC_BASE_S      equ 0x58    ; IRQ8-15 -> INT 58h-5Fh
 KCB_INT_CB      equ 538     ; DWORD: far ptr dyspozytora przerwan programowych (KERNEL)
 KCB_CALLER_DS   equ 520     ; WORD: DS wolajacego ostatnie API (int3f_handler)
 RMX_INT         equ 0xE0    ; rm_int_service -> loader NE (WinExec), kernel/ktask.c
+KCB_EXC_CB      equ 544     ; DWORD: wejscie KERNEL dla wyjatku przy wielu zadaniach
+KCB_NTASKS      equ 594     ; WORD: liczba zadan (>= 2: wyjatek konczy zadanie)
+KCB_EXC_STACK   equ 596     ; WORD: selektor stosu dla wyjatku
 KCB_TRACE       equ 536     ; WORD: !=0 -> int3f_handler loguje kazde wywolanie API
 MT_SHIFT        equ 7       ; 128 B na wpis tablicy modulow
 MT_DGROUP       equ 10      ; offset WORD dgroup (DS modulu) we wpisie
@@ -1559,6 +1562,21 @@ exc_common:
     out  dx, al
     pop  dx
     pop  ax
+    ; Wiele zadan: konczy sie tylko winne (KERNEL), na osobnym stosie. Jedno: panika jak dotad.
+    push ds
+    push ax
+    mov  ax, SEL_KCB
+    mov  ds, ax
+    cmp  word [KCB_NTASKS], 2
+    pop  ax
+    pop  ds
+    jb   .one_task
+    mov  ax, SEL_KCB
+    mov  ds, ax
+    mov  ss, [KCB_EXC_STACK]
+    mov  sp, 0x1FFE
+    call far [KCB_EXC_CB]
+.one_task:
     push es                  ; oryginalny ES (dla zrzutu rejestrow)
     push ax
     push bx

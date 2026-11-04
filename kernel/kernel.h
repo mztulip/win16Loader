@@ -70,6 +70,9 @@ typedef void (__far __pascal *FARPROC)(void);
 #define KCB_APP_HEAPSTART 534
 #define KCB_I3F_STACK     590   /* offset int3f_stack w SEL_DATA16 */
 #define KCB_I3F_DEPTH     592   /* offset int3f_depth w SEL_DATA16 */
+#define KCB_EXC_CB        544   /* DWORD: wejscie KERNEL dla wyjatku, gdy dziala wiele zadan */
+#define KCB_NTASKS        594   /* >= 2: wyjatek konczy zadanie, inaczej panika */
+#define KCB_EXC_STACK     596   /* selektor stosu dla wyjatku */
 #define KCB_WINDIR        600
 #define KCB_SYSDIR        664
 #define KCB_CMDLINE       728
@@ -92,6 +95,7 @@ typedef void (__far __pascal *FARPROC)(void);
 #define MTF_DLL         0x0001
 #define MTF_VIRTUAL     0x0002
 #define MTF_SYSTEM      0x0004
+#define MTF_RUNNING     0x0008
 #define MTE(i)          ((BYTE __far *)MK_FP(SEL_MODTAB, (i) * MT_SIZE))
 #define MTW(i, off)     (*(WORD __far *)(MTE(i) + (off)))
 
@@ -158,6 +162,10 @@ WORD  API GetCurrentPDB(void);
 void  task_init(void);
 void  task_exit(WORD ax);
 WORD  task_show(void);
+WORD  task_owner(void);
+void  kmem_set_owner(WORD h, WORD task);
+void  kmem_free_task(WORD task);
+void  kdos_close_task(WORD task);
 BOOL  task_is_first(void);
 int   rm_int21(void);                         /* uzywa RMREGS w RMBUF */
 HFILE API _lopen(LPCSTR path, int mode);

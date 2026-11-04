@@ -39,6 +39,28 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     HWND h;
     int i;
     t_app = "TASKCHLD";
+    if (cmd[0] == 'q') {                              /* "quick": wszystko zostawia nieposprzatane */
+        int k, files = 0, brushes = 0, mem = 0;
+        char d[60];
+        for (k = 0; k < 10; k++) if (_lopen("A:\\LOADER.EXE", 0) != -1) files++;
+        for (k = 0; k < 200; k++) if (CreateSolidBrush(RGB(k, 0, 0))) brushes++;
+        for (k = 0; k < 8; k++) if (GlobalAlloc(GMEM_FIXED, 32768L)) mem++;
+        wsprintf(d, "pliki=%d pedzle=%d bloki=%d", files, brushes, mem);
+        t_log("zasoby nieposprzatane", files == 10 && brushes == 200 && mem == 8, d);
+        return 0;
+    }
+    if (cmd[0] == 'c') {                              /* "crash": wyjatek w programie */
+        char __far *bad = (char __far *)0x3FF00000L;      /* selektor bez deskryptora */
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = ChildProc;
+        wc.hInstance = hi;
+        wc.lpszClassName = "TaskCrashW";
+        RegisterClass(&wc);
+        ShowWindow(CreateWindow("TaskCrashW", "Crash", WS_OVERLAPPEDWINDOW, 300, 200, 200, 100, NULL, NULL, hi, NULL), SW_SHOWNOACTIVATE);
+        *bad = 1;
+        t_log("BLAD: wyjatek nie zadzialal", FALSE, "");
+        return 0;
+    }
     CHECK(prev == 0, "hPrevInstance = 0");
     CHECK(hi != 0, "hInstance");
     CHECK(_fstrncmp(cmd, "arg1 arg2", 9) == 0 && (cmd[9] == 0 || cmd[9] == 13), "linia polecen");

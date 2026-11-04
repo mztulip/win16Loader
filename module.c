@@ -47,6 +47,18 @@ unsigned short g_app_stack, g_app_heap, g_app_heapstart;
 
 extern unsigned long g_ext_mem_kb;
 
+/* Przydzialy programu w kolejnosci ich wykonania. Ponowne uruchomienie zakonczonego programu
+ * wykonuje te same kroki, wiec dostaje te same adresy: XMS i selektory nie uciekaja. */
+#define MAX_ALLOCLOG 700
+struct ALLOCLOG {
+    unsigned nx, ns;
+    unsigned char bad;
+    struct { unsigned long phys, size; } x[MAX_ALLOCLOG];
+    unsigned s[64 + 8];
+};
+static struct ALLOCLOG __far *g_rec, __far *g_replay;
+static unsigned g_rp_x, g_rp_s, g_replay_idx;
+
 typedef struct {
     char           name[10];
     unsigned       flags;
@@ -56,6 +68,7 @@ typedef struct {
     unsigned short __far *ent_off;   /* [MAX_ORD] */
     unsigned char  __far *ent_seg;   /* [MAX_ORD]: 0=brak, 0xFE=stala */
     unsigned char  __far *ent_flg;   /* [MAX_ORD]: flagi wejscia (bit1 = shared data) */
+    struct ALLOCLOG __far *log;      /* programy: przydzialy do ponownego uruchomienia */
 } MOD;
 
 static MOD            g_mods[MAX_MODS];
@@ -114,11 +127,22 @@ static unsigned long xms_alloc(unsigned long size)
     /* Kazdy blok na wlasnych stronach 4KB: kod i dane (stos!) na jednej stronie to w QEMU
      * wolna sciezka przy kazdym zapisie - wykrywanie kodu samomodyfikujacego (docs/wydajnosc_gdi.md) */
     unsigned long p = (g_xms_next + 4095UL) & ~4095UL;
+    if (g_replay) {
+        if (g_rp_x < g_replay->nx && size <= g_replay->x[g_rp_x].size) return g_replay->x[g_rp_x++].phys;
+        mlog("ERROR: inny uklad pliku przy ponownym ladowaniu\n");
+        return 0;
+    }
     if (p + size > g_xms_limit) {
         mlog("ERROR: brak XMS (potrzeba %lu B @%06lX, limit %06lX)\n", size, p, g_xms_limit);
         return 0;
     }
     g_xms_next = p + size;
+    if (g_rec) {
+        if (g_rec->nx < MAX_ALLOCLOG) {
+            g_rec->x[g_rec->nx].phys = p;
+            g_rec->x[g_rec->nx++].size = size;
+        } else g_rec->bad = 1;
+    }
     return p;
 }
 
@@ -193,7 +217,12 @@ static void gdt_add(unsigned sel, unsigned long base, unsigned long limit,
 static unsigned sel_alloc(unsigned n)
 {
     unsigned s = g_next_sel;
+    if (g_replay) return g_rp_s < g_replay->ns ? g_replay->s[g_rp_s++] : 0;
     g_next_sel += n * 8u;
+    if (g_rec) {
+        if (g_rec->ns < sizeof(g_rec->s) / sizeof(g_rec->s[0])) g_rec->s[g_rec->ns++] = s;
+        else g_rec->bad = 1;
+    }
     return s;
 }
 
@@ -566,8 +595,16 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
         if (name) { strncpy(mname, name, 9); mname[9] = 0; }
     }
     if (!_fullpath(full, path, sizeof(full))) strcpy(full, path);
-    idx = (unsigned)new_mod(mname, (is_app ? 0 : MTF_DLL) | (system ? MTF_SYSTEM : 0), full);
-    if ((int)idx < 0) { fclose(f); return -1; }
+    if (is_app && g_replay) idx = g_replay_idx;
+    else {
+        idx = (unsigned)new_mod(mname, (is_app ? 0 : MTF_DLL) | (system ? MTF_SYSTEM : 0), full);
+        if ((int)idx < 0) { fclose(f); return -1; }
+        if (is_app) {
+            g_mods[idx].log = (struct ALLOCLOG __far *)_fmalloc(sizeof(struct ALLOCLOG));
+            if (g_mods[idx].log) _fmemset(g_mods[idx].log, 0, sizeof(struct ALLOCLOG));
+            g_rec = g_mods[idx].log;
+        }
+    }
     m = &g_mods[idx];
     m->nsegs = ne.ne_cseg;
     if (m->nsegs > MAX_SEGS) { mlog("ERROR: za duzo segmentow\n"); fclose(f); return -1; }
@@ -653,7 +690,12 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
 
     /* Zaleznosci (rekurencyjnie) - tmp jest potem nadpisywany */
     for (i = 0; i < nref; i++) {
-        mod_map[i] = mod_load(myrefs[i], 0, 0);
+        {   /* import zaladowany przy okazji nie nalezy do przydzialow programu */
+            struct ALLOCLOG __far *sr = g_rec, __far *sp = g_replay;
+            g_rec = 0; g_replay = 0;
+            mod_map[i] = mod_load(myrefs[i], 0, 0);
+            g_rec = sr; g_replay = sp;
+        }
         if (mod_map[i] < 0) { fclose(f); return -1; }
     }
 
@@ -739,6 +781,7 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     }
     _ffree(segtab);
     mt_set_word(idx, MT_DGROUP, m->dgroup_sel);
+    if (is_app) g_rec = 0;
 
     if (is_app) {
         g_entry_cs = ne.ne_cs ? m->first_sel + (ne.ne_cs - 1u) * 8u : 0;
@@ -928,7 +971,22 @@ void mod_exec_rm(void)
     if (g_next_sel + (MAX_SEGS + 4u) * 8u > g_sel_limit) { res[0] = 0; res[1] = 8; return; }
     if (access(path, 0)) { res[0] = 0; res[1] = 2; return; }
     dir_of(path, g_appdir);
+    {   /* zakonczony program z tego samego pliku: te same adresy */
+        static char full[96];
+        unsigned i;
+        g_replay = 0;
+        if (!_fullpath(full, path, sizeof(full))) strcpy(full, path);
+        for (i = 0; i < g_nmods; i++) {
+            unsigned char __far *e = mt_entry(i);
+            if (g_mods[i].log && !g_mods[i].log->bad && !(*(unsigned short __far *)(e + MT_FLAGS) & MTF_RUNNING) &&
+                !_fstricmp((char __far *)e + MT_PATH, (char __far *)full)) {
+                g_replay = g_mods[i].log; g_replay_idx = i; g_rp_x = g_rp_s = 0;
+                break;
+            }
+        }
+    }
     idx = mod_load(0, path, 1);
+    g_replay = 0;
     if (idx >= 0) stubs_resolve();
     gdt_apply();
     kcb[KCB_THUNK_NEXT_OFF / 2] = g_nthunks * THUNK_SIZE;

@@ -19,6 +19,10 @@ typedef struct {
 
 static TASK g_t[MAX_TASKS];
 static int  g_cur, g_n;
+static int  g_dying = -1;            /* zadanie konczone po wyjatku */
+static BOOL g_fault;
+
+extern void fault_entry(void);
 
 /* Dla task_boot (kasm.asm): pierwsze uruchomienie zadania */
 WORD g_boot_cs, g_boot_ip, g_boot_ds, g_boot_psp;
@@ -51,6 +55,14 @@ static HTASK tdb_new(WORD hinst)
     return h;
 }
 
+static void set_running(WORD hinst, BOOL on)
+{
+    int mi = mod_from_handle(hinst);
+    if (mi < 0) return;
+    if (on) MTW(mi, MT_FLAGS) |= MTF_RUNNING;
+    else MTW(mi, MT_FLAGS) &= ~MTF_RUNNING;
+}
+
 /* Zadanie startowe: uruchomil je loader, jego dane sa w KCB */
 void task_init(void)
 {
@@ -68,6 +80,21 @@ void task_init(void)
     t->heapstart = KCBW(KCB_APP_HEAPSTART);
     g_cur = 0;
     g_n = 1;
+    set_running(t->hinst, TRUE);
+    {   /* wyjatek konczacy zadanie dziala na wlasnym stosie: stos zadania moze byc zepsuty */
+        WORD st = (WORD)GlobalAlloc(0x40, 0x2000);
+        kmem_set_owner(st, 0);
+        kmem_set_owner(t->h, 0);
+        KCBW(KCB_EXC_STACK) = st;
+        *(DWORD __far *)MK_FP(SEL_KCB, KCB_EXC_CB) = (DWORD)(void __far *)fault_entry;
+    }
+}
+
+/* Zadanie, ktoremu nalezy blok przydzielony wlasnie teraz: tylko gdy API wywolal sam program */
+WORD task_owner(void)
+{
+    if (!g_n || KCBW(KCB_CALLER_DS) != g_t[g_cur].hinst) return 0;
+    return g_t[g_cur].h;
 }
 
 static void switch_to(int i)
@@ -88,6 +115,7 @@ static void switch_to(int i)
     g_boot_cs = n->entry_cs; g_boot_ip = n->entry_ip;
     g_boot_ds = n->hinst; g_boot_psp = n->psp;
     g_cur = i;
+    KCBW(KCB_NTASKS) = (i == g_dying) ? 0 : g_n;
     task_switch(&o->ss, &o->sp, n->ss, n->sp);
 }
 
@@ -140,27 +168,61 @@ BOOL task_is_first(void) { task_init(); return g_cur == 0; }
 void task_exit(WORD ax)
 {
     TASK *t;
-    WORD dummy_ss, dummy_sp;
     int n;
     task_init();
     if (g_n <= 1) { pm_int21(ax); return; }
     t = &g_t[g_cur];
-    {   /* okna, timery, kolejka, klasy zadania: USER (nie ma importu KERNEL -> USER) */
-        HMODULE u = GetModuleHandle("USER");
-        typedef void (API *TASKEXITPROC)(WORD, WORD);
-        TASKEXITPROC f = u ? (TASKEXITPROC)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
-        if (f) f(t->h, t->hinst);
+    {   /* okna, kolejka i klasy: USER, obiekty: GDI (KERNEL nie importuje tych modulow) */
+        typedef void (API *USEREXIT)(WORD, WORD, BOOL);
+        typedef void (API *GDIEXIT)(WORD);
+        HMODULE u = GetModuleHandle("USER"), g = GetModuleHandle("GDI");
+        USEREXIT fu = u ? (USEREXIT)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
+        GDIEXIT fg = g ? (GDIEXIT)GetProcAddress(g, (LPCSTR)MK_FP(0, 915)) : 0;
+        if (fu) fu(t->h, t->hinst, g_fault);
+        if (fg) fg(t->h);
     }
+    kdos_close_task(t->h);
+    kmem_free_task(t->h);
+    set_running(t->hinst, FALSE);
     if (t->psp != SEL_PSP) GlobalFree(t->psp);
     GlobalFree(t->h);
     t->used = FALSE;
     g_n--;
+    g_dying = -1;
+    g_fault = FALSE;
     n = next_task();
     *(WORD __far *)MK_FP(SEL_DATA16, KCBW(KCB_I3F_DEPTH)) = 0;
     t->depth = 0;
-    /* switch_to zapisze stan w nieuzywanym wpisie, stos konczonego zadania nikomu nie wroci */
-    (void)dummy_ss; (void)dummy_sp;
-    switch_to(n);
+    switch_to(n);                                 /* stos konczonego zadania nikomu nie wroci */
+}
+
+/* Wyjatek przy wielu zadaniach (kasm.asm: fault_entry, na stosie KCB_EXC_STACK): konczy tylko
+ * winne zadanie. Komunikat po sprzataniu, inne programy dzialaja w tym czasie dalej. */
+void task_fault_c(void)
+{
+    static char msg[80];
+    typedef int (API *MSGBOX)(WORD, LPCSTR, LPCSTR, WORD);
+    HMODULE u;
+    MSGBOX mb;
+    int mi;
+    *(WORD __far *)MK_FP(SEL_DATA16, KCBW(KCB_I3F_DEPTH)) = 0;
+    KCBW(KCB_NTASKS) = 0;                          /* wyjatek przy sprzataniu = panika */
+    g_dying = g_cur;
+    g_fault = TRUE;
+    mi = mod_from_handle(g_t[g_cur].hinst);
+    kstrcpy((LPSTR)msg, "Program ");
+    if (mi >= 0) kstrcpy((LPSTR)msg + kstrlen((LPCSTR)msg), (LPCSTR)(MTE(mi) + MT_NAME));
+    kstrcpy((LPSTR)msg + kstrlen((LPCSTR)msg), " wykonal niedozwolona operacje i zostal zamkniety.");
+    dbg_str("KERNEL: wyjatek konczy zadanie: ", (LPCSTR)msg);
+    u = GetModuleHandle("USER");
+    {
+        typedef void (API *USEREXIT)(WORD, WORD, BOOL);
+        USEREXIT fu = u ? (USEREXIT)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
+        if (fu) fu(g_t[g_cur].h, g_t[g_cur].hinst, TRUE);
+    }
+    mb = u ? (MSGBOX)GetProcAddress(u, (LPCSTR)MK_FP(0, 1)) : 0;
+    if (mb) mb(0, (LPCSTR)msg, (LPCSTR)"Blad programu", 0x10);
+    task_exit(0x4CFF);
 }
 
 /* Slowo programu z cmd do out, reszta to argumenty. Zwraca wskaznik na argumenty. */
@@ -222,6 +284,9 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     t->h = tdb_new(t->hinst);
     t->psp = (WORD)GlobalAlloc(0x40, 256);
     if (!t->h || !t->psp) return 8;
+    kmem_set_owner(t->h, 0);                             /* nie naleza do uruchamiajacego */
+    kmem_set_owner(t->psp, 0);
+    set_running(t->hinst, TRUE);
     psp = (BYTE __far *)MK_FP(t->psp, 0);
     kmemcpy(psp, MK_FP(SEL_PSP, 0), 0x80);
     n = kstrlen(args);
@@ -241,6 +306,7 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     f[8] = (WORD)task_boot;
     t->used = TRUE;
     g_n++;
+    KCBW(KCB_NTASKS) = g_n;
     dbg_str("KERNEL: WinExec ", (LPCSTR)prog);
     Yield();                                             /* nowe zadanie dostaje CPU od razu */
     return t->hinst;

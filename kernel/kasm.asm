@@ -110,6 +110,18 @@ task_returned:
     mov  ax, 0x4C00
     int  0x21
 
+; Wejscie z exc_common (pm_call.asm): wyjatek przy wielu zadaniach, juz na stosie KCB_EXC_STACK.
+extern task_fault_c_
+global fault_entry_
+fault_entry_:
+    mov  ax, seg _g_d3
+    mov  ds, ax
+    mov  es, ax
+    sti
+    call task_fault_c_
+.never:
+    jmp  .never
+
 ; ---------------------------------------------------------------------
 ; DOS3CALL (ordinal 102): INT 21h z rejestrow wolajacego. DS wolajacego jest
 ; w KCB (int3f_handler podmienil DS na DGROUP KERNEL). Wynik: rejestry + CF.

@@ -40,8 +40,8 @@ APPS = {
                   + ['kesc', 'd5', 'pshot', 'kalt-f4', 'w1']),
     # dysk B: przy jednej stacji i wyjeta dyskietka: DOS nie moze prosic o klawisz (konczy sie DONE)
     'dosprompt': ('example_apps/dosprompt', 'DOSPROMP.EXE', ['Meject -f floppy0', 'w0.5', 'kshift', 'd40', 'pshot']),
-    # zadania: WinExec, Yield, koniec zadania (konczy sie sama)
-    'tasks':    ('example_apps/tasks', 'TASKTEST.EXE', ['d40', 'w1', 'pshot']),
+    # zadania: WinExec, Yield, koniec zadania; Enter zamyka komunikat o wyjatku (konczy sie sama)
+    'tasks':    ('example_apps/tasks', 'TASKTEST.EXE', ['w1', 'kret'] * 25 + ['d60', 'w1', 'pshot']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

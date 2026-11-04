@@ -1590,22 +1590,23 @@ programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w oryginale, bez la
      GetInstanceData.
 
 Stan (galaz tasks):
-- ZROBIONE: 21a, 21b, 21c (bez GetQueueStatus na zadanie), czesc 21d (okna, timery, kolejka, klasy),
-  czesc 21e (WinExec, ShellExecute, IsTask, GetNumTasks, PSP z linia polecen).
+- ZROBIONE: 21a, 21b, 21c (bez GetQueueStatus na zadanie), 21d (okna, timery, kolejka, klasy,
+  pamiec GlobalAlloc, obiekty GDI, pliki), czesc 21e (WinExec, ShellExecute, IsTask, GetNumTasks,
+  PSP z linia polecen). Ponowne uruchomienie zakonczonego programu uzywa tych samych adresow.
+  Wyjatek przy wielu zadaniach konczy tylko winne zadanie, z komunikatem.
   Calmira uruchamia SKI.EXE, przelaczanie paskiem zadan, zamkniecie, ponowne uruchomienie.
 - DO ZROBIENIA:
-  * 21d: zwalnianie obiektow GDI, pamieci GlobalAlloc i plikow konczonego zadania.
-  * Kazde uruchomienie laduje program od nowa do XMS (ok. 450 KB SKI z zapasu 4 MB), nic nie wraca:
-    po kilku uruchomieniach WinExec zwroci blad. Wymaga 21f albo ponownego uzycia pamieci.
-  * 21e: LoadModule z LOADPARMS, GetModuleUsage, FreeLibrary, LibEntry DLL ladowanych przez WinExec
-    (dzis nie sa wolane!), katalog biezacy na zadanie, TaskFirst/TaskNext.
-  * 21f: hPrevInstance, GetInstanceData (dzis kazda instancja = osobna kopia, hPrev = 0).
+  * 21e: LibEntry DLL ladowanych przez WinExec (dzis nie sa wolane!), katalog biezacy na zadanie,
+    LoadModule z LOADPARMS, GetModuleUsage, FreeLibrary, TaskFirst/TaskNext.
+  * 21f: hPrevInstance, GetInstanceData. Dzialajace rownolegle kopie programu to osobne kopie kodu,
+    kazda zabiera nowy XMS (zwracany dopiero przy ponownym uruchomieniu tej kopii).
+  * USER: menu, ikony i kursory konczonego zadania nie sa zwalniane.
   * WaitEvent/PostEvent, LockCurrentTask, SetTaskQueue/GetTaskQueue to nadal stuby.
-  * Wyjatek w programie konczy caly system; ma konczyc tylko zadanie.
+  * Jedno zadanie: wyjatek to dalej panika calego systemu (nie ma do czego wrocic).
 
 Lepiej niz w oryginale (o ile nie lamie zgodnosci):
-- wyjatek w programie konczy tylko to zadanie (komunikat zamiast paniki calego systemu),
-- zadne zadanie nie ma pracy = HLT, zamiast aktywnego czekania.
+- wyjatek w programie konczy tylko to zadanie (komunikat zamiast paniki calego systemu) [zrobione],
+- zadne zadanie nie ma pracy = HLT, zamiast aktywnego czekania [zrobione].
 
 Testy: kazdy etap w example_apps; pierwszy cel: program uruchamia drugi przez WinExec
 i wymienia z nim komunikaty, dopiero potem Calmira + SKI.EXE.

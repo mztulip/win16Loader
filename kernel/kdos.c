@@ -67,12 +67,29 @@ static WORD put_str(WORD off, LPCSTR s)
 /* ============================================================
  * Pliki: _lopen/_lcreat/_lclose/_lread/_lwrite/_hread/_hwrite/_llseek
  * ============================================================ */
+/* Pliki zadan: koniec zadania zamyka to, co zostawilo otwarte */
+#define MAX_FH 64
+static struct { WORD h, task; } g_fh[MAX_FH];
+
+static void fh_add(WORD h)
+{
+    WORD i, task = GetCurrentTask();
+    for (i = 0; i < MAX_FH; i++) if (!g_fh[i].task) { g_fh[i].h = h; g_fh[i].task = task; return; }
+}
+
+static void fh_del(WORD h)
+{
+    WORD i;
+    for (i = 0; i < MAX_FH; i++) if (g_fh[i].task && g_fh[i].h == h) g_fh[i].task = 0;
+}
+
 /* ordinal 85 */
 HFILE API _lopen(LPCSTR path, int mode)
 {
     RMREGS __far *r = rr(0x3D00 | (mode & 0xFF));
     r->dx = put_str(RMBUF_DATA, path);
     if (rm_int21()) return HFILE_ERROR;
+    fh_add(r->ax);
     return (HFILE)r->ax;
 }
 
@@ -83,6 +100,7 @@ HFILE API _lcreat(LPCSTR path, int attr)
     r->cx = (WORD)attr;
     r->dx = put_str(RMBUF_DATA, path);
     if (rm_int21()) return HFILE_ERROR;
+    fh_add(r->ax);
     return (HFILE)r->ax;
 }
 
@@ -91,6 +109,7 @@ HFILE API _lclose(HFILE h)
 {
     RMREGS __far *r = rr(0x3E00);
     r->bx = (WORD)h;
+    fh_del(h);
     return rm_int21() ? HFILE_ERROR : 0;
 }
 
@@ -385,7 +404,26 @@ static void rm_set_dta(void)
     rm_int21();
 }
 
+static void dos3call_do(void);
+
+void kdos_close_task(WORD task)
+{
+    WORD i;
+    for (i = 0; i < MAX_FH; i++)
+        if (g_fh[i].task == task) _lclose(g_fh[i].h);
+}
+
 void dos3call_c(void)
+{
+    BYTE ah = (BYTE)(g_d3.ax >> 8);
+    WORD bx = g_d3.bx;
+    dos3call_do();
+    if (g_d3.flags & CF_FLAG) return;
+    if (ah == 0x3C || ah == 0x3D || ah == 0x5A || ah == 0x5B || ah == 0x6C) fh_add(g_d3.ax);
+    else if (ah == 0x3E) fh_del(bx);
+}
+
+static void dos3call_do(void)
 {
     BYTE ah = (BYTE)(g_d3.ax >> 8);
     RMREGS __far *r;

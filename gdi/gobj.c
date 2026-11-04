@@ -92,6 +92,10 @@ WORD obj_new(BYTE type)
     g_obj[i].type = type;
     g_obj[i].stock = 0;
     g_obj[i].slot = slot;
+    {   /* wlascicielem jest zadanie tylko dla obiektow z bezposredniego wywolania programu */
+        WORD __far *k = (WORD __far *)MK_FP(0x98, 0);       /* KCB: hInstance zadania, DS wolajacego */
+        g_obj[i].owner = k[520 / 2] == k[0] ? GetCurrentTask() : 0;
+    }
     d = (BYTE __far *)MK_FP(g_pool[t].mem, 0) + slot * g_pool[t].size;
     { WORD k; for (k = 0; k < g_pool[t].size; k++) d[k] = 0; }
     return I2H(i);
@@ -397,4 +401,17 @@ int API MulDiv(int a, int b, int c)
     r = (long)a * b;
     if ((r < 0) != (c < 0)) r -= c / 2; else r += c / 2;
     return (int)(r / c);
+}
+
+/* ordinal 915 (prywatny): koniec zadania. Najpierw DC: zwalniaja wybrane do nich obiekty. */
+void API GdiTaskExit(WORD task)
+{
+    WORD i;
+    for (i = 1; i < MAX_OBJS; i++)
+        if (g_obj[i].owner == task && !g_obj[i].stock && (g_obj[i].type == OT_DC || g_obj[i].type == OT_MEMDC))
+            DeleteDC(I2H(i));
+    for (i = 1; i < MAX_OBJS; i++)
+        if (g_obj[i].owner == task && !g_obj[i].stock && g_obj[i].type != OT_FREE)
+            DeleteObject(I2H(i));
+    cursor_reset();
 }

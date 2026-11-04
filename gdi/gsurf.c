@@ -407,6 +407,14 @@ void cursor_exclude(int x0, int y0, int x1, int y1)
     }
 }
 
+/* Po przerwanym rysowaniu (koniec zadania w trakcie operacji) */
+void cursor_reset(void)
+{
+    g_cdepth = 1;
+    g_cexcl = !g_cdrawn;
+    cursor_restore();
+}
+
 void cursor_restore(void)
 {
     if (--g_cdepth > 0) return;

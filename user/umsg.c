@@ -356,15 +356,14 @@ static void mouse_buttons(WORD b)
 
 /* Okno pojawilo sie, zniknelo albo przesunelo: to, co lezy pod kursorem, dostanie WM_MOUSEMOVE
  * (i WM_SETCURSOR) bez ruchu myszy */
-static BOOL g_mouse_stale;
+static BOOL g_mouse_stale, g_input_busy;
 void mouse_windows_changed(void) { g_mouse_stale = TRUE; }
 
 void input_poll(void)
 {
-    static BOOL busy;                                         /* send_msg moze oddac CPU innemu zadaniu */
     BYTE __far *k = (BYTE __far *)MK_FP(SEL_KCB, 0);
-    if (busy) return;
-    busy = TRUE;
+    if (g_input_busy) return;                                 /* send_msg moze oddac CPU innemu zadaniu */
+    g_input_busy = TRUE;
     while (k[1024] != k[1025]) {                              /* klawiatura */
         WORD e = *(WORD __far *)(k + 1026 + k[1024] * 2);
         k[1024] = (BYTE)((k[1024] + 1) % 64);
@@ -383,7 +382,7 @@ void input_poll(void)
         g_mouse_stale = FALSE;
         mouse_msg(WM_MOUSEMOVE, FALSE);
     }
-    busy = FALSE;
+    g_input_busy = FALSE;
 }
 
 /* ============================================================
@@ -839,12 +838,24 @@ int mouse_y(void) { return g_my; }
 WORD mouse_btn(void) { return g_mbtn; }
 
 
-/* ordinal 952 (prywatny): koniec zadania, wola KERNEL przed zwolnieniem zadania */
-void API UserTaskExit(WORD task, WORD hinst)
+/* ordinal 952 (prywatny): koniec zadania, wola KERNEL. fault = wyjatek: kod programu nie jest juz
+ * wykonywany (okna dostaja DefWindowProc), a wejscie moglo zostac przerwane w polowie. */
+void API UserTaskExit(WORD task, WORD hinst, BOOL fault)
 {
     HWND c, next;
     WORD i;
     int k;
+    static WORD done;
+    if (done == task) return;                                /* po wyjatku wolane drugi raz z task_exit */
+    done = task;
+    if (fault) {
+        g_input_busy = FALSE;
+        if (g_capture && WP(g_capture) && WP(g_capture)->task == task) g_capture = 0;
+        for (i = 1; i < MAX_WND; i++) {
+            WND __far *w = (WND __far *)MK_FP(g_wndmem, 0) + i;
+            if (w->used && w->task == task) w->proc = (WNDPROC)DefWindowProc;
+        }
+    }
     for (c = WP(HDESKTOP)->child; c; c = next) {
         next = WP(c) ? WP(c)->next : 0;
         if (WP(c) && WP(c)->task == task) DestroyWindow(c);
@@ -853,6 +864,6 @@ void API UserTaskExit(WORD task, WORD hinst)
     for (i = g_qh; i != g_qt; i = (i + 1) % QSIZE) if (g_qtask[i] == task) g_q[i].message = WM_NULL;
     k = quit_slot(task);
     if (k >= 0) g_quits[k].task = 0;
-    for (k = 0; k < MAX_SENDS; k++) if (g_xs[k].used && g_xs[k].to == task) { g_xs[k].done = TRUE; }
+    for (k = 0; k < MAX_SENDS; k++) if (g_xs[k].used && g_xs[k].to == task) g_xs[k].done = TRUE;
     cls_free_inst(hinst);
 }
