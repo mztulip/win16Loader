@@ -615,6 +615,7 @@ pm16_call_app:
     mov  [app_ret_ss], ss
     mov  [app_ret_sp], sp
     mov  word [int3f_depth], 0
+    call kbc_drain
     sti                 ; wlacz przerwania: IRQ0 -> IDT[0x20] -> irq0_handler
 
     ; Inicjalizacja DLL (LibEntry) w kolejnosci zaleznosci. Rejestry jak w Win16:
@@ -1178,6 +1179,7 @@ rmi_pm_entry:
     out  0xA1, al
     mov  ss, [rmi_pm_ss]
     mov  sp, [rmi_pm_sp]
+    call kbc_drain
     popa
     pop  gs
     pop  fs
@@ -1733,6 +1735,27 @@ irq0_handler:
     iret
 
 ; =====================================================================
+; kbc_drain: odbierz bajty czekajace w 8042 (przerwania wylaczone, tryb chroniony).
+; W trybie rzeczywistym IRQ1/IRQ12 sa zamaskowane, a inicjalizacja PIC kasuje zapamietane
+; zadanie przerwania. Bajtu nieodebranego nikt by juz nie odczytal, a przy pelnym buforze
+; 8042 nie przyjmuje nastepnych: mysz i klawiatura stawalyby na zawsze.
+; Niszczy: AX, BX, CX, DX, ES.
+; =====================================================================
+kbc_drain:
+    in   al, 0x64
+    test al, 0x01
+    jz   .done
+    test al, 0x20
+    jnz  .aux
+    call irq1_c_
+    jmp  kbc_drain
+.aux:
+    call mouse_c_
+    jmp  kbc_drain
+.done:
+    ret
+
+; =====================================================================
 ; irq1_handler: IRQ1 (klawiatura) w PM. Wpis wywolywany z int21_handler
 ; gdy PIC ISR bit1=1 (hardware keyboard interrupt).
 ; Wywoluje irq1_c_ (keyboard.c) do odczytu scan code i zapisu VK do KCB.
@@ -1745,7 +1768,12 @@ irq1_handler:
     push cx
     push dx
     push es
+    in   al, 0x64       ; zadanie mogl juz obsluzyc kbc_drain: nie czytaj starego bajtu
+    and  al, 0x21
+    cmp  al, 0x01
+    jne  .eoi
     call irq1_c_        ; C: czytaj scan code 0x60, przelicz VK, zapisz do KCB
+.eoi:
     mov  al, 0x20       ; EOI do master PIC - PRZED pop ax (inaczej AL przerwanego kodu = 0x20)
     out  0x20, al
     pop  es
@@ -1767,7 +1795,12 @@ irq12_handler:
     push cx
     push dx
     push es
+    in   al, 0x64       ; jw.; stary bajt rozjechalby 3-bajtowy pakiet PS/2
+    and  al, 0x21
+    cmp  al, 0x21
+    jne  .eoi
     call mouse_c_       ; C: czytaj bajt 0x60, aktualizuj pakiet PS/2, zapisz do KCB
+.eoi:
     mov  al, 0x20       ; EOI do slave i master PIC - PRZED pop ax (inaczej AL przerwanego
     out  0xA0, al       ; kodu = 0x20: losowe bledy w GDI/USER przy ruchu mysza)
     out  0x20, al
