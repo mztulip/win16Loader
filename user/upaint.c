@@ -499,7 +499,7 @@ static void out_line(HDC dc, int x, int y, LPCSTR s, int n, BOOL pfx, int lh)
 
 int API DrawText(HDC dc, LPCSTR s, int n, LPRECT r, WORD fmt)
 {
-    struct { int tmHeight, a, b, c, ext; } tm;
+    struct { int tmHeight; BYTE r[30]; } tm;
     int lh, y, total = 0, maxw = 0, width = r->right - r->left;
     BOOL pfx = !(fmt & DT_NOPREFIX);
     LPCSTR p;
