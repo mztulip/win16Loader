@@ -165,8 +165,19 @@ LRESULT API CallWindowProc(WNDPROC p, HWND h, WORD m, WORD wp, LONG lp)
 BOOL post_msg(HWND h, WORD m, WORD wp, LONG lp)
 {
     WORD nt = (g_qt + 1) % QSIZE;
+    /* Okno bez zywego wlasciciela (pulpit powstaje przed pierwszym zadaniem): odbierze biezace.
+     * Inaczej nikt nie zabierze komunikatu, a miejsce zwalnia sie tylko od poczatku kolejki. */
+    WORD task = (h && WP(h)) ? WP(h)->task : 0;
+    if (!task || !IsTask(task)) task = GetCurrentTask();
+    if ((m == WM_MOUSEMOVE || m == WM_NCMOUSEMOVE) && g_qt != g_qh) {   /* liczy sie ostatnia pozycja */
+        MSG *l = &g_q[(g_qt + QSIZE - 1) % QSIZE];
+        if (l->message == m && l->hwnd == h && l->wParam == wp) {
+            l->lParam = lp; l->time = tick(); l->pt.x = g_mx; l->pt.y = g_my;
+            return TRUE;
+        }
+    }
     if (nt == g_qh) { udbg("USER: kolejka pelna\n"); return FALSE; }
-    g_qtask[g_qt] = (h && WP(h)) ? WP(h)->task : GetCurrentTask();
+    g_qtask[g_qt] = task;
     g_q[g_qt].hwnd = h; g_q[g_qt].message = m; g_q[g_qt].wParam = wp; g_q[g_qt].lParam = lp;
     g_q[g_qt].time = tick();
     g_q[g_qt].pt.x = g_mx; g_q[g_qt].pt.y = g_my;

@@ -93,6 +93,22 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         DestroyWindow(w2);
     }
 
+    /* kursor nad pulpitem: komunikaty pulpitu nie moga zablokowac kolejki (byla pelna po 256) */
+    {
+        int i, got = 0;
+        for (i = 0; i < 600; i++) {
+            POINT p;
+            SetCursorPos(600 - (i & 1) * 20, 460 - (i & 2) * 10);
+            GetCursorPos(&p);
+            while (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&m);
+        }
+        for (i = 0; i < 300; i++) {
+            if (!PostMessage(me, WM_USER + 7, 0, 0)) break;
+            if (PeekMessage(&m, me, WM_USER + 7, WM_USER + 7, PM_REMOVE)) got++;
+        }
+        CHECK_INT(got, 300, "kolejka dziala po ruchu myszy nad pulpitem");
+    }
+
     /* ponowne uruchomienie: klasy dziecka musialy zniknac */
     h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINNOACTIVE);
     CHECK(h > 32, "drugie uruchomienie po koncu pierwszego");
