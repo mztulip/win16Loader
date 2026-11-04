@@ -401,6 +401,14 @@ static unsigned name_in_table(FILE *f, const char *want, unsigned long max)
     }
 }
 
+/* Stale KERNEL (kernel_equate): nie sa eksportami pliku, wiec po nazwie trzeba je znac tutaj */
+static const struct { const char *name; unsigned ord; } g_equate_names[] = {
+    { "__AHSHIFT", 113 }, { "__AHINCR", 114 }, { "__WINFLAGS", 178 }, { "__ROMBIOS", 173 },
+    { "__0000H", 183 }, { "__0040H", 193 }, { "__A000H", 174 }, { "__B000H", 181 },
+    { "__B800H", 182 }, { "__C000H", 195 }, { "__D000H", 179 }, { "__E000H", 190 }, { "__F000H", 194 },
+    { 0, 0 }
+};
+
 static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
 {
     static char want[130], path[80];
@@ -415,6 +423,11 @@ static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
     fread(want, 1, len, f);
     want[len] = 0;
     fseek(f, pos, SEEK_SET);
+    if (!stricmp(g_mods[tmod].name, "KERNEL")) {
+        unsigned k;
+        for (k = 0; g_equate_names[k].name; k++)
+            if (!stricmp(want, g_equate_names[k].name)) return g_equate_names[k].ord;
+    }
     _fstrncpy((char __far *)path, (char __far *)mt_entry(tmod) + MT_PATH, sizeof(path) - 1);
     path[sizeof(path) - 1] = 0;
     if (path[0] && (m = fopen(path, "rb")) != 0) {

@@ -43,3 +43,6 @@ dlls/[a-z]*.lnk
 !dlls/dll_imp.lnk
 WIN16API.DB
 qemu_out/
+
+# Biblioteki przykladowe (budowane)
+example_apps/libdemo/*.DLL

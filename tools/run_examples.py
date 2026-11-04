@@ -46,6 +46,8 @@ APPS = {
     'tasks':    ('example_apps/tasks', 'TASKTEST.EXE', ['w1', 'kret'] * 25 + ['d60', 'w1', 'pshot']),
     # LibEntry DLL ladowanych w trakcie pracy: WinExec i LoadLibrary
     'libdemo':  ('example_apps/libdemo', 'LIBDEMO.EXE', ['d30', 'w1', 'pshot', 'kalt-f4', 'w1']),
+    # import po nazwie z KERNEL: stale i Catch/Throw (konczy sie sama)
+    'nameimp':  ('example_apps/nameimp', 'NAMEIMP.EXE', ['d30', 'w1', 'pshot']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

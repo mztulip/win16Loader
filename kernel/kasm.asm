@@ -5,6 +5,9 @@
 bits 16
 
 SEL_KCB        equ 0x98
+SEL_DATA16     equ 0x28
+KCB_I3F_STACK  equ 590
+KCB_I3F_DEPTH  equ 592
 KCB_CALLER_DS  equ 520
 
 segment _DATA public class=DATA use16
@@ -213,88 +216,82 @@ int_entry_:
 
 ; ---------------------------------------------------------------------
 ; CATCH (ordinal 55): int FAR PASCAL Catch(LPCATCHBUF lpCatchBuf)
-; Ramka:
-; [bp+0]  = stary BP
-; [bp+2]  = return IP
-; [bp+4]  = return CS
-; [bp+6]  = lpCatchBuf offset
-; [bp+8]  = lpCatchBuf selector
-; [bp+10] = caller SP po powrocie
+; Wywolanie idzie przez thunk INT 3Fh, wiec adres powrotu na stosie to trampolina, a prawdziwy
+; adres i DS wolajacego leza na stosie thunka. Bufor (9 slow):
+;   0 BP, 2 SP po powrocie, 4 IP, 6 CS, 8 DS, 10 SS, 12 SI, 14 DI, 16 poziom thunka
+; [bp+2] powrot, [bp+6] offset bufora, [bp+8] selektor bufora
 ; ---------------------------------------------------------------------
 global CATCH
 CATCH:
     push bp
     mov  bp, sp
     push ds
-    push es
     push si
     push di
-
-    mov  es, [bp+8]
-    mov  di, [bp+6]
-
-    mov  ax, [bp+0]
+    mov  ax, SEL_KCB
+    mov  es, ax
+    mov  si, [es:KCB_I3F_DEPTH]
+    mov  di, [es:KCB_I3F_STACK]
+    mov  ax, SEL_DATA16
+    mov  ds, ax
+    mov  cx, [si]
+    dec  cx                     ; poziom wolajacego (ten wpis zdejmie trampolina)
+    mov  bx, cx
+    shl  bx, 1
+    add  bx, cx
+    shl  bx, 1
+    add  bx, di                 ; DS:BX = wpis thunka: DS, IP, CS
+    les  di, [bp+6]
+    mov  ax, [bx]
+    mov  [es:di+8], ax
+    mov  ax, [bx+2]
+    mov  [es:di+4], ax
+    mov  ax, [bx+4]
+    mov  [es:di+6], ax
+    mov  [es:di+16], cx
+    mov  ax, [bp]
     mov  [es:di+0], ax
     lea  ax, [bp+10]
     mov  [es:di+2], ax
-    mov  ax, [bp+2]
-    mov  [es:di+4], ax
-    mov  ax, [bp+4]
-    mov  [es:di+6], ax
-    mov  ax, [bp-2]
-    mov  [es:di+8], ax
-    mov  ax, ss
-    mov  [es:di+10], ax
-    mov  ax, [bp-6]
-    mov  [es:di+12], ax
-    mov  ax, [bp-8]
-    mov  [es:di+14], ax
+    mov  [es:di+10], ss
     mov  ax, [bp-4]
-    mov  [es:di+16], ax
-
+    mov  [es:di+12], ax
+    mov  ax, [bp-6]
+    mov  [es:di+14], ax
     pop  di
     pop  si
-    pop  es
     pop  ds
     pop  bp
     xor  ax, ax
-    xor  dx, dx
     retf 4
 
 ; ---------------------------------------------------------------------
 ; THROW (ordinal 56): void FAR PASCAL Throw(const LPCATCHBUF lpCatchBuf, int nVal)
+; Wraca wprost do miejsca Catch, z pominieciem trampoliny: poziom thunka wraca do zapisanego,
+; wiec porzucone po drodze wywolania API (SendMessage) znikaja razem ze stosem.
 ; ---------------------------------------------------------------------
 global THROW
 THROW:
-    push bp
     mov  bp, sp
-
-    mov  ax, [bp+6]
-    test ax, ax
-    jnz  .val_ok
-    mov  ax, 1
-.val_ok:
-    mov  es, [bp+10]
-    mov  di, [bp+8]
-
-    mov  bx, [es:di+0]
-    mov  cx, [es:di+2]
-    mov  dx, [es:di+4]
-    mov  si, [es:di+6]
-
+    mov  dx, [bp+4]             ; nVal
+    les  di, [bp+6]
+    mov  ax, SEL_KCB
+    mov  ds, ax
+    mov  si, [KCB_I3F_DEPTH]
+    mov  ax, SEL_DATA16
+    mov  ds, ax
+    mov  ax, [es:di+16]
+    mov  [si], ax
     cli
     mov  ss, [es:di+10]
-    mov  sp, cx
+    mov  sp, [es:di+2]
     sti
-    push si
-    push dx
-
-    mov  bx, [es:di+0]
+    push word [es:di+6]         ; CS
+    push word [es:di+4]         ; IP
+    mov  bp, [es:di+0]
     mov  si, [es:di+12]
     mov  ds, [es:di+8]
-    push word [es:di+16]
     mov  di, [es:di+14]
-    mov  bp, bx
-    pop  es
+    mov  ax, dx
     xor  dx, dx
     retf
