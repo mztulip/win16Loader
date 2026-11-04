@@ -138,6 +138,7 @@ pulpit ciemny teal (0x1C5058), ramka 1 px czarna + 3 px jasny teal (0x88C8D0), p
 `=` (menu systemowe), `-`, `+`, `X` (zamknij); pasek menu 0x88C0C8, menu rozwijane 0xC0E4E8
 z ramka 0x004048, zaznaczenie 0x0A6E7E. Paleta kolorow systemowych: `g_col` w `user/umisc.c`
 i `[colors]` w `windir/WIN.INI`. Nie zmieniac na kolory/ksztalty Windows bez prosby uzytkownika.
+Tytuly ikon: font MS Sans Serif 8, nie Fixedsys (aplikacje projektuja pulpit pod te szerokosci).
 
 ### Pulapki wydajnosci (`docs/wydajnosc_gdi.md`) - nie powtarzac
 

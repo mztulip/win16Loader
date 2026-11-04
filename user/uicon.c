@@ -2,8 +2,9 @@
  * ikona 32x32 w wolnym miejscu na dole obszaru klienta rodzica (rzedy od lewej, od dolu,
  * odstepy SM_CXICONSPACING/SM_CYICONSPACING), ArrangeIconicWindows, osobne okno tytulu
  * ikony (klasa #32772), przeciaganie ikony, klik = menu systemowe, dwuklik = przywroc.
- * Malowanie ikony: WM_PAINTICON/WM_ICONERASEBKGND (upaint.c). Wyglad tytulu: wlasny
- * styl (kolory paska tytulu, font Fixedsys), nie kopia Windows. */
+ * Malowanie ikony: WM_PAINTICON/WM_ICONERASEBKGND (upaint.c). Wyglad tytulu: kolory paska
+ * tytulu (wlasny styl), font MS Sans Serif 8 jak w Windows 3.1: aplikacje projektuja pulpit
+ * pod te szerokosci ("My Computer" w Fixedsys nie miescilo sie w odstepie ikon). */
 #include "user.h"
 
 extern BOOL modal_next(LPMSG m);
@@ -22,7 +23,7 @@ void API EndPaint(HWND, PAINTSTRUCT __far *);
 #define SPACE_X   sysmetric(38)
 #define SPACE_Y   sysmetric(39)
 #define TITLE_GAP 2
-#define TITLE_H   17                  /* Fixedsys (15) + 1 px z gory i z dolu */
+#define TITLE_H   15                  /* MS Sans Serif 8 (13) + 1 px z gory i z dolu */
 
 #define SWP_NOSIZE     0x0001
 #define SWP_NOZORDER   0x0004
@@ -96,6 +97,13 @@ WORD API ArrangeIconicWindows(HWND h)
 /* ============================================================
  * Okno tytulu ikony (#32772): w polu 'title' trzyma uchwyt swojej ikony
  * ============================================================ */
+static WORD title_font(void)
+{
+    static WORD f;
+    if (!f) f = CreateFont(-11, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0, "MS Sans Serif");
+    return f;
+}
+
 static void title_paint(HWND t)
 {
     PAINTSTRUCT ps;
@@ -104,16 +112,17 @@ static void title_paint(HWND t)
     if (dc && w) {
         BOOL act = (w->flags & WF_ACTIVE) != 0;
         RECT r;
-        WORD of = SelectObject(dc, chrome_font());
+        WORD of = SelectObject(dc, title_font());
         int tx = LOWORD(GetTextExtent(dc, (LPCSTR)w->text, w->textlen));
-        SelectObject(dc, of);
         GetClientRect(t, (LPRECT)&r);
         fill_color(dc, r.left, r.top, r.right, r.bottom, syscolor(act ? COLOR_ACTIVECAPTION : COLOR_INACTIVECAPTION));
         InflateRect((LPRECT)&r, -3, 0);
         /* za dlugi tytul (nieaktywna ikona) - poczatek tytulu od lewej, reszta obcieta */
-        chrome_text(dc, (LPCSTR)w->text, w->textlen, (LPRECT)&r,
-                    (tx > r.right - r.left ? 0 : 0x0001) | 0x0004 | 0x0020 | 0x0800,   /* DT_CENTER VCENTER SINGLELINE NOPREFIX */
-                    syscolor(act ? COLOR_CAPTIONTEXT : COLOR_INACTIVECAPTIONTEXT));
+        SetBkMode(dc, 1);
+        SetTextColor(dc, syscolor(act ? COLOR_CAPTIONTEXT : COLOR_INACTIVECAPTIONTEXT));
+        DrawText(dc, (LPCSTR)w->text, w->textlen, (LPRECT)&r,
+                 (tx > r.right - r.left ? 0 : 0x0001) | 0x0004 | 0x0020 | 0x0800);     /* DT_CENTER VCENTER SINGLELINE NOPREFIX */
+        SelectObject(dc, of);
     }
     EndPaint(t, (PAINTSTRUCT __far *)&ps);
 }
@@ -154,7 +163,7 @@ static void title_rect(HWND h, LPRECT t)
 {
     WND __far *w = WP(h), __far *p = WP(w->parent);
     HDC dc = GetDC(0);
-    WORD of = SelectObject(dc, chrome_font());
+    WORD of = SelectObject(dc, title_font());
     int cx = LOWORD(GetTextExtent(dc, (LPCSTR)w->text, w->textlen)) + 6;
     int mx = (w->flags & WF_ACTIVE) ? p->cr.right - p->cr.left : SPACE_X - 2;
     SelectObject(dc, of);

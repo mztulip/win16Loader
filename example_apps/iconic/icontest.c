@@ -171,6 +171,24 @@ static void tests(HINSTANCE hi)
     }
     DestroyWindow(c);
     pump();
+    /* Tytul ikony: MS Sans Serif jak w Windows 3.1; szeroki font ucinal "My Computer" (Calmira) */
+    c = CreateWindow("NoIcon", "My Computer", WS_OVERLAPPEDWINDOW, 10, 10, 200, 100, NULL, NULL, hi, NULL);
+    ShowWindow(c, SW_SHOWMINNOACTIVE);
+    pump();
+    t = find_title(c);
+    GetWindowRect(t, &rt);
+    {
+        HDC sdc = GetDC(0);
+        HFONT f = CreateFont(-11, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "MS Sans Serif"), of = SelectObject(sdc, f);
+        int tw = LOWORD(GetTextExtent(sdc, "My Computer", 11));
+        SelectObject(sdc, of);
+        DeleteObject(f);
+        ReleaseDC(0, sdc);
+        CHECK_INT(rw(&rt), tw + 6, "tytul ikony: caly tekst fontem MS Sans Serif");
+        CHECK_INT(rh(&rt), 15, "tytul ikony: wysokosc dla fontu 13 px");
+    }
+    DestroyWindow(c);
+    pump();
 }
 
 LRESULT FAR PASCAL __export WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
