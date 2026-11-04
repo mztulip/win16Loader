@@ -393,6 +393,7 @@ LRESULT send_msg(HWND h, WORD m, WORD w, LONG l);
 LRESULT call_proc(WNDPROC p, WORD ds, HWND h, WORD m, WORD w, LONG l);
 WORD   proc_ds(WNDPROC p, WORD hinst);  /* DS dla procedury okna (USER albo hinst) */
 BOOL   post_msg(HWND h, WORD m, WORD w, LONG l);
+void   mouse_windows_changed(void);
 WORD   API GetCurrentTask(void);
 void   API Yield(void);
 void   API DirectedYield(WORD task);

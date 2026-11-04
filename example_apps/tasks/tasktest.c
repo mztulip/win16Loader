@@ -4,7 +4,7 @@
 #include <windows.h>
 #include "testlog.h"
 
-static int g_active, g_paint;
+static int g_active, g_paint, g_moves;
 static HTASK g_me;
 
 /* Komunikaty rodzica przez zadany czas: dziecko pracuje w tym czasie */
@@ -21,6 +21,7 @@ LRESULT FAR PASCAL __export ParentProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_ACTIVATEAPP) g_active++;
     if (msg == WM_PAINT) { g_paint++; }
+    if (msg == WM_MOUSEMOVE) g_moves++;
     if (msg == WM_USER + 5) t_log("BLAD: komunikat dziecka trafil do rodzica", FALSE, "");
     return DefWindowProc(h, msg, wp, lp);
 }
@@ -78,6 +79,19 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     CHECK(!IsWindow(ch), "okno dziecka zniszczone po jego koncu");
     CHECK(GetCurrentTask() == g_me, "rodzic dziala dalej");
     CHECK(!PeekMessage(&m, NULL, WM_QUIT, WM_QUIT, PM_NOREMOVE), "WM_QUIT dziecka nie u rodzica");
+
+    /* okno pojawia sie pod nieruchomym kursorem: WM_MOUSEMOVE bez ruchu myszy (SkiFree na to czeka) */
+    {
+        HWND w2;
+        SetCursorPos(500, 400);
+        pump(200);
+        w2 = CreateWindow("TaskParentW", "Pod kursorem", WS_POPUP, 450, 350, 100, 100, NULL, NULL, hi, NULL);
+        g_moves = 0;
+        ShowWindow(w2, SW_SHOWNORMAL);
+        pump(200);
+        CHECK(g_moves > 0, "WM_MOUSEMOVE gdy okno pojawi sie pod kursorem");
+        DestroyWindow(w2);
+    }
 
     /* ponowne uruchomienie: klasy dziecka musialy zniknac */
     h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINNOACTIVE);

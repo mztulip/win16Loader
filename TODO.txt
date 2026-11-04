@@ -1589,6 +1589,20 @@ programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w 3.1, bez lamania 
 21f  Wiele instancji jednego programu jak w 3.1: wspolny kod, osobny DGROUP, hPrevInstance,
      GetInstanceData.
 
+Stan (galaz win31-tasks):
+- ZROBIONE: 21a, 21b, 21c (bez GetQueueStatus na zadanie), czesc 21d (okna, timery, kolejka, klasy),
+  czesc 21e (WinExec, ShellExecute, IsTask, GetNumTasks, PSP z linia polecen).
+  Calmira uruchamia SKI.EXE, przelaczanie paskiem zadan, zamkniecie, ponowne uruchomienie.
+- DO ZROBIENIA:
+  * 21d: zwalnianie obiektow GDI, pamieci GlobalAlloc i plikow konczonego zadania.
+  * Kazde uruchomienie laduje program od nowa do XMS (ok. 450 KB SKI z zapasu 4 MB), nic nie wraca:
+    po kilku uruchomieniach WinExec zwroci blad. Wymaga 21f albo ponownego uzycia pamieci.
+  * 21e: LoadModule z LOADPARMS, GetModuleUsage, FreeLibrary, LibEntry DLL ladowanych przez WinExec
+    (dzis nie sa wolane!), katalog biezacy na zadanie, TaskFirst/TaskNext.
+  * 21f: hPrevInstance, GetInstanceData (dzis kazda instancja = osobna kopia, hPrev = 0).
+  * WaitEvent/PostEvent, LockCurrentTask, SetTaskQueue/GetTaskQueue to nadal stuby.
+  * Wyjatek w programie konczy caly system; ma konczyc tylko zadanie.
+
 Lepiej niz w 3.1 (o ile nie lamie zgodnosci):
 - wyjatek w programie konczy tylko to zadanie (komunikat zamiast paniki calego systemu),
 - zadne zadanie nie ma pracy = HLT, zamiast aktywnego czekania.

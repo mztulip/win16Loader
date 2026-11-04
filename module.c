@@ -868,7 +868,7 @@ int mod_load_app(const char *path)
 
 /* Zapas dla modulow ladowanych w trakcie pracy (WinExec): sterta KERNEL i selektory
  * dynamiczne zaczynaja sie za nim */
-#define LATE_XMS  0x200000UL
+#define LATE_XMS  0x400000UL
 #define LATE_SELS 0x800u
 static unsigned g_sel_limit;
 

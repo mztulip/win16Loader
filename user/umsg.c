@@ -354,6 +354,11 @@ static void mouse_buttons(WORD b)
     }
 }
 
+/* Okno pojawilo sie, zniknelo albo przesunelo: to, co lezy pod kursorem, dostanie WM_MOUSEMOVE
+ * (i WM_SETCURSOR) bez ruchu myszy */
+static BOOL g_mouse_stale;
+void mouse_windows_changed(void) { g_mouse_stale = TRUE; }
+
 void input_poll(void)
 {
     static BOOL busy;                                         /* send_msg moze oddac CPU innemu zadaniu */
@@ -374,6 +379,10 @@ void input_poll(void)
         mouse_buttons(b);
     }
     mouse_moved(*(int __far *)(k + 285), *(int __far *)(k + 287));
+    if (g_mouse_stale && !g_capture) {                       /* okna zmienily sie pod kursorem */
+        g_mouse_stale = FALSE;
+        mouse_msg(WM_MOUSEMOVE, FALSE);
+    }
     busy = FALSE;
 }
 

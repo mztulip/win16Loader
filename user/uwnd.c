@@ -479,6 +479,7 @@ BOOL API DestroyWindow(HWND h)
     WORD i;
     if (!w || h == HDESKTOP) return FALSE;
     if (w->flags & WF_DESTROYING) return TRUE;
+    mouse_windows_changed();
     /* najpierw okna posiadane */
     for (i = 1; i < MAX_WND; i++) {
         WND __far *o = (WND __far *)MK_FP(g_wndmem, 0) + i;
@@ -580,6 +581,7 @@ BOOL API SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, WORD fl)
     wp.cx = w->wr.right - w->wr.left; wp.cy = w->wr.bottom - w->wr.top;
     if (!moved) wp.flags |= SWP_NOMOVE;
     if (!sized) wp.flags |= SWP_NOSIZE;
+    if (moved || sized || (fl & 0x00C0)) mouse_windows_changed();     /* SWP_SHOWWINDOW, SWP_HIDEWINDOW */
     send_msg(h, WM_WINDOWPOSCHANGED, 0, (LONG)(WINDOWPOS __far *)&wp);
     return TRUE;
 }
@@ -630,6 +632,7 @@ BOOL API ShowWindow(HWND h, int cmd)
 {
     BOOL r = show_window(h, cmd);
     WND __far *w = WP(h);
+    mouse_windows_changed();
     if (cmd && w && (w->flags & WF_NEEDSIZE)) {
         WORD t = (w->flags & WF_MAXIMIZED) ? 2 : (w->flags & WF_MINIMIZED) ? 1 : 0;
         int mx = w->cr.left, my = w->cr.top;
