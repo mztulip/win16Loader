@@ -507,6 +507,46 @@ static void set_text_mode(void)
 /* ============================================================
  * main
  * ============================================================ */
+/* Przy jednej stacji DOS udaje B: jako druga dyskietke w tej samej stacji i przy przejsciu
+ * miedzy literami prosi o zamiane. Dla aplikacji Win16 B: nie istnieje (jak w Windows NT):
+ * na czas ich dzialania wpis B: w tablicy CDS DOS-a jest nieprawidlowy (flagi = 0),
+ * wiec sciezki, IOCTL i zmiana dysku dostaja blad od samego DOS-a. */
+#define CDS_FLAGS 0x43
+static unsigned __far *g_cds_b;
+static unsigned g_cds_b_flags;
+
+static void phantom_b_hide(void)
+{
+    union REGS r;
+    struct SREGS s;
+    unsigned drive;
+    unsigned char __far *lol, __far *cds, __far *e;
+    int86(0x11, &r, &r);
+    if (!(r.x.ax & 1) || (r.x.ax & 0xC0)) return;      /* brak stacji albo sa co najmniej dwie */
+    _dos_getdrive(&drive);
+    if (drive == 2) return;                            /* uruchomiono z B: */
+    segread(&s);
+    r.h.ah = 0x52;
+    int86x(0x21, &r, &r, &s);                          /* List of Lists -> ES:BX */
+    lol = (unsigned char __far *)MK_FP(s.es, r.x.bx);
+    cds = *(unsigned char __far * __far *)(lol + 0x16);
+    if (lol[0x21] < 2 || !cds) return;
+    /* rozmiar wpisu: 0x58 (DOS 4+) albo 0x51 (DOS 3.x); pisz tylko gdy to na pewno wpis B: */
+    e = cds + 0x58;
+    if (e[0] != 'B' || e[1] != ':') e = cds + 0x51;
+    if (e[0] != 'B' || e[1] != ':') { kprintf("Dysk B: brak wpisu CDS\n"); return; }
+    g_cds_b = (unsigned __far *)(e + CDS_FLAGS);
+    g_cds_b_flags = *g_cds_b;
+    *g_cds_b = 0;
+    kprintf("Dysk B: ukryty (jedna stacja)\n");
+}
+
+static void phantom_b_restore(void)
+{
+    if (g_cds_b) *g_cds_b = g_cds_b_flags;
+    g_cds_b = 0;
+}
+
 int main(int argc, char *argv[])
 {
     const char *app_name;
@@ -675,7 +715,9 @@ int main(int argc, char *argv[])
         vesa_set_lfb();  /* przelacz VESA z banked na LFB mode przed PM */
         kprintf("LFB=0x%08lX pitch=%u font=0x%06lX -> wchodze w PM\n",
                 g_lfb_phys, g_vesa_pitch, g_font_phys);
+        phantom_b_hide();
         pm_call_app();
+        phantom_b_restore();
         shutdown_mouse_ps2();
         {
             unsigned maxpara = 0;

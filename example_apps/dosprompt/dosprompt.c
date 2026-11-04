@@ -1,6 +1,7 @@
 /* dosprompt.c - test regresyjny: DOS nie moze czekac na klawisz w trakcie wywolania z PM.
  * Klawiatura jest wtedy zamaskowana, wiec kazda prosba DOS-a wieszala caly system:
- *  - dysk B: przy jednej stacji ("Remove diskette in drive A:", INT 2Fh AX=4A00h),
+ *  - dysk B: przy jednej stacji ("Remove diskette in drive A:"); loader ukrywa wtedy B:
+ *    (jak Windows NT: B: nie istnieje), bo drugiej dyskietki nie ma gdzie wlozyc,
  *  - blad krytyczny, np. brak dyskietki ("Abort, Retry, Fail?", INT 24h).
  * Zawieszenie = brak linii DONE.
  */
@@ -21,10 +22,11 @@ static int try_open(const char *name)
 static void run_test(void)
 {
     DWORD t;
-    /* przelaczanie miedzy dyskami logicznymi A: i B: tej samej stacji */
-    CHECK_INT(try_open("B:\\LOADER.EXE"), 16, "B: bez prosby o zamiane dyskietki");
-    CHECK_INT(try_open("A:\\LOADER.EXE"), 16, "powrot na A:");
-    CHECK_INT(try_open("B:\\LOADER.EXE"), 16, "znow B:");
+    /* jedna stacja: B: nie istnieje, zadnej prosby o zamiane dyskietki */
+    CHECK_INT(GetDriveType(0), DRIVE_REMOVABLE, "GetDriveType(A:)");
+    CHECK_INT(GetDriveType(1), 0, "GetDriveType(B:) = brak dysku przy jednej stacji");
+    CHECK_INT(try_open("B:\\LOADER.EXE"), -1, "B: sciezka zwraca blad, nie czyta dyskietki z A:");
+    CHECK_INT(try_open("A:\\LOADER.EXE"), 16, "A: dziala dalej");
     /* run_examples.py wyjmuje dyskietke i daje znac klawiszem Shift */
     t = GetTickCount();
     while (GetAsyncKeyState(VK_SHIFT) >= 0 && GetTickCount() - t < 60000UL) ;

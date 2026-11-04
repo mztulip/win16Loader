@@ -21,7 +21,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `gdiperf`  | GDIPERF.EXE  | Poprawność szybkich ścieżek GDI (ROP-y, granice 64 KB, nakładanie, mono, clip, kursor, tekst, wzory) i regresja wydajności: progi czasu względem pętli kalibracyjnej, niezależne od hosta (`docs/wydajnosc_gdi.md`). Kończy się sama |
 | `dosirq`   | DOSIRQ.EXE   | Regresja: mysz i klawiatura działają w trakcie wywołań DOS (dawniej bajt czekający w 8042 po powrocie do PM zatrzymywał kursor na zawsze) |
 | `menuhover`| MENUHOV.EXE  | Regresja: przejazd myszą bez klikania z otwartego podmenu na pozycje rodzica, także z drugiego poziomu (`WM_MENUSELECT`) |
-| `dosprompt`| DOSPROMP.EXE | Regresja: dysk B: przy jednej stacji i brak dyskietki nie wieszają systemu (DOS prosił o klawisz przy zamaskowanej klawiaturze) |
+| `dosprompt`| DOSPROMP.EXE | Regresja: przy jednej stacji dysk B: nie istnieje (`GetDriveType` = 0, ścieżka zwraca błąd), a brak dyskietki nie wiesza systemu (DOS prosił o klawisz przy zamaskowanej klawiaturze) |
 
 ## Budowanie i uruchamianie
 
