@@ -152,6 +152,8 @@ int   rm_int(BYTE intno, RMREGS __far *r);   /* r jest kopiowane do/z RMBUF */
 RMREGS __far *rmregs(void);
 /* ktask.c */
 HTASK API GetCurrentTask(void);
+HMODULE API GetModuleHandle(LPCSTR name);
+FARPROC API GetProcAddress(HMODULE h, LPCSTR name);
 WORD  API GetCurrentPDB(void);
 void  task_init(void);
 void  task_exit(WORD ax);

@@ -1,30 +1,95 @@
-/* tasktest.c - zadania jak w Windows 3.1: WinExec uruchamia TASKCHLD.EXE, oba przelaczaja sie
- * przez Yield, koniec dziecka nie konczy rodzica. */
+/* tasktest.c - zadania: WinExec uruchamia TASKCHLD.EXE, oba przelaczaja sie,
+ * kazde ma wlasna kolejke, SendMessage dziala na stosie odbiorcy, PostQuitMessage konczy tylko
+ * jedno zadanie, koniec dziecka sprzata jego okna i nie konczy rodzica. */
 #include <windows.h>
 #include "testlog.h"
 
+static int g_active, g_paint;
+static HTASK g_me;
+
+/* Komunikaty rodzica przez zadany czas: dziecko pracuje w tym czasie */
+static void pump(DWORD ms)
+{
+    MSG m;
+    DWORD t0 = GetTickCount();
+    while (GetTickCount() - t0 < ms) {
+        if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&m);
+    }
+}
+
+LRESULT FAR PASCAL __export ParentProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_ACTIVATEAPP) g_active++;
+    if (msg == WM_PAINT) { g_paint++; }
+    if (msg == WM_USER + 5) t_log("BLAD: komunikat dziecka trafil do rodzica", FALSE, "");
+    return DefWindowProc(h, msg, wp, lp);
+}
+
 int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
 {
+    WNDCLASS wc;
     UINT h;
-    HTASK me;
+    HWND me, ch;
+    MSG m;
     long yields = 0;
     DWORD t0;
     (void)prev; (void)cmd; (void)show;
     t_app = "TASKTEST";
-    me = GetCurrentTask();
-    CHECK(me != 0, "GetCurrentTask");
+    g_me = GetCurrentTask();
+    CHECK(g_me != 0, "GetCurrentTask");
     CHECK_INT(GetNumTasks(), 1, "GetNumTasks na starcie");
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = ParentProc;
+    wc.hInstance = hi;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = "TaskParentW";
+    RegisterClass(&wc);
+    me = CreateWindow("TaskParentW", "Rodzic", WS_OVERLAPPEDWINDOW, 20, 20, 240, 150, NULL, NULL, hi, NULL);
+    ShowWindow(me, SW_SHOWNORMAL);
+    UpdateWindow(me);
+
     CHECK(WinExec("A:\\NIEMA.EXE", SW_SHOWNORMAL) == 2, "WinExec: brak pliku = 2");
-    h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINIMIZED);
+    h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINNOACTIVE);
     CHECK(h > 32, "WinExec: sukces > 32");
     CHECK(h != (UINT)hi, "dziecko ma inny hInstance");
-    CHECK(GetCurrentTask() == me, "po WinExec dalej to samo zadanie");
+    CHECK(GetCurrentTask() == g_me, "po WinExec dalej to samo zadanie");
     CHECK_INT(GetNumTasks(), 2, "GetNumTasks z dzieckiem");
     t0 = GetTickCount();
-    while (GetNumTasks() > 1 && GetTickCount() - t0 < 20000UL) { Yield(); yields++; }
+    while (!(ch = FindWindow("TaskChildW", NULL)) && GetTickCount() - t0 < 10000UL) { Yield(); yields++; }
+    CHECK(ch != 0, "okno dziecka");
+    CHECK(yields >= 3, "Yield przelaczal zadania");
+    CHECK(GetWindowTask(ch) != g_me && GetWindowTask(ch) != 0, "GetWindowTask(dziecko)");
+    CHECK(GetWindowTask(me) == g_me, "GetWindowTask(rodzic)");
+    CHECK(IsTask(GetWindowTask(ch)), "IsTask(dziecko)");
+
+    CHECK_INT(SendMessage(ch, WM_USER + 1, 21, 0), 42, "SendMessage miedzy zadaniami: wynik");
+    CHECK(GetCurrentTask() == g_me, "po SendMessage z powrotem u nadawcy");
+
+    /* komunikat do okna dziecka nie moze trafic do kolejki rodzica */
+    PostMessage(ch, WM_USER + 5, 0, 0);
+    CHECK(!PeekMessage(&m, ch, WM_USER + 5, WM_USER + 5, PM_NOREMOVE | PM_NOYIELD), "kolejki rozdzielone");
+
+    pump(600);                                        /* dziecko dostaje timer i maluje */
+    PostMessage(ch, WM_USER + 2, 0, 0);               /* PostQuitMessage u dziecka */
+    t0 = GetTickCount();
+    while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
     CHECK_INT(GetNumTasks(), 1, "dziecko zakonczone");
-    CHECK(yields >= 5, "Yield przelaczal zadania");
-    CHECK(GetCurrentTask() == me, "rodzic dziala dalej");
+    CHECK(!IsWindow(ch), "okno dziecka zniszczone po jego koncu");
+    CHECK(GetCurrentTask() == g_me, "rodzic dziala dalej");
+    CHECK(!PeekMessage(&m, NULL, WM_QUIT, WM_QUIT, PM_NOREMOVE), "WM_QUIT dziecka nie u rodzica");
+
+    /* ponowne uruchomienie: klasy dziecka musialy zniknac */
+    h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINNOACTIVE);
+    CHECK(h > 32, "drugie uruchomienie po koncu pierwszego");
+    t0 = GetTickCount();
+    while (!(ch = FindWindow("TaskChildW", NULL)) && GetTickCount() - t0 < 10000UL) Yield();
+    CHECK(ch != 0, "drugie uruchomienie ma okno");
+    pump(200);
+    PostMessage(ch, WM_USER + 2, 0, 0);
+    t0 = GetTickCount();
+    while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
+    CHECK_INT(GetNumTasks(), 1, "drugie dziecko zakonczone");
     t_done();
     return 0;
 }

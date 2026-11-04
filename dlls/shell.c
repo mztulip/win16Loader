@@ -1,6 +1,6 @@
-/* shell.c - SHELL.DLL: rejestr Windows 3.1, Drag&Drop, ShellExecute, ExtractIcon
+/* shell.c - SHELL.DLL: rejestr, Drag&Drop, ShellExecute, ExtractIcon
  *
- * Rejestr 3.1 to jedno drzewo (HKEY_CLASSES_ROOT = 1, 0 tez oznacza korzen - por.
+ * Rejestr to jedno drzewo (HKEY_CLASSES_ROOT = 1, 0 tez oznacza korzen - por.
  * fix_win16_hkey w Wine dlls/krnl386.exe16/registry.c; koniec RegEnumKey = 259),
  * kazdy klucz ma jedna wartosc tekstowa. Trzymamy go w DGROUP i zapisujemy
  * tekstowo do <windir>\REG.TXT (linie "sciezka\klucza=wartosc").
@@ -238,12 +238,20 @@ BOOL API DragQueryPoint(HANDLE d, LPVOID p)           { (void)d; if (p) w_memset
 /* ---- ShellExecute / FindExecutable ---- */
 HINSTANCE API ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR par, LPCSTR dir, int show)
 {
-    (void)h; (void)par; (void)dir; (void)show;
-    dbg("SHELL: ShellExecute (brak wielozadaniowosci) ");
-    if (op && HIWORD(op)) { dbg(op); dbg(" "); }
-    if (file && HIWORD(file)) dbg(file);
-    dbg("\n");
-    return 31;                                    /* SE_ERR_NOASSOC */
+    static char cmd[200];
+    int n = 0, i;
+    WORD r;
+    (void)h; (void)dir;
+    if (op && HIWORD(op) && lstrcmpi(op, "open")) return 31;   /* SE_ERR_NOASSOC: inne operacje */
+    if (!file || !HIWORD(file)) return 2;
+    for (i = 0; file[i] && n < 190; i++) cmd[n++] = file[i];
+    if (par && HIWORD(par) && par[0]) {
+        cmd[n++] = ' ';
+        for (i = 0; par[i] && n < 198; i++) cmd[n++] = par[i];
+    }
+    cmd[n] = 0;
+    r = WinExec((LPCSTR)cmd, show);
+    return r;
 }
 
 HINSTANCE API FindExecutable(LPCSTR file, LPCSTR dir, LPSTR res)

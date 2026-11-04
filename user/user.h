@@ -91,6 +91,7 @@ typedef struct {
     WORD    textlen;
     char    text[MAX_TITLE];
     BYTE    extra[MAX_EXTRA];
+    WORD    task;                  /* zadanie, ktore utworzylo okno */
 } WND;
 
 #define WF_ERASE      0x0001       /* WM_ERASEBKGND przy BeginPaint */
@@ -131,6 +132,7 @@ typedef struct {
 } CLASS;
 extern CLASS g_cls[MAX_CLASS];
 int   cls_find(LPCSTR name, WORD hinst);
+void  cls_free_inst(WORD hinst);
 
 /* ---- Styl okien ---- */
 #define WS_OVERLAPPED   0x00000000UL
@@ -391,6 +393,11 @@ LRESULT send_msg(HWND h, WORD m, WORD w, LONG l);
 LRESULT call_proc(WNDPROC p, WORD ds, HWND h, WORD m, WORD w, LONG l);
 WORD   proc_ds(WNDPROC p, WORD hinst);  /* DS dla procedury okna (USER albo hinst) */
 BOOL   post_msg(HWND h, WORD m, WORD w, LONG l);
+WORD   API GetCurrentTask(void);
+void   API Yield(void);
+void   API DirectedYield(WORD task);
+int    API GetNumTasks(void);
+BOOL   API IsTask(WORD task);
 void   wnd_invalidate(HWND h, RECT __far *r, BOOL erase, BOOL children);
 void   wnd_invalidate_screen(RECT __far *r, HWND except);
 void   wnd_vis_rects(HWND h, BOOL client, LPRECT out, int __far *n, int max);

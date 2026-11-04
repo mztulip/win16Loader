@@ -1,4 +1,4 @@
-/* ktask.c - KERNEL: zadania jak w Windows 3.1 (kooperacyjne). Kazde zadanie ma wlasny
+/* ktask.c - KERNEL: zadania (kooperacyjne). Kazde zadanie ma wlasny
  * stos (w swoim DGROUP), PSP i kopie stanu thunka INT 3Fh. Przelaczenie tylko w Yield
  * i tym, co go wola (USER: GetMessage/PeekMessage/WaitMessage). */
 #include "kernel.h"
@@ -145,6 +145,12 @@ void task_exit(WORD ax)
     task_init();
     if (g_n <= 1) { pm_int21(ax); return; }
     t = &g_t[g_cur];
+    {   /* okna, timery, kolejka, klasy zadania: USER (nie ma importu KERNEL -> USER) */
+        HMODULE u = GetModuleHandle("USER");
+        typedef void (API *TASKEXITPROC)(WORD, WORD);
+        TASKEXITPROC f = u ? (TASKEXITPROC)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
+        if (f) f(t->h, t->hinst);
+    }
     if (t->psp != SEL_PSP) GlobalFree(t->psp);
     GlobalFree(t->h);
     t->used = FALSE;
@@ -236,6 +242,6 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     t->used = TRUE;
     g_n++;
     dbg_str("KERNEL: WinExec ", (LPCSTR)prog);
-    Yield();                                             /* jak w 3.1: start dostaje CPU od razu */
+    Yield();                                             /* nowe zadanie dostaje CPU od razu */
     return t->hinst;
 }

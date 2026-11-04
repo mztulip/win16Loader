@@ -14,11 +14,12 @@ static void cpu_idle(void);
 /* ============================================================
  * Stan
  * ============================================================ */
-#define QSIZE 128
+#define QSIZE 256
 static MSG   g_q[QSIZE];
+static WORD  g_qtask[QSIZE];              /* zadanie odbiorcy: jedna kolejka, komunikaty ze znacznikiem */
 static WORD  g_qh, g_qt;
-static BOOL  g_quit;
-static WORD  g_quitcode;
+#define MAX_QUIT 16
+static struct { WORD task, code; } g_quits[MAX_QUIT];   /* PostQuitMessage: osobno dla kazdego zadania */
 static HWND  g_focus, g_active, g_capture;
 static BYTE  g_keys[256];                 /* 0x80 = wcisniety, 0x01 = przelaczony */
 static int   g_mx = SCR_W / 2, g_my = SCR_H / 2;
@@ -75,7 +76,56 @@ static LRESULT run_hooks(int type, int code, WORD wp, LONG lp)
 
 void shell_hook(int code, WORD w) { run_hooks(10, code, w, 0); }
 
+/* SendMessage do okna innego zadania: procedura musi dzialac na stosie wlasciciela (programy
+ * small-model zakladaja SS=DS), wiec oddajemy mu CPU. Odbiorca wykonuje prosbe
+ * w send_pump, czyli gdy czeka na komunikat, a wysylajacy czeka w petli (i sam obsluguje prosby). */
+#define MAX_SENDS 8
+typedef struct { BOOL used, done; WORD from, to; HWND h; WORD m, wp; LONG lp; LRESULT res; } XSEND;
+static XSEND g_xs[MAX_SENDS];
+static LRESULT send_direct(HWND h, WORD m, WORD wp, LONG lp);
+
+void send_pump(void)
+{
+    WORD me = GetCurrentTask();
+    int i;
+    for (i = 0; i < MAX_SENDS; i++) {
+        XSEND *x = &g_xs[i];
+        if (x->used && !x->done && x->to == me) {
+            x->to = 0;                                    /* w trakcie: nie wykonuj drugi raz */
+            x->res = WP(x->h) ? send_direct(x->h, x->m, x->wp, x->lp) : 0;
+            x->done = TRUE;
+        }
+    }
+}
+
+static LRESULT send_task(WORD to, HWND h, WORD m, WORD wp, LONG lp)
+{
+    WORD me = GetCurrentTask();
+    XSEND *x = 0;
+    LRESULT res;
+    int i;
+    for (i = 0; i < MAX_SENDS; i++) if (!g_xs[i].used) { x = &g_xs[i]; break; }
+    if (!x) { udbg("USER: za duzo SendMessage miedzy zadaniami\n"); return 0; }
+    x->used = TRUE; x->done = FALSE; x->from = me; x->to = to;
+    x->h = h; x->m = m; x->wp = wp; x->lp = lp; x->res = 0;
+    while (!x->done && (x->to == 0 || IsTask(x->to))) {
+        if (x->to) DirectedYield(x->to); else Yield();
+        send_pump();
+    }
+    res = x->res;
+    x->used = FALSE;
+    return res;
+}
+
 LRESULT send_msg(HWND h, WORD m, WORD wp, LONG lp)
+{
+    WND __far *w = WP(h);
+    if (!w || !w->proc) return 0;
+    if (w->task && w->task != GetCurrentTask() && IsTask(w->task)) return send_task(w->task, h, m, wp, lp);
+    return send_direct(h, m, wp, lp);
+}
+
+static LRESULT send_direct(HWND h, WORD m, WORD wp, LONG lp)
 {
     WND __far *w = WP(h);
     if (!w || !w->proc) return 0;
@@ -116,6 +166,7 @@ BOOL post_msg(HWND h, WORD m, WORD wp, LONG lp)
 {
     WORD nt = (g_qt + 1) % QSIZE;
     if (nt == g_qh) { udbg("USER: kolejka pelna\n"); return FALSE; }
+    g_qtask[g_qt] = (h && WP(h)) ? WP(h)->task : GetCurrentTask();
     g_q[g_qt].hwnd = h; g_q[g_qt].message = m; g_q[g_qt].wParam = wp; g_q[g_qt].lParam = lp;
     g_q[g_qt].time = tick();
     g_q[g_qt].pt.x = g_mx; g_q[g_qt].pt.y = g_my;
@@ -135,10 +186,31 @@ BOOL API PostMessage(HWND h, WORD m, WORD wp, LONG lp)
     return post_msg(h, m, wp, lp);
 }
 
-BOOL API PostAppMessage(WORD task, WORD m, WORD wp, LONG lp) { (void)task; return post_msg(0, m, wp, lp); }
+BOOL API PostAppMessage(WORD task, WORD m, WORD wp, LONG lp)
+{
+    WORD t = g_qt;
+    if (!post_msg(0, m, wp, lp)) return FALSE;
+    g_qtask[t] = task;
+    return TRUE;
+}
 
 /* ordinal 6 */
-void API PostQuitMessage(int code) { g_quit = TRUE; g_quitcode = (WORD)code; }
+static int quit_slot(WORD task)
+{
+    int i;
+    for (i = 0; i < MAX_QUIT; i++) if (g_quits[i].task == task) return i;
+    return -1;
+}
+
+void API PostQuitMessage(int code)
+{
+    WORD task = GetCurrentTask();
+    int i = quit_slot(task);
+    if (i < 0) i = quit_slot(0);
+    if (i < 0) return;
+    g_quits[i].task = task;
+    g_quits[i].code = (WORD)code;
+}
 
 /* ============================================================
  * Klawiatura: scancode set 1 -> VK (uklad US)
@@ -284,7 +356,10 @@ static void mouse_buttons(WORD b)
 
 void input_poll(void)
 {
+    static BOOL busy;                                         /* send_msg moze oddac CPU innemu zadaniu */
     BYTE __far *k = (BYTE __far *)MK_FP(SEL_KCB, 0);
+    if (busy) return;
+    busy = TRUE;
     while (k[1024] != k[1025]) {                              /* klawiatura */
         WORD e = *(WORD __far *)(k + 1026 + k[1024] * 2);
         k[1024] = (BYTE)((k[1024] + 1) % 64);
@@ -299,6 +374,7 @@ void input_poll(void)
         mouse_buttons(b);
     }
     mouse_moved(*(int __far *)(k + 285), *(int __far *)(k + 287));
+    busy = FALSE;
 }
 
 /* ============================================================
@@ -344,7 +420,11 @@ void activate_window(HWND h, BOOL mouse)
     }
     if (!WP(h)) return;
     SetWindowPos(h, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);    /* na gore */
-    if (!old) send_msg(h, WM_ACTIVATEAPP, TRUE, 0);
+    if (!old || !WP(old) || WP(old)->task != WP(h)->task) {
+        if (old && WP(old)) send_msg(old, WM_ACTIVATEAPP, FALSE, WP(h)->task);
+        if (WP(h)) send_msg(h, WM_ACTIVATEAPP, TRUE, old && WP(old) ? WP(old)->task : 0);
+    }
+    if (!WP(h)) return;
     WP(h)->flags |= WF_ACTIVE;
     send_msg(h, WM_NCACTIVATE, TRUE, 0);
     send_msg(h, WM_ACTIVATE, mouse ? 2 : 1, MAKELONG(old, IsIconic(h)));
@@ -433,7 +513,7 @@ BOOL API EnableHardwareInput(BOOL e) { (void)e; return TRUE; }
  * Timery
  * ============================================================ */
 #define MAX_TIMERS 32
-static struct { HWND h; WORD id; WORD ms; DWORD next; LPVOID proc; BOOL used; } g_tm[MAX_TIMERS];
+static struct { HWND h; WORD id; WORD ms; DWORD next; LPVOID proc; BOOL used; WORD task; } g_tm[MAX_TIMERS];
 
 WORD API SetTimer(HWND h, WORD id, WORD ms, LPVOID proc)
 {
@@ -448,7 +528,7 @@ WORD API SetTimer(HWND h, WORD id, WORD ms, LPVOID proc)
         if (!h) id = nextid++;
     }
     g_tm[i].used = TRUE; g_tm[i].h = h; g_tm[i].id = id; g_tm[i].ms = ms;
-    g_tm[i].next = tick() + ms; g_tm[i].proc = proc;
+    g_tm[i].next = tick() + ms; g_tm[i].proc = proc; g_tm[i].task = GetCurrentTask();
     return id ? id : 1;
 }
 
@@ -470,8 +550,9 @@ static BOOL timer_msg(LPMSG m, HWND filt)
 {
     int i;
     DWORD t = tick();
+    WORD me = GetCurrentTask();
     for (i = 0; i < MAX_TIMERS; i++) {
-        if (!g_tm[i].used || (long)(t - g_tm[i].next) < 0) continue;
+        if (!g_tm[i].used || g_tm[i].task != me || (long)(t - g_tm[i].next) < 0) continue;
         if (filt && g_tm[i].h != filt) continue;
         g_tm[i].next = t + g_tm[i].ms;
         m->hwnd = g_tm[i].h; m->message = WM_TIMER; m->wParam = g_tm[i].id;
@@ -554,12 +635,14 @@ static BOOL in_filter(WORD m, WORD mn, WORD mx)
 
 static BOOL get_msg(LPMSG m, HWND filt, WORD mn, WORD mx, BOOL remove)
 {
-    WORD i;
+    WORD i, me = GetCurrentTask();
+    int qs;
+    send_pump();
     input_poll();
     for (i = g_qh; i != g_qt; i = (i + 1) % QSIZE) {
         MSG *q = &g_q[i];
         if (q->message == WM_NULL && i == g_qh) { g_qh = (g_qh + 1) % QSIZE; continue; }
-        if (q->message == WM_NULL) continue;
+        if (q->message == WM_NULL || g_qtask[i] != me) continue;
         if (filt && q->hwnd != filt && !IsChild(filt, q->hwnd)) continue;
         if (!in_filter(q->message, mn, mx)) continue;
         *m = *q;
@@ -571,9 +654,9 @@ static BOOL get_msg(LPMSG m, HWND filt, WORD mn, WORD mx, BOOL remove)
         g_lasttime = m->time;
         return TRUE;
     }
-    if (g_quit && !filt) {
-        m->hwnd = 0; m->message = WM_QUIT; m->wParam = g_quitcode; m->lParam = 0;
-        if (remove) g_quit = FALSE;
+    if (!filt && (qs = quit_slot(me)) >= 0) {
+        m->hwnd = 0; m->message = WM_QUIT; m->wParam = g_quits[qs].code; m->lParam = 0;
+        if (remove) g_quits[qs].task = 0;
         return TRUE;
     }
     if (in_filter(WM_PAINT, mn, mx)) {
@@ -588,6 +671,17 @@ static BOOL get_msg(LPMSG m, HWND filt, WORD mn, WORD mx, BOOL remove)
     return FALSE;
 }
 
+/* Nic do roboty: oddaj CPU kolejnemu zadaniu. HLT dopiero, gdy pelny obieg zadan nic nie znalazl
+ * (g_idle zeruje kazde zadanie, ktore dostalo komunikat albo pracuje) */
+static WORD g_idle;
+
+static void task_wait(void)
+{
+    int n = GetNumTasks();
+    if (++g_idle >= (WORD)n) { g_idle = 0; cpu_idle(); }
+    if (n > 1) { Yield(); send_pump(); }
+}
+
 /* ordinal 108 */
 BOOL API GetMessage(LPMSG m, HWND filt, WORD mn, WORD mx)
 {
@@ -595,8 +689,9 @@ BOOL API GetMessage(LPMSG m, HWND filt, WORD mn, WORD mx)
     for (;;) {
         if (get_msg(m, filt, mn, mx, TRUE)) break;
         caret_blink();
-        cpu_idle();
+        task_wait();
     }
+    g_idle = 0;
     run_hooks(3, 0, 0, (LONG)m);                              /* WH_GETMESSAGE */
     return m->message != WM_QUIT;
 }
@@ -616,10 +711,15 @@ BOOL API PeekMessage(LPMSG m, HWND filt, WORD mn, WORD mx, WORD fl)
         DWORD t = tick();
         caret_blink();
         if (t != tick0) { tick0 = t; empty = 0; }
-        if (++empty > PEEK_SPIN) cpu_idle();
+        if (++empty > PEEK_SPIN) task_wait();             /* PM_NOYIELD: tez bez przelaczania w pustej petli */
+        else {
+            g_idle = 0;
+            if (!(fl & 2) && GetNumTasks() > 1) { Yield(); send_pump(); }
+        }
         return FALSE;
     }
     empty = 0;
+    g_idle = 0;
     if (fl & 1) run_hooks(3, 0, 0, (LONG)m);
     return TRUE;
 }
@@ -627,7 +727,8 @@ BOOL API PeekMessage(LPMSG m, HWND filt, WORD mn, WORD mx, WORD fl)
 void API WaitMessage(void)
 {
     MSG m;
-    while (!get_msg((LPMSG)&m, 0, 0, 0, FALSE)) { caret_blink(); cpu_idle(); }
+    while (!get_msg((LPMSG)&m, 0, 0, 0, FALSE)) { caret_blink(); task_wait(); }
+    g_idle = 0;
 }
 
 /* ordinal 113: WM_KEYDOWN -> WM_CHAR (uklad US) */
@@ -715,15 +816,34 @@ BOOL modal_next(LPMSG m)
                 (m->message >= WM_NCMOUSEMOVE && m->message <= WM_NCRBUTTONUP) ||
                 (m->message >= WM_KEYDOWN && m->message <= WM_SYSCHAR)) return TRUE;
             if (m->message == WM_PAINT || m->message == WM_PAINTICON) { DispatchMessage(m); continue; }
-            if (m->message == WM_QUIT) { post_msg(0, WM_QUIT, m->wParam, 0); g_quit = TRUE; return FALSE; }
+            if (m->message == WM_QUIT) { PostQuitMessage(m->wParam); return FALSE; }
             DispatchMessage(m);
             continue;
         }
         caret_blink();
-        cpu_idle();
+        task_wait();
     }
 }
 
 int mouse_x(void) { return g_mx; }
 int mouse_y(void) { return g_my; }
 WORD mouse_btn(void) { return g_mbtn; }
+
+
+/* ordinal 952 (prywatny): koniec zadania, wola KERNEL przed zwolnieniem zadania */
+void API UserTaskExit(WORD task, WORD hinst)
+{
+    HWND c, next;
+    WORD i;
+    int k;
+    for (c = WP(HDESKTOP)->child; c; c = next) {
+        next = WP(c) ? WP(c)->next : 0;
+        if (WP(c) && WP(c)->task == task) DestroyWindow(c);
+    }
+    for (i = 0; i < MAX_TIMERS; i++) if (g_tm[i].used && g_tm[i].task == task) g_tm[i].used = FALSE;
+    for (i = g_qh; i != g_qt; i = (i + 1) % QSIZE) if (g_qtask[i] == task) g_q[i].message = WM_NULL;
+    k = quit_slot(task);
+    if (k >= 0) g_quits[k].task = 0;
+    for (k = 0; k < MAX_SENDS; k++) if (g_xs[k].used && g_xs[k].to == task) { g_xs[k].done = TRUE; }
+    cls_free_inst(hinst);
+}

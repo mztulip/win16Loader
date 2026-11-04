@@ -109,6 +109,7 @@ static HWND find_paint(HWND h, HWND filt)
     HWND c, list[64];
     int n = 0, i;
     if (!w || !(w->style & WS_VISIBLE)) return 0;
+    if (h != HDESKTOP && w->task != GetCurrentTask()) return 0;   /* maluje zadanie wlasciciela */
     if (w->flags & WF_MINIMIZED) {                           /* ikona: bez ramki i bez okien potomnych */
         w->flags &= ~WF_NCPAINT;
         return (w->upd && (!filt || filt == h)) ? h : 0;
@@ -129,7 +130,7 @@ static HWND find_paint(HWND h, HWND filt)
 
 HWND paint_pending(HWND filt) { return find_paint(HDESKTOP, filt); }
 
-/* Okno zminimalizowane z ikona klasy dostaje WM_PAINTICON i WM_ICONERASEBKGND (Win 3.x) */
+/* Okno zminimalizowane z ikona klasy dostaje WM_PAINTICON i WM_ICONERASEBKGND */
 static BOOL class_icon_paint(WND __far *w) { return (w->flags & WF_MINIMIZED) && g_cls[w->cls].icon; }
 static HBRUSH icon_bg_brush(WND __far *w)
 {

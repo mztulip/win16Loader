@@ -85,6 +85,14 @@ ATOM register_system_class(LPCSTR name, WORD style, WNDPROC proc, int extra, WOR
 }
 
 /* ordinal 403 */
+/* Koniec zadania: klasy tego programu znikaja (inaczej ponowne uruchomienie ich nie zarejestruje) */
+void cls_free_inst(WORD hinst)
+{
+    int i;
+    for (i = 0; i < MAX_CLASS; i++)
+        if (g_cls[i].used && !g_cls[i].system && g_cls[i].hinst == hinst) g_cls[i].used = 0;
+}
+
 BOOL API UnregisterClass(LPCSTR name, WORD hinst)
 {
     int i = cls_find(name, hinst);
@@ -364,6 +372,7 @@ HWND API CreateWindowEx(DWORD ex, LPCSTR cname, LPCSTR title, DWORD style, int x
     w->exstyle = ex;
     w->proc = g_cls[ci].proc;
     w->hinst = hinst;
+    w->task = GetCurrentTask();
     if (style & WS_CHILD) { w->parent = parent; w->id = menu; }
     else {
         w->parent = HDESKTOP;
@@ -920,16 +929,18 @@ BOOL API EnumChildWindows(HWND h, WNDENUMPROC proc, LONG lp)
 /* ordinal 225 */
 BOOL API EnumTaskWindows(WORD task, WNDENUMPROC proc, LONG lp)
 {
-    (void)task;
-    return EnumWindows(proc, lp);
+    HWND c, next;
+    for (c = WP(HDESKTOP)->child; c; c = next) {
+        next = WP(c) ? WP(c)->next : 0;
+        if (WP(c) && WP(c)->task == task && !((WNDENUMPROC)proc)(c, lp)) return FALSE;
+    }
+    return TRUE;
 }
 
 /* ordinal 224 */
 WORD API GetWindowTask(HWND h)
 {
-    extern WORD API GetCurrentTask(void);
-    (void)h;
-    return GetCurrentTask();
+    return WP(h) ? WP(h)->task : 0;
 }
 
 /* ============================================================

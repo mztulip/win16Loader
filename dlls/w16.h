@@ -52,6 +52,7 @@ LONG   API _llseek(int, LONG, int);
 int    API lstrlen(LPCSTR);
 LPSTR  API lstrcpy(LPSTR, LPCSTR);
 int    API lstrcmpi(LPCSTR, LPCSTR);
+WORD   API WinExec(LPCSTR, WORD);
 WORD   API GetWindowsDirectory(LPSTR, WORD);
 WORD   API GetDriveType(int);
 int    API GetModuleFileName(WORD, LPSTR, int);
