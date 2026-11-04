@@ -13,14 +13,13 @@ typedef struct {
     WORD  ss, sp;                    /* zapisany stos, gdy zadanie nie dziala */
     WORD  stack, initsp, heap, heapstart;
     WORD  entry_cs, entry_ip;
+    BOOL  dying;                     /* konczone po wyjatku */
     WORD  depth;                     /* stan thunka INT 3Fh */
     WORD  i3f[I3F_MAX * 3];
 } TASK;
 
 static TASK g_t[MAX_TASKS];
 static int  g_cur, g_n;
-static int  g_dying = -1;            /* zadanie konczone po wyjatku */
-static BOOL g_fault;
 
 extern void fault_entry(void);
 
@@ -35,8 +34,15 @@ static WORD cur_ds(void);
 #pragma aux cur_ds = "mov ax, ds" value [ax];
 
 /* Wynik INT E0h (mod_exec_rm w module.c), w RMBUF */
-typedef struct { WORD ok, hinst, entry_cs, entry_ip, initsp, stack, heap, heapstart; } EXECRES;
+#define MAX_LATE_DLL 16
+typedef struct {
+    WORD ok, hinst, entry_cs, entry_ip, initsp, stack, heap, heapstart;
+    WORD ndll, dll[MAX_LATE_DLL * 4];              /* LibEntry: cs, ip, ds, heap */
+} EXECRES;
 #define EXEC_RM_INT 0xE0
+
+extern WORD libentry_call(WORD cs, WORD ip, WORD ds, WORD heap, WORD psp);
+#pragma aux libentry_call parm [ax] [dx] [bx] [cx] [si] value [ax];
 
 static HTASK tdb_new(WORD hinst)
 {
@@ -115,7 +121,7 @@ static void switch_to(int i)
     g_boot_cs = n->entry_cs; g_boot_ip = n->entry_ip;
     g_boot_ds = n->hinst; g_boot_psp = n->psp;
     g_cur = i;
-    KCBW(KCB_NTASKS) = (i == g_dying) ? 0 : g_n;
+    KCBW(KCB_NTASKS) = n->dying ? 0 : g_n;                /* wyjatek przy sprzataniu = panika */
     task_switch(&o->ss, &o->sp, n->ss, n->sp);
 }
 
@@ -178,7 +184,7 @@ void task_exit(WORD ax)
         HMODULE u = GetModuleHandle("USER"), g = GetModuleHandle("GDI");
         USEREXIT fu = u ? (USEREXIT)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
         GDIEXIT fg = g ? (GDIEXIT)GetProcAddress(g, (LPCSTR)MK_FP(0, 915)) : 0;
-        if (fu) fu(t->h, t->hinst, g_fault);
+        if (fu) fu(t->h, t->hinst, t->dying);
         if (fg) fg(t->h);
     }
     kdos_close_task(t->h);
@@ -188,8 +194,7 @@ void task_exit(WORD ax)
     GlobalFree(t->h);
     t->used = FALSE;
     g_n--;
-    g_dying = -1;
-    g_fault = FALSE;
+    t->dying = FALSE;
     n = next_task();
     *(WORD __far *)MK_FP(SEL_DATA16, KCBW(KCB_I3F_DEPTH)) = 0;
     t->depth = 0;
@@ -207,13 +212,18 @@ void task_fault_c(void)
     int mi;
     *(WORD __far *)MK_FP(SEL_DATA16, KCBW(KCB_I3F_DEPTH)) = 0;
     KCBW(KCB_NTASKS) = 0;                          /* wyjatek przy sprzataniu = panika */
-    g_dying = g_cur;
-    g_fault = TRUE;
+    g_t[g_cur].dying = TRUE;
+    {   /* ten stos zostaje na czas komunikatu, inne zadanie moze w tym czasie tez zawiesc */
+        WORD st = (WORD)GlobalAlloc(0x40, 0x2000);
+        if (st) { kmem_set_owner(st, 0); KCBW(KCB_EXC_STACK) = st; }
+    }
     mi = mod_from_handle(g_t[g_cur].hinst);
     kstrcpy((LPSTR)msg, "Program ");
     if (mi >= 0) kstrcpy((LPSTR)msg + kstrlen((LPCSTR)msg), (LPCSTR)(MTE(mi) + MT_NAME));
     kstrcpy((LPSTR)msg + kstrlen((LPCSTR)msg), " wykonal niedozwolona operacje i zostal zamkniety.");
     dbg_str("KERNEL: wyjatek konczy zadanie: ", (LPCSTR)msg);
+    dbg_puts("  numer="); dbg_hex(KCBW(KCB_EXC_INFO), 2);
+    dbg_puts(" CS:IP="); dbg_hex(KCBW(KCB_EXC_INFO + 4), 4); dbg_puts(":"); dbg_hex(KCBW(KCB_EXC_INFO + 2), 4); dbg_puts("\n");
     u = GetModuleHandle("USER");
     {
         typedef void (API *USEREXIT)(WORD, WORD, BOOL);
@@ -246,11 +256,63 @@ static BOOL has_ext(LPCSTR s)
     return dot != 0;
 }
 
+/* Wywolaj loader w trybie rzeczywistym (mode 0 = program, 1 = DLL). Wynik w RMBUF. */
+static void exec_rm(WORD mode, LPCSTR path)
+{
+    RMREGS __far *r = rmregs();
+    WORD __far *in = (WORD __far *)MK_FP(SEL_RMBUF, RMBUF_DATA);
+    kdos_init();
+    kmemset(r, 0, sizeof(RMREGS));
+    in[0] = mode;
+    kstrcpy((LPSTR)(in + 1), path);
+    rm_int(EXEC_RM_INT, r);
+}
+
+/* LibEntry nowo zaladowanych DLL, w kolejnosci zaleznosci. Tak jak przy starcie systemu:
+ * DS=DGROUP, DI=hInstance, CX=rozmiar sterty, ES:SI=linia polecen. FALSE: ktoras zwrocila blad
+ * albo jest ich za duzo. Lista musi byc skopiowana: LibEntry moze uzyc RMBUF (DOS). */
+static BOOL run_libentries(EXECRES __far *res)
+{
+    static WORD list[MAX_LATE_DLL * 4];
+    WORD n = res->ndll, i;
+    BOOL ok = TRUE;
+    if (n > MAX_LATE_DLL) { dbg_puts("KERNEL: za duzo nowych DLL\n"); return FALSE; }
+    kmemcpy((LPVOID)list, res->dll, n * 8);
+    for (i = 0; i < n; i++) {
+        int mi = mod_from_handle(list[i * 4 + 2]);
+        if (!libentry_call(list[i * 4], list[i * 4 + 1], list[i * 4 + 2], list[i * 4 + 3], GetCurrentPDB())) {
+            dbg_puts("KERNEL: LibEntry zwrocilo blad\n");
+            if (mi >= 0) MTW(mi, MT_FLAGS) |= MTF_VIRTUAL;   /* drugi LoadLibrary nie odda jej jako dobrej */
+            ok = FALSE;
+        }
+    }
+    return ok;
+}
+
+/* ordinal 95: jeszcze nie w pamieci = zaladuj. Wynik < 32 = blad (2 brak pliku, 20 LibEntry) */
+HINSTANCE API LoadLibrary(LPCSTR name)
+{
+    static char path[96];
+    EXECRES __far *res = (EXECRES __far *)MK_FP(SEL_RMBUF, RMBUF_DATA);
+    int mi = mod_from_name(name);
+    dbg_str("KERNEL: LoadLibrary ", name);
+    if (mi >= 0) {
+        if (MTW(mi, MT_FLAGS) & MTF_VIRTUAL) return 2;
+    } else {
+        kstrcpy((LPSTR)path, name);
+        if (!has_ext((LPCSTR)path)) kstrcpy((LPSTR)path + kstrlen((LPCSTR)path), ".DLL");
+        exec_rm(1, (LPCSTR)path);
+        if (!res->ok) return res->hinst ? res->hinst : 2;
+        mi = res->hinst;
+        if (!run_libentries(res)) return 20;
+    }
+    return MTW(mi, MT_DGROUP) ? MTW(mi, MT_DGROUP) : MTW(mi, MT_HMOD);
+}
+
 /* ordinal 166. Wynik > 32 = hInstance, inaczej kod bledu jak w Windows (2 = brak pliku) */
 WORD API WinExec(LPCSTR cmd, WORD show)
 {
     static char prog[80];
-    RMREGS __far *r = rmregs();
     EXECRES __far *res = (EXECRES __far *)MK_FP(SEL_RMBUF, RMBUF_DATA);
     LPCSTR args;
     int i, slot = -1, n;
@@ -263,10 +325,7 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     if (!has_ext((LPCSTR)prog)) kstrcpy((LPSTR)prog + kstrlen((LPCSTR)prog), ".EXE");
     for (i = 0; i < MAX_TASKS; i++) if (!g_t[i].used) { slot = i; break; }
     if (slot < 0) return 8;                              /* za malo pamieci */
-    kdos_init();
-    kmemset(r, 0, sizeof(RMREGS));
-    kstrcpy((LPSTR)MK_FP(SEL_RMBUF, RMBUF_DATA), (LPCSTR)prog);
-    rm_int(EXEC_RM_INT, r);
+    exec_rm(0, (LPCSTR)prog);
     if (!res->ok) {
         dbg_str("KERNEL: WinExec nie udany ", (LPCSTR)prog);
         return res->hinst ? res->hinst : 2;              /* hinst = kod bledu */
@@ -281,6 +340,7 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     t->heap = res->heap;
     t->heapstart = res->heapstart;
     t->show = show;
+    if (!run_libentries(res)) return 20;                 /* jak LoadLibrary: blad DLL */
     t->h = tdb_new(t->hinst);
     t->psp = (WORD)GlobalAlloc(0x40, 256);
     if (!t->h || !t->psp) return 8;

@@ -110,6 +110,34 @@ task_returned:
     mov  ax, 0x4C00
     int  0x21
 
+; libentry_call(cs [ax], ip [dx], ds [bx], heap [cx], psp [si]): near, wynik AX z LibEntry.
+; Rejestry jak przy starcie systemu (pm_call.asm): DS=DGROUP, DI=hInstance, CX=sterta,
+; ES:SI=linia polecen, BP=0. Wejscie po indirect far call przez ramke na stosie.
+global libentry_call_
+libentry_call_:
+    push bp
+    push di
+    push si
+    push ds
+    push es
+    push cs
+    push .back
+    push ax
+    push dx
+    mov  es, si
+    mov  si, 0x80
+    mov  di, bx
+    mov  ds, bx
+    xor  bp, bp
+    retf
+.back:
+    pop  es
+    pop  ds
+    pop  si
+    pop  di
+    pop  bp
+    ret
+
 ; Wejscie z exc_common (pm_call.asm): wyjatek przy wielu zadaniach, juz na stosie KCB_EXC_STACK.
 extern task_fault_c_
 global fault_entry_

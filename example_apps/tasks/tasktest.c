@@ -124,9 +124,11 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         t_log("pamiec wraca po koncu zadania", GetFreeSpace(0) >= free0, d);
     }
 
-    /* wyjatek w dziecku konczy tylko dziecko */
+    /* wyjatek w dziecku konczy tylko dziecko; dwa naraz: kazde ma swoj stos i swoj komunikat */
     h = WinExec("A:\\TASKCHLD.EXE crash", SW_SHOWNORMAL);
     CHECK(h > 32, "uruchomienie programu z wyjatkiem");
+    h = WinExec("A:\\TASKCHLD.EXE crash", SW_SHOWNORMAL);
+    CHECK(h > 32, "drugi program z wyjatkiem w tym samym czasie");
     t0 = GetTickCount();
     while (GetNumTasks() > 1 && GetTickCount() - t0 < 30000UL) pump(100);
     CHECK_INT(GetNumTasks(), 1, "wyjatek konczy tylko winne zadanie");

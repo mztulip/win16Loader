@@ -1592,12 +1592,13 @@ programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w oryginale, bez la
 Stan (galaz tasks):
 - ZROBIONE: 21a, 21b, 21c (bez GetQueueStatus na zadanie), 21d (okna, timery, kolejka, klasy,
   pamiec GlobalAlloc, obiekty GDI, pliki), czesc 21e (WinExec, ShellExecute, IsTask, GetNumTasks,
-  PSP z linia polecen). Ponowne uruchomienie zakonczonego programu uzywa tych samych adresow.
+  PSP z linia polecen, LibEntry i LoadLibrary w trakcie pracy, import po nazwie).
+  Ponowne uruchomienie zakonczonego programu uzywa tych samych adresow.
   Wyjatek przy wielu zadaniach konczy tylko winne zadanie, z komunikatem.
   Calmira uruchamia SKI.EXE, przelaczanie paskiem zadan, zamkniecie, ponowne uruchomienie.
 - DO ZROBIENIA:
-  * 21e: LibEntry DLL ladowanych przez WinExec (dzis nie sa wolane!), katalog biezacy na zadanie,
-    LoadModule z LOADPARMS, GetModuleUsage, FreeLibrary, TaskFirst/TaskNext.
+  * 21e: katalog biezacy na zadanie, LoadModule z LOADPARMS, GetModuleUsage, FreeLibrary i WEP
+    (DLL zostaje w pamieci do konca systemu), TaskFirst/TaskNext.
   * 21f: hPrevInstance, GetInstanceData. Dzialajace rownolegle kopie programu to osobne kopie kodu,
     kazda zabiera nowy XMS (zwracany dopiero przy ponownym uruchomieniu tej kopii).
   * USER: menu, ikony i kursory konczonego zadania nie sa zwalniane.

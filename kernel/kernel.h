@@ -71,6 +71,7 @@ typedef void (__far __pascal *FARPROC)(void);
 #define KCB_I3F_STACK     590   /* offset int3f_stack w SEL_DATA16 */
 #define KCB_I3F_DEPTH     592   /* offset int3f_depth w SEL_DATA16 */
 #define KCB_EXC_CB        544   /* DWORD: wejscie KERNEL dla wyjatku, gdy dziala wiele zadan */
+#define KCB_EXC_INFO      548   /* 3 WORD: numer wyjatku, IP, CS */
 #define KCB_NTASKS        594   /* >= 2: wyjatek konczy zadanie, inaczej panika */
 #define KCB_EXC_STACK     596   /* selektor stosu dla wyjatku */
 #define KCB_WINDIR        600
@@ -156,6 +157,7 @@ int   rm_int(BYTE intno, RMREGS __far *r);   /* r jest kopiowane do/z RMBUF */
 RMREGS __far *rmregs(void);
 /* ktask.c */
 HTASK API GetCurrentTask(void);
+HINSTANCE API LoadLibrary(LPCSTR name);
 HMODULE API GetModuleHandle(LPCSTR name);
 FARPROC API GetProcAddress(HMODULE h, LPCSTR name);
 WORD  API GetCurrentPDB(void);

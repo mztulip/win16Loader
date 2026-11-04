@@ -73,6 +73,7 @@ PIC_BASE_S      equ 0x58    ; IRQ8-15 -> INT 58h-5Fh
 KCB_INT_CB      equ 538     ; DWORD: far ptr dyspozytora przerwan programowych (KERNEL)
 KCB_CALLER_DS   equ 520     ; WORD: DS wolajacego ostatnie API (int3f_handler)
 RMX_INT         equ 0xE0    ; rm_int_service -> loader NE (WinExec), kernel/ktask.c
+KCB_EXC_INFO    equ 548     ; 3 WORD: numer wyjatku, IP, CS
 KCB_EXC_CB      equ 544     ; DWORD: wejscie KERNEL dla wyjatku przy wielu zadaniach
 KCB_NTASKS      equ 594     ; WORD: liczba zadan (>= 2: wyjatek konczy zadanie)
 KCB_EXC_STACK   equ 596     ; WORD: selektor stosu dla wyjatku
@@ -1571,8 +1572,16 @@ exc_common:
     pop  ax
     pop  ds
     jb   .one_task
+    ; Ramka: numer, kod bledu, IP, CS (kopia dla komunikatu, zanim opuscimy stos zadania)
+    mov  bp, sp
     mov  ax, SEL_KCB
     mov  ds, ax
+    mov  ax, [ss:bp]
+    mov  [KCB_EXC_INFO], ax
+    mov  ax, [ss:bp+4]
+    mov  [KCB_EXC_INFO+2], ax
+    mov  ax, [ss:bp+6]
+    mov  [KCB_EXC_INFO+4], ax
     mov  ss, [KCB_EXC_STACK]
     mov  sp, 0x1FFE
     call far [KCB_EXC_CB]

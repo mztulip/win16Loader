@@ -23,6 +23,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `menuhover`| MENUHOV.EXE  | Regresja: przejazd myszą bez klikania z otwartego podmenu na pozycje rodzica, także z drugiego poziomu (`WM_MENUSELECT`) |
 | `dosprompt`| DOSPROMP.EXE | Regresja: przy jednej stacji dysk B: nie istnieje (`GetDriveType` = 0, ścieżka zwraca błąd), a brak dyskietki nie wiesza systemu (DOS prosił o klawisz przy zamaskowanej klawiaturze) |
 | `tasks`    | TASKTEST.EXE | Zadania jak w Win16: WinExec, Yield, własny stos i PSP, koniec dziecka nie kończy rodzica (`taskchild` = program potomny) |
+| `libdemo`  | LIBDEMO.EXE  | LibEntry bibliotek ładowanych w trakcie pracy: import statyczny programu z `WinExec` i `LoadLibrary`, jedno wywołanie, sterta DLL, DLL zwracająca błąd. Wyniki pokazuje w oknie |
 
 ## Budowanie i uruchamianie
 

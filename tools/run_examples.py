@@ -15,7 +15,9 @@ ROOT = os.path.dirname(HERE)
 # nazwa -> (katalog, plik .EXE, kroki qemu_headless po starcie)
 # Dodatkowe pliki na dyskietke: EXTRA[nazwa] = [(zrodlo, nazwa na dyskietce)]
 EXTRA = {'shell': [('example_apps/app.ico', 'SHELLTST.ICO')],
-         'tasks': [('example_apps/taskchild/TASKCHLD.EXE', 'TASKCHLD.EXE')]}
+         'tasks': [('example_apps/taskchild/TASKCHLD.EXE', 'TASKCHLD.EXE')],
+         'libdemo': [('example_apps/libdemo/' + f, 'LIBDEMO/' + f)
+                     for f in ('LIBCHLD.EXE', 'DEMODLL.DLL', 'DEMODYN.DLL', 'DEMOBAD.DLL')]}
 APPS = {
     'controls': ('example_apps/controls', 'CTLTEST.EXE', ['w4', 'pshot', 'kesc', 'w1']),
     'odmenu':   ('example_apps/odmenu', 'ODMENU.EXE', ['w4', 'pshot', 'kesc', 'w1', 'kesc', 'w1']),
@@ -42,6 +44,8 @@ APPS = {
     'dosprompt': ('example_apps/dosprompt', 'DOSPROMP.EXE', ['Meject -f floppy0', 'w0.5', 'kshift', 'd40', 'pshot']),
     # zadania: WinExec, Yield, koniec zadania; Enter zamyka komunikat o wyjatku (konczy sie sama)
     'tasks':    ('example_apps/tasks', 'TASKTEST.EXE', ['w1', 'kret'] * 25 + ['d60', 'w1', 'pshot']),
+    # LibEntry DLL ladowanych w trakcie pracy: WinExec i LoadLibrary
+    'libdemo':  ('example_apps/libdemo', 'LIBDEMO.EXE', ['d30', 'w1', 'pshot', 'kalt-f4', 'w1']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),
@@ -67,6 +71,8 @@ def main():
         subprocess.run(['make', '-s', '-C', os.path.join(ROOT, d)], check=True)
         subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, d, exe), '::' + exe], check=True)
         for src, dst in EXTRA.get(n, []):
+            if '/' in dst:                                  # podkatalog na dyskietce
+                subprocess.run(['mmd', '-D', 's', '-i', fd, '::' + dst.rsplit('/', 1)[0]], stderr=subprocess.DEVNULL)
             subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, src), '::' + dst], check=True)
     bad = False
     summary = []

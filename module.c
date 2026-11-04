@@ -382,6 +382,57 @@ static int kernel_equate(unsigned ord, TARGET *t)
     return 1;
 }
 
+/* Import po nazwie: tablica nazw importow programu (offset w pliku) -> ordinal w pliku modulu */
+static unsigned long g_imptab_off;
+
+static unsigned name_in_table(FILE *f, const char *want, unsigned long max)
+{
+    unsigned long used = 0;
+    for (;;) {
+        char nm[130];
+        unsigned char len;
+        unsigned short ord;
+        if (fread(&len, 1, 1, f) != 1 || !len) return 0;
+        if (fread(nm, 1, len, f) != len || fread(&ord, 2, 1, f) != 1) return 0;
+        nm[len] = 0;
+        if (ord && !stricmp(nm, want)) return ord;
+        used += len + 3u;
+        if (max && used >= max) return 0;
+    }
+}
+
+static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
+{
+    static char want[130], path[80];
+    unsigned char len = 0;
+    long pos = ftell(f);
+    unsigned ord = 0;
+    FILE *m;
+    MZ_HEADER mz;
+    NE_HEADER ne;
+    fseek(f, g_imptab_off + name_off, SEEK_SET);
+    fread(&len, 1, 1, f);
+    fread(want, 1, len, f);
+    want[len] = 0;
+    fseek(f, pos, SEEK_SET);
+    _fstrncpy((char __far *)path, (char __far *)mt_entry(tmod) + MT_PATH, sizeof(path) - 1);
+    path[sizeof(path) - 1] = 0;
+    if (path[0] && (m = fopen(path, "rb")) != 0) {
+        if (fread(&mz, sizeof(mz), 1, m) == 1 && !fseek(m, mz.e_lfanew, SEEK_SET) &&
+            fread(&ne, sizeof(ne), 1, m) == 1) {
+            fseek(m, mz.e_lfanew + ne.ne_restab, SEEK_SET);
+            ord = name_in_table(m, want, 0);
+            if (!ord && ne.ne_cbnrestab) {
+                fseek(m, ne.ne_nrestab, SEEK_SET);
+                ord = name_in_table(m, want, ne.ne_cbnrestab);
+            }
+        }
+        fclose(m);
+    }
+    if (!ord) mlog("  WARN: import po nazwie %s.%s nie znaleziony\n", g_mods[tmod].name, want);
+    return ord;
+}
+
 static int resolve_import(unsigned tmod, unsigned ord, TARGET *t)
 {
     MOD *m = &g_mods[tmod];
@@ -468,9 +519,15 @@ static int apply_fixups(FILE *f, long reloc_off, unsigned char __far *seg,
             if (resolve_import((unsigned)tm, rec.target2, &t)) return -1;
             sel = t.sel; off = t.off;
         } else if (rtype == RTYPE_IMPORTNAME) {
-            mlog("  WARN: IMPORTNAME niezaimplementowany (mod %u) @%04X\n",
-                 rec.target1, rec.offset);
-            nbad++; continue;
+            int tm;
+            unsigned ord;
+            if (rec.target1 < 1 || rec.target1 > nmodref) { nbad++; continue; }
+            tm = mod_map[rec.target1 - 1];
+            if (tm < 0) { nbad++; continue; }
+            ord = import_name_ord(f, (unsigned)tm, rec.target2);
+            /* nieznana nazwa: ord 0 = stub, ktory zaloguje wywolanie zamiast skoku pod 0000:FFFF */
+            if (resolve_import((unsigned)tm, ord, &t)) return -1;
+            sel = t.sel; off = t.off;
         } else {
             continue;   /* OSFIXUP (emulacja FPU) - z koprocesorem nic nie robimy */
         }
@@ -699,6 +756,7 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
         if (mod_map[i] < 0) { fclose(f); return -1; }
     }
 
+    g_imptab_off = mz.e_lfanew + (unsigned long)ne.ne_imptab;
     /* Segmenty */
     for (i = 0; i < m->nsegs; i++) {
         NE_SEG_ENTRY s = segtab[i];
@@ -953,54 +1011,80 @@ static void gdt_apply(void)
     g_ngdtp = 0;
 }
 
-/* INT E0h z rm_int_service (tryb rzeczywisty): zaladuj program dla WinExec.
- * Wejscie: sciezka w RMBUF+0x100. Wynik tamze: ok, hinst/blad, wejscie, stos, sterta. */
+/* INT E0h z rm_int_service (tryb rzeczywisty): zaladuj program (WinExec) albo DLL (LoadLibrary).
+ * Wejscie w RMBUF+0x100: slowo trybu (0 = program, 1 = DLL), od +2 sciezka.
+ * Wynik tamze, slowa: ok, hinst/blad, wejscie cs, ip, sp, stos, sterta, poczatek sterty,
+ * liczba nowych DLL, po 4 slowa na DLL do wywolania LibEntry: cs, ip, ds, heap */
 #define RMBUF_DATA_OFF 0x100
+#define RES_NDLL   8
+#define RES_DLLS   9
 #define KCB_THUNK_NEXT_OFF 522
 extern unsigned long g_kcb_phys;
 
+static void base_name(const char *path, char *out)
+{
+    const char *p = path, *s;
+    unsigned n = 0;
+    for (s = path; *s; s++) if (*s == '\\' || *s == ':') p = s + 1;
+    while (p[n] && p[n] != '.' && n < 8) { out[n] = p[n]; n++; }
+    out[n] = 0;
+    upcase(out);
+}
+
 void mod_exec_rm(void)
 {
-    static char path[96];
+    static char path[96], base[10];
     unsigned short __far *res = (unsigned short __far *)MK_FP(g_rmbuf_seg, RMBUF_DATA_OFF);
     unsigned short __far *kcb = (unsigned short __far *)MK_FP((unsigned)(g_kcb_phys >> 4), 0);
-    int idx;
-    _fstrncpy((char __far *)path, (char __far *)res, sizeof(path) - 1);
+    int idx, mode = res[0];
+    unsigned i;
+    _fstrncpy((char __far *)path, (char __far *)(res + 1), sizeof(path) - 1);
     path[sizeof(path) - 1] = 0;
     g_nthunks = kcb[KCB_THUNK_NEXT_OFF / 2] / THUNK_SIZE;
+    g_ndllinit = 0;
     if (g_next_sel + (MAX_SEGS + 4u) * 8u > g_sel_limit) { res[0] = 0; res[1] = 8; return; }
     if (access(path, 0)) { res[0] = 0; res[1] = 2; return; }
-    dir_of(path, g_appdir);
-    {   /* zakonczony program z tego samego pliku: te same adresy */
-        static char full[96];
-        unsigned i;
-        g_replay = 0;
-        if (!_fullpath(full, path, sizeof(full))) strcpy(full, path);
-        for (i = 0; i < g_nmods; i++) {
-            unsigned char __far *e = mt_entry(i);
-            if (g_mods[i].log && !g_mods[i].log->bad && !(*(unsigned short __far *)(e + MT_FLAGS) & MTF_RUNNING) &&
-                !_fstricmp((char __far *)e + MT_PATH, (char __far *)full)) {
-                g_replay = g_mods[i].log; g_replay_idx = i; g_rp_x = g_rp_s = 0;
-                break;
+    if (mode == 0) {
+        dir_of(path, g_appdir);
+        {   /* zakonczony program z tego samego pliku: te same adresy */
+            static char full[96];
+            g_replay = 0;
+            if (!_fullpath(full, path, sizeof(full))) strcpy(full, path);
+            for (i = 0; i < g_nmods; i++) {
+                unsigned char __far *e = mt_entry(i);
+                if (g_mods[i].log && !g_mods[i].log->bad && !(*(unsigned short __far *)(e + MT_FLAGS) & MTF_RUNNING) &&
+                    !_fstricmp((char __far *)e + MT_PATH, (char __far *)full)) {
+                    g_replay = g_mods[i].log; g_replay_idx = i; g_rp_x = g_rp_s = 0;
+                    break;
+                }
             }
         }
+        idx = mod_load(0, path, 1);
+        g_replay = 0;
+    } else {
+        base_name(path, base);
+        idx = mod_load_named(base, path);
     }
-    idx = mod_load(0, path, 1);
-    g_replay = 0;
     if (idx >= 0) stubs_resolve();
     gdt_apply();
     kcb[KCB_THUNK_NEXT_OFF / 2] = g_nthunks * THUNK_SIZE;
-    res = (unsigned short __far *)MK_FP(g_rmbuf_seg, RMBUF_DATA_OFF);
     if (idx < 0) { res[0] = 0; res[1] = 11; return; }          /* zly format EXE */
-    mlog("WinExec: %s hInst=%04X XMS do %06lX sel do %04X\n", path, g_app_ds, g_xms_next, g_next_sel);
     res[0] = 1;
-    res[1] = g_app_ds;
-    res[2] = g_entry_cs;
-    res[3] = g_entry_ip;
-    res[4] = g_init_sp;
-    res[5] = g_app_stack;
-    res[6] = g_app_heap;
-    res[7] = g_app_heapstart;
+    res[RES_NDLL] = g_ndllinit;
+    for (i = 0; i < g_ndllinit * 4u; i++) res[RES_DLLS + i] = g_dllinit[i];
+    if (mode == 0) {
+        mlog("WinExec: %s hInst=%04X XMS do %06lX sel do %04X\n", path, g_app_ds, g_xms_next, g_next_sel);
+        res[1] = g_app_ds;
+        res[2] = g_entry_cs;
+        res[3] = g_entry_ip;
+        res[4] = g_init_sp;
+        res[5] = g_app_stack;
+        res[6] = g_app_heap;
+        res[7] = g_app_heapstart;
+    } else {
+        mlog("LoadLibrary: %s [%d] DLL do inicjalizacji: %u\n", path, idx, g_ndllinit);
+        res[1] = (unsigned short)idx;
+    }
 }
 
 unsigned short mod_thunk_next(void)

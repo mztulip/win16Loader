@@ -96,15 +96,6 @@ int API GetInstanceData(HINSTANCE h, BYTE __near *dst, int n)
     return n;
 }
 
-/* ordinal 95 */
-HINSTANCE API LoadLibrary(LPCSTR name)
-{
-    int mi = mod_from_name(name);
-    dbg_str("KERNEL: LoadLibrary ", name);
-    if (mi < 0 || (MTW(mi, MT_FLAGS) & MTF_VIRTUAL)) return 2;   /* plik nie znaleziony */
-    return MTW(mi, MT_DGROUP) ? MTW(mi, MT_DGROUP) : MTW(mi, MT_HMOD);
-}
-
 /* ordinal 96 */
 void API FreeLibrary(HINSTANCE h)   { (void)h; }
 

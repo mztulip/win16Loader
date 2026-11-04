@@ -128,7 +128,8 @@ z katalogu systemowego (`A:\`) `*.FON`. Potem przechodzi do PM i woła LibEntry 
 Eksporty: `tools/gen_lnk.py MODUL pliki.c` (ordynaly z .spec Wine, prywatne w PRIVATE),
 weryfikacja `retf N` vs .spec: `tools/check_args.py plik:MODUL` (KERNEL.354 = falszywy alarm).
 Calmira II (`../win31_apps/cal3101p`) dziala: pulpit, pasek zadan, menu Start, dialogi.
-Brak: wielozadaniowosci (ShellExecute/WinExec zwracaja blad), COMMDLG (zawsze "Anuluj"), DDE.
+Zadania kooperacyjne (`kernel/ktask.c`): WinExec/ShellExecute/LoadLibrary laduja moduly w trakcie pracy przez `INT E0h` (`mod_exec_rm`), stan w `TODO.txt` ETAP 21.
+Brak: COMMDLG (zawsze "Anuluj"), DDE.
 
 ### Wyglad: wlasny styl, NIE kopiujemy Windows
 

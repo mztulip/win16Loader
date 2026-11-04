@@ -27,7 +27,7 @@ $(APP).res: $(APP).rc $(wildcard *.h) $(wildcard *.ico)
 
 $(APP).EXE: $(OBJS) $(APP).res
 	$(LINK) system windows name $@ file {$(OBJS)} library {clibs $(LIBS)} \
-	    option quiet option map option modname=$(APP) option stack=8192 option heapsize=4096
+	    option quiet option map option modname=$(APP) option stack=8192 option heapsize=4096 $(LINKOPT)
 	$(RC) -q $(APP).res $@
 
 clean:
