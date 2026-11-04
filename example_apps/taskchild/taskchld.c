@@ -5,7 +5,24 @@
 #include "testlog.h"
 #include <direct.h>
 
+BOOL FAR PASCAL WaitEvent(HANDLE h);
+
 static int g_timer;
+WORD g_mark;
+unsigned dgroup_const(void);
+#pragma aux dgroup_const = "mov ax, seg g_mark" value [ax];
+static HINSTANCE g_prev;
+
+LRESULT FAR PASCAL __export InstProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_USER + 1) {
+        /* Stala segmentu w kodzie (fixup na DGROUP): dane swojej kopii tylko w jej wlasnym kodzie */
+        return *(WORD __far *)(((DWORD)dgroup_const() << 16) | (WORD)&g_mark);
+    }
+    if (msg == WM_USER + 3) return (LRESULT)(WORD)g_prev;
+    if (msg == WM_USER + 2) { PostQuitMessage(0); return 0; }
+    return DefWindowProc(h, msg, wp, lp);
+}
 
 static BOOL own_stack(void)
 {
@@ -41,13 +58,51 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     int i;
     t_app = "TASKCHLD";
     if (cmd[0] == 'q') {                              /* "quick": wszystko zostawia nieposprzatane */
-        int k, files = 0, brushes = 0, mem = 0;
+        int k, files = 0, brushes = 0, mem = 0, menus = 0;
         char d[60];
         for (k = 0; k < 10; k++) if (_lopen("A:\\LOADER.EXE", 0) != -1) files++;
         for (k = 0; k < 200; k++) if (CreateSolidBrush(RGB(k, 0, 0))) brushes++;
         for (k = 0; k < 8; k++) if (GlobalAlloc(GMEM_FIXED, 32768L)) mem++;
-        wsprintf(d, "pliki=%d pedzle=%d bloki=%d", files, brushes, mem);
-        t_log("zasoby nieposprzatane", files == 10 && brushes == 200 && mem == 8, d);
+        for (k = 0; k < 30; k++) if (CreateMenu()) menus++;
+        wsprintf(d, "pliki=%d pedzle=%d bloki=%d menu=%d", files, brushes, mem, menus);
+        t_log("zasoby nieposprzatane", files == 10 && brushes == 200 && mem == 8 && menus == 30, d);
+        return 0;
+    }
+    if (cmd[0] == 'e') {                              /* "ev": czeka na PostEvent od rodzica */
+        WaitEvent(0);
+        t_log("WaitEvent konczy sie po PostEvent", TRUE, "");
+        return 0;
+    }
+    if (cmd[0] == 'i') {                              /* "inst": klasa tylko w pierwszej kopii */
+        char d[60];
+        wsprintf(d, "hPrev=%04X", (WORD)prev);
+        t_log("kopia programu", TRUE, d);
+        g_mark = 1234 + (WORD)hi;
+        g_prev = prev;
+        if (prev) {
+            WORD other = 0;
+            GetInstanceData(prev, (BYTE NEAR *)&g_mark, sizeof(g_mark));
+            other = g_mark;
+            g_mark = 1234 + (WORD)hi;
+            CHECK_INT(other, 1234 + (WORD)prev, "GetInstanceData z poprzedniej kopii");
+            memset(&wc, 0, sizeof(wc));
+            wc.lpfnWndProc = InstProc;
+            wc.hInstance = hi;
+            wc.lpszClassName = "TaskInstW";
+            CHECK(!RegisterClass(&wc), "RegisterClass: kopie to jeden program, druga rejestracja zawodzi");
+        } else {
+            memset(&wc, 0, sizeof(wc));
+            wc.lpfnWndProc = InstProc;
+            wc.hInstance = hi;
+            wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+            wc.lpszClassName = "TaskInstW";
+            CHECK(RegisterClass(&wc), "RegisterClass w pierwszej kopii");
+        }
+        h = CreateWindow("TaskInstW", "Kopia", WS_OVERLAPPEDWINDOW, prev ? 340 : 60, 240, 200, 100, NULL, NULL, hi, NULL);
+        CHECK(h != 0, prev ? "CreateWindow: klasa pierwszej kopii" : "CreateWindow w pierwszej kopii");
+        CHECK(!prev || (HINSTANCE)GetWindowWord(h, GWW_HINSTANCE) == hi, "okno nalezy do tej kopii");
+        CreateMenu();                                 /* zostaje: koniec zadania zwalnia */
+        while (GetMessage(&m, NULL, 0, 0)) DispatchMessage(&m);
         return 0;
     }
     if (cmd[0] == 'w') {                              /* "wd KATALOG": katalog biezacy zadania */

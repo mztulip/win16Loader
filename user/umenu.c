@@ -31,6 +31,7 @@ typedef struct {
 } MITEM;
 typedef struct { WORD used, n; MITEM it[MAX_ITEMS]; } MENU;
 
+static WORD g_menutask[MAX_MENUS];
 static WORD g_menusel[MAX_MENUS];              /* kazde menu we wlasnym bloku GlobalAlloc */
 static HWND g_mowner;                          /* wlasciciel menu (WM_MEASUREITEM/WM_DRAWITEM) */
 
@@ -52,9 +53,25 @@ static HMENU menu_handle(MENU __far *m)
     return 0;
 }
 
-static HMENU menu_new(void)
+BOOL API DestroyMenu(HMENU);
+
+/* Zadanie, gdy menu utworzyl sam program (KCB: DS wolajacego = hInstance zadania); 0 = system */
+static WORD caller_task(void)
+{
+    WORD __far *k = (WORD __far *)MK_FP(SEL_KCB, 0);
+    return k[520 / 2] == k[0] ? GetCurrentTask() : 0;
+}
+
+void menus_free_task(WORD task)
 {
     WORD i;
+    for (i = 0; i < MAX_MENUS; i++)
+        if (g_menusel[i] && g_menutask[i] == task) DestroyMenu(MENUBASE + i * 4);
+}
+
+static HMENU menu_new(void)
+{
+    WORD i, owner = caller_task();                     /* przed GlobalAlloc: nadpisze DS wolajacego */
     for (i = 0; i < MAX_MENUS; i++)
         if (!g_menusel[i]) {
             MENU __far *m;
@@ -62,6 +79,7 @@ static HMENU menu_new(void)
             if (!g_menusel[i]) return 0;
             m = (MENU __far *)MK_FP(g_menusel[i], 0);
             m->used = 1;
+            g_menutask[i] = owner;
             return MENUBASE + i * 4;
         }
     return 0;

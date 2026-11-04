@@ -6,7 +6,7 @@
 #include "demodll.h"
 
 #define DIR "A:\\LIBDEMO\\"
-#define MAX_LINES 14
+#define MAX_LINES 20
 static char g_lines[MAX_LINES][64];
 static int g_nl;
 
@@ -57,6 +57,19 @@ static void demo(void)
             b = LoadLibrary(DIR "DEMODYN.DLL");
             f(&i);
             show_line("drugi LoadLibrary bez LibEntry", b == a && i.calls == 1, "");
+            wsprintf(d, "%d", GetModuleUsage(a));
+            show_line("GetModuleUsage po dwoch LoadLibrary", GetModuleUsage(a) == 2, d);
+            FreeLibrary(b);
+            show_line("FreeLibrary: DLL zostaje, bez WEP", GetModuleUsage(a) == 1 && !GlobalFindAtom(WEP_ATOM), "");
+            FreeLibrary(a);
+            show_line("ostatni FreeLibrary wola WEP", GlobalFindAtom(WEP_ATOM) != 0, "");
+            show_line("po FreeLibrary modulu nie ma", GetModuleHandle("DEMODYN") == 0, "");
+            b = LoadLibrary(DIR "DEMODYN.DLL");
+            wsprintf(d, "uchwyt %04X", (WORD)b);
+            show_line("ponowny LoadLibrary", (UINT)b > 32 && b == a, d);
+            f(&i);                                 /* wciaz wazny: te same adresy */
+            wsprintf(d, "wywolan=%d odczyt=%d", i.calls, i.reads);
+            show_line("LibEntry od nowa, swieze dane", i.calls == 1 && i.reads == 1, d);
         }
     }
     a = LoadLibrary(DIR "NIEMA.DLL");

@@ -14,6 +14,11 @@ typedef struct {
     WORD  stack, initsp, heap, heapstart;
     WORD  entry_cs, entry_ip;
     BOOL  dying;                     /* konczone po wyjatku */
+    HTASK parent;
+    WORD  prev;                      /* hPrevInstance: dzialajaca kopia tego programu */
+    WORD  events;                    /* WaitEvent/PostEvent; 1 na start: kod startowy programu czeka raz */
+    HANDLE queue;                    /* SetTaskQueue */
+    HINSTANCE libs[8];               /* LoadLibrary: reszte zwalnia koniec zadania */
     BYTE  drive;                     /* dysk i katalog biezacy, gdy DOS ma ustawiony stan innego zadania */
     char  dir[66];
     WORD  depth;                     /* stan thunka INT 3Fh */
@@ -27,7 +32,7 @@ static int  g_dos_owner = -1;        /* zadanie, ktorego katalog jest teraz usta
 extern void fault_entry(void);
 
 /* Dla task_boot (kasm.asm): pierwsze uruchomienie zadania */
-WORD g_boot_cs, g_boot_ip, g_boot_ds, g_boot_psp;
+WORD g_boot_cs, g_boot_ip, g_boot_ds, g_boot_psp, g_boot_prev;
 
 extern void task_switch(WORD *save_ss, WORD *save_sp, WORD new_ss, WORD new_sp);
 #pragma aux task_switch parm [ax] [dx] [bx] [cx];
@@ -64,6 +69,39 @@ static HTASK tdb_new(WORD hinst)
     return h;
 }
 
+static BOOL g_locked;
+
+BOOL task_started(void) { return g_n != 0; }
+WORD task_prev(void) { task_init(); return g_t[g_cur].prev; }
+
+/* Inna dzialajaca kopia programu o tej samej nazwie (hInstance) albo 0 */
+static WORD other_instance(int self, WORD hinst)
+{
+    int mi = mod_from_handle(hinst), i;
+    if (mi < 0) return 0;
+    for (i = MAX_TASKS - 1; i >= 0; i--) {
+        int m2;
+        if (i == self || !g_t[i].used || g_t[i].dying || g_t[i].hinst == hinst) continue;
+        m2 = mod_from_handle(g_t[i].hinst);
+        if (m2 >= 0 && !kstricmp((LPCSTR)(MTE(mi) + MT_NAME), (LPCSTR)(MTE(m2) + MT_NAME))) return g_t[i].hinst;
+    }
+    return 0;
+}
+
+void task_lib_loaded(HINSTANCE h)
+{
+    int i;
+    if (!g_n) return;
+    for (i = 0; i < 8; i++) if (!g_t[g_cur].libs[i]) { g_t[g_cur].libs[i] = h; return; }
+}
+
+void task_lib_freed(HINSTANCE h)
+{
+    int i;
+    if (!g_n) return;
+    for (i = 0; i < 8; i++) if (g_t[g_cur].libs[i] == h) { g_t[g_cur].libs[i] = 0; return; }
+}
+
 static void set_running(WORD hinst, BOOL on)
 {
     int mi = mod_from_handle(hinst);
@@ -83,6 +121,7 @@ void task_init(void)
     t->hinst = KCBW(KCB_APP_HINST);
     t->psp = SEL_PSP;
     t->show = 1;
+    t->events = 1;
     t->initsp = KCBW(KCB_APP_SP);
     t->stack = KCBW(KCB_APP_STACK);
     t->heap = KCBW(KCB_APP_HEAP);
@@ -134,7 +173,7 @@ static void switch_to(int i)
     KCBW(KCB_APP_HEAP) = n->heap;
     KCBW(KCB_APP_HEAPSTART) = n->heapstart;
     g_boot_cs = n->entry_cs; g_boot_ip = n->entry_ip;
-    g_boot_ds = n->hinst; g_boot_psp = n->psp;
+    g_boot_ds = n->hinst; g_boot_psp = n->psp; g_boot_prev = n->prev;
     g_cur = i;
     KCBW(KCB_NTASKS) = n->dying ? 0 : g_n;                /* wyjatek przy sprzataniu = panika */
     task_switch(&o->ss, &o->sp, n->ss, n->sp);
@@ -154,6 +193,7 @@ static int next_task(void)
 void API Yield(void)
 {
     task_init();
+    if (g_locked) return;
     switch_to(next_task());
 }
 
@@ -170,6 +210,81 @@ void API DirectedYield(HTASK h)
 HTASK API GetCurrentTask(void)  { task_init(); return g_t[g_cur].h; }
 /* ordinal 37 */
 WORD  API GetCurrentPDB(void)   { task_init(); return g_t[g_cur].psp; }
+/* ordinal 30: FALSE, gdy bylo zdarzenie; inaczej czeka na PostEvent, pozwalajac dzialac innym */
+BOOL API WaitEvent(HTASK h)
+{
+    TASK *t;
+    task_init();
+    (void)h;
+    t = &g_t[g_cur];
+    if (t->events) { t->events--; return FALSE; }
+    while (!t->events && g_n > 1) Yield();
+    if (t->events) t->events--;
+    return TRUE;
+}
+
+/* ordinal 31 */
+void API PostEvent(HTASK h)
+{
+    int i;
+    task_init();
+    for (i = 0; i < MAX_TASKS; i++)
+        if (g_t[i].used && (g_t[i].h == h || (!h && i == g_cur))) { g_t[i].events++; return; }
+}
+
+/* ordinal 33 */
+HTASK API LockCurrentTask(BOOL f)
+{
+    task_init();
+    g_locked = f;
+    return f ? g_t[g_cur].h : 0;
+}
+/* ordinal 122 */
+HTASK API IsTaskLocked(void) { task_init(); return g_locked ? g_t[g_cur].h : 0; }
+
+static TASK *task_of(HTASK h)
+{
+    int i;
+    task_init();
+    if (!h) return &g_t[g_cur];
+    for (i = 0; i < MAX_TASKS; i++) if (g_t[i].used && g_t[i].h == h) return &g_t[i];
+    return 0;
+}
+
+/* ordinal 34 */
+HANDLE API SetTaskQueue(HTASK h, HANDLE q)
+{
+    TASK *t = task_of(h);
+    HANDLE o;
+    if (!t) return 0;
+    o = t->queue; t->queue = q;
+    return o;
+}
+/* ordinal 35 */
+HANDLE API GetTaskQueue(HTASK h) { TASK *t = task_of(h); return t ? t->queue : 0; }
+
+/* ordinal 900 (prywatny, TOOLHELP): dane zadania nr i lub nastepnego. Wynik: nr + 1, 0 = koniec.
+ * out: hTask, hParent, hInst, hModule, SS, SP, pStackTop, pStackMin, pStackBottom, events, queue */
+WORD API TaskEnum(WORD i, WORD __far *out, LPSTR name)
+{
+    int mi;
+    task_init();
+    while (i < MAX_TASKS && !g_t[i].used) i++;
+    if (i >= MAX_TASKS) return 0;
+    {
+        TASK *t = &g_t[i];
+        WORD __far *inst = (WORD __far *)MK_FP(t->hinst, 0);
+        mi = mod_from_handle(t->hinst);
+        out[0] = t->h; out[1] = t->parent; out[2] = t->hinst;
+        out[3] = mi >= 0 ? MTW(mi, MT_HMOD) : 0;
+        out[4] = t->hinst; out[5] = t->sp;
+        out[6] = inst[0x0A / 2]; out[7] = inst[0x0C / 2]; out[8] = inst[0x0E / 2];
+        out[9] = t->events; out[10] = t->queue;
+        if (mi >= 0) kstrncpy(name, (LPCSTR)(MTE(mi) + MT_NAME), 10);
+    }
+    return i + 1;
+}
+
 /* ordinal 130: powiadomienia o zmianach plikow. Nic ich jeszcze nie wysyla, ale wywolanie sie udaje. */
 FARPROC API FileCDR(FARPROC proc)  { (void)proc; return (FARPROC)MK_FP(0, 1); }
 
@@ -196,13 +311,18 @@ void task_exit(WORD ax)
     task_init();
     if (g_n <= 1) { pm_int21(ax); return; }
     t = &g_t[g_cur];
+    g_locked = FALSE;
+    {   /* biblioteki z LoadLibrary, ktorych zadanie nie zwolnilo */
+        int k;
+        for (k = 0; k < 8; k++) if (t->libs[k]) FreeLibrary(t->libs[k]);
+    }
     {   /* okna, kolejka i klasy: USER, obiekty: GDI (KERNEL nie importuje tych modulow) */
-        typedef void (API *USEREXIT)(WORD, WORD, BOOL);
+        typedef void (API *USEREXIT)(WORD, WORD, BOOL, WORD);
         typedef void (API *GDIEXIT)(WORD);
         HMODULE u = GetModuleHandle("USER"), g = GetModuleHandle("GDI");
         USEREXIT fu = u ? (USEREXIT)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
         GDIEXIT fg = g ? (GDIEXIT)GetProcAddress(g, (LPCSTR)MK_FP(0, 915)) : 0;
-        if (fu) fu(t->h, t->hinst, t->dying);
+        if (fu) fu(t->h, t->hinst, t->dying, other_instance(g_cur, t->hinst));
         if (fg) fg(t->h);
     }
     kdos_close_task(t->h);
@@ -245,9 +365,9 @@ void task_fault_c(void)
     dbg_puts(" CS:IP="); dbg_hex(KCBW(KCB_EXC_INFO + 4), 4); dbg_puts(":"); dbg_hex(KCBW(KCB_EXC_INFO + 2), 4); dbg_puts("\n");
     u = GetModuleHandle("USER");
     {
-        typedef void (API *USEREXIT)(WORD, WORD, BOOL);
+        typedef void (API *USEREXIT)(WORD, WORD, BOOL, WORD);
         USEREXIT fu = u ? (USEREXIT)GetProcAddress(u, (LPCSTR)MK_FP(0, 952)) : 0;
-        if (fu) fu(g_t[g_cur].h, g_t[g_cur].hinst, TRUE);
+        if (fu) fu(g_t[g_cur].h, g_t[g_cur].hinst, TRUE, other_instance(g_cur, g_t[g_cur].hinst));
     }
     mb = u ? (MSGBOX)GetProcAddress(u, (LPCSTR)MK_FP(0, 1)) : 0;
     if (mb) mb(0, (LPCSTR)msg, (LPCSTR)"Blad programu", 0x10);
@@ -325,6 +445,10 @@ HINSTANCE API LoadLibrary(LPCSTR name)
         mi = res->hinst;
         if (!run_libentries(res)) return 20;
     }
+    if (!(MTW(mi, MT_FLAGS) & MTF_SYSTEM)) {
+        MTW(mi, MT_USAGE)++;
+        task_lib_loaded(MTW(mi, MT_DGROUP) ? MTW(mi, MT_DGROUP) : MTW(mi, MT_HMOD));
+    }
     return MTW(mi, MT_DGROUP) ? MTW(mi, MT_DGROUP) : MTW(mi, MT_HMOD);
 }
 
@@ -359,9 +483,12 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     t->heap = res->heap;
     t->heapstart = res->heapstart;
     t->show = show;
+    t->events = 1;
     task_dos_sync();                                     /* nowe zadanie dziedziczy katalog */
     dos_dir_save(&t->drive, (LPSTR)t->dir);
     if (!run_libentries(res)) return 20;                 /* jak LoadLibrary: blad DLL */
+    t->parent = g_t[g_cur].h;
+    t->prev = other_instance(slot, t->hinst);
     t->h = tdb_new(t->hinst);
     t->psp = (WORD)GlobalAlloc(0x40, 256);
     if (!t->h || !t->psp) return 8;

@@ -132,7 +132,7 @@ typedef struct {
 } CLASS;
 extern CLASS g_cls[MAX_CLASS];
 int   cls_find(LPCSTR name, WORD hinst);
-void  cls_free_inst(WORD hinst);
+void  cls_free_inst(WORD hinst, WORD next);
 
 /* ---- Styl okien ---- */
 #define WS_OVERLAPPED   0x00000000UL

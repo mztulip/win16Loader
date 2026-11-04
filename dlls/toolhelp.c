@@ -61,9 +61,35 @@ BOOL API ModuleNext(MODULEENTRY __far *me)                { (void)me; return FAL
 WORD API ModuleFindName(MODULEENTRY __far *me, LPCSTR n)  { (void)me; (void)n; return 0; }
 
 /* Zadania i sterta - bez wyliczania */
-BOOL API TaskFirst(LPVOID te)                    { (void)te; return FALSE; }
-BOOL API TaskNext(LPVOID te)                     { (void)te; return FALSE; }
-WORD API TaskFindHandle(LPVOID te, WORD t)       { (void)te; (void)t; return 0; }
+typedef struct {
+    DWORD dwSize;
+    WORD hTask, hTaskParent, hInst, hModule, wSS, wSP, wStackTop, wStackMinimum, wStackBottom, wcEvents, hQueue;
+    char szModule[10];
+    WORD wPSPOffset, hNext;
+} TASKENTRY;
+WORD API TaskEnum(WORD i, WORD __far *out, LPSTR name);
+
+static BOOL task_fill(TASKENTRY __far *te, WORD i)
+{
+    WORD next = TaskEnum(i, &te->hTask, (LPSTR)te->szModule);
+    if (!next) return FALSE;
+    te->wPSPOffset = 0;
+    te->hNext = next;                                     /* dla programu: nieprzezroczysty */
+    return TRUE;
+}
+
+BOOL API TaskFirst(LPVOID te) { return task_fill((TASKENTRY __far *)te, 0); }
+BOOL API TaskNext(LPVOID te)  { return task_fill((TASKENTRY __far *)te, ((TASKENTRY __far *)te)->hNext); }
+WORD API TaskFindHandle(LPVOID te, WORD t)
+{
+    WORD i = 0;
+    TASKENTRY __far *e = (TASKENTRY __far *)te;
+    while (task_fill(e, i)) {
+        if (e->hTask == t) return t;
+        i = e->hNext;
+    }
+    return 0;
+}
 BOOL API GlobalFirst(LPVOID ge, WORD f)          { (void)ge; (void)f; return FALSE; }
 BOOL API GlobalNext(LPVOID ge, WORD f)           { (void)ge; (void)f; return FALSE; }
 BOOL API GlobalEntryHandle(LPVOID ge, WORD h)    { (void)ge; (void)h; return FALSE; }

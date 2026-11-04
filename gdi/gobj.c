@@ -81,9 +81,14 @@ BYTE obj_type(WORD h)
 
 WORD obj_new(BYTE type)
 {
-    WORD i, slot;
+    WORD i, slot, owner;
+    WORD __far *k;
     BYTE t = type == OT_MEMDC ? OT_DC : type;
     BYTE __far *d;
+    /* Wlascicielem jest zadanie tylko dla obiektow z bezposredniego wywolania programu. KCB: hInstance
+     * zadania i DS wolajacego; odczyt przed innymi wywolaniami API, bo one go nadpisuja. */
+    k = (WORD __far *)MK_FP(0x98, 0);
+    owner = k[520 / 2] == k[0] ? GetCurrentTask() : 0;
     gdi_init();
     for (i = 1; i < MAX_OBJS; i++) if (g_obj[i].type == OT_FREE) break;
     if (i == MAX_OBJS) { gdbg("GDI: tabela obiektow pelna\n"); return 0; }
@@ -92,10 +97,7 @@ WORD obj_new(BYTE type)
     g_obj[i].type = type;
     g_obj[i].stock = 0;
     g_obj[i].slot = slot;
-    {   /* wlascicielem jest zadanie tylko dla obiektow z bezposredniego wywolania programu */
-        WORD __far *k = (WORD __far *)MK_FP(0x98, 0);       /* KCB: hInstance zadania, DS wolajacego */
-        g_obj[i].owner = k[520 / 2] == k[0] ? GetCurrentTask() : 0;
-    }
+    g_obj[i].owner = owner;
     d = (BYTE __far *)MK_FP(g_pool[t].mem, 0) + slot * g_pool[t].size;
     { WORD k; for (k = 0; k < g_pool[t].size; k++) d[k] = 0; }
     return I2H(i);

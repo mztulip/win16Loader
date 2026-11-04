@@ -160,7 +160,7 @@ void inittask_c(void)
     g_it_bx = n ? 0x82 : 0x81;
     g_it_cx = stk;
     g_it_dx = task_show();
-    g_it_si = 0;                /* hPrevInstance */
+    g_it_si = task_prev();      /* hPrevInstance */
     g_it_di = hinst;
     g_it_es = GetCurrentPDB();
     dbg_puts("KERNEL: InitTask hInst="); dbg_hex(hinst, 4);
@@ -179,20 +179,8 @@ DWORD API GetWinFlags(void)     { return 0x0415; }
 /* ordinal 105 */
 WORD  API GetExeVersion(void)   { return 0x030A; }
 
-/* ordinal 30 */
-BOOL  API WaitEvent(HTASK h)    { (void)h; return FALSE; }
-/* ordinal 31 */
-BOOL  API PostEvent(HTASK h)    { (void)h; return TRUE; }
 /* ordinal 155 */
 HINSTANCE API GetTaskDS(void)   { return KCBW(KCB_APP_HINST); }
-/* ordinal 122 */
-BOOL  API IsTaskLocked(void)    { return FALSE; }
-/* ordinal 33 */
-HTASK API LockCurrentTask(BOOL f) { (void)f; return GetCurrentTask(); }
-/* ordinal 34 */
-HANDLE API SetTaskQueue(HTASK t, HANDLE q) { (void)t; (void)q; return 0; }
-/* ordinal 35 */
-HANDLE API GetTaskQueue(HTASK t) { (void)t; return 0; }
 
 static WORD g_errmode;
 /* ordinal 107 */

@@ -43,7 +43,11 @@ int mod_from_name(LPCSTR name)
     b[n] = 0;
     for (i = 0; i < MAX_MODS; i++) {
         if (!MTE(i)[MT_NAME]) break;
-        if (!kstricmp((LPCSTR)(MTE(i) + MT_NAME), (LPCSTR)(char __far *)b)) return i;
+        if (kstricmp((LPCSTR)(MTE(i) + MT_NAME), (LPCSTR)(char __far *)b)) continue;
+        /* zakonczony program i biblioteka po FreeLibrary nie sa juz zaladowane */
+        if (MTW(i, MT_FLAGS) & MTF_UNLOADED) continue;
+        if (task_started() && !(MTW(i, MT_FLAGS) & (MTF_DLL | MTF_RUNNING))) continue;
+        return i;
     }
     return -1;
 }
@@ -61,7 +65,16 @@ HMODULE API GetModuleHandle(LPCSTR name)
 }
 
 /* ordinal 48 */
-int API GetModuleUsage(HMODULE h)   { return mod_from_handle(h) >= 0 ? 1 : 0; }
+/* ordinal 48: program = liczba dzialajacych kopii, biblioteka = licznik uzycia */
+int API GetModuleUsage(HMODULE h)
+{
+    int mi = mod_of_arg(h), i, n = 0;
+    if (mi < 0) return 0;
+    if (MTW(mi, MT_FLAGS) & MTF_DLL) return MTW(mi, MT_USAGE) ? MTW(mi, MT_USAGE) : 1;
+    for (i = 0; i < MAX_MODS && MTE(i)[MT_NAME]; i++)
+        if ((MTW(i, MT_FLAGS) & MTF_RUNNING) && !kstricmp((LPCSTR)(MTE(i) + MT_NAME), (LPCSTR)(MTE(mi) + MT_NAME))) n++;
+    return n;
+}
 
 /* ordinal 49 */
 int API GetModuleFileName(HINSTANCE h, LPSTR buf, int size)
@@ -97,13 +110,46 @@ int API GetInstanceData(HINSTANCE h, BYTE __near *dst, int n)
 }
 
 /* ordinal 96 */
-void API FreeLibrary(HINSTANCE h)   { (void)h; }
+void API FreeLibrary(HINSTANCE h)
+{
+    int mi = mod_of_arg(h);
+    WORD fl;
+    typedef int (API *WEPPROC)(int);
+    WEPPROC wep;
+    if (mi < 0) return;
+    fl = MTW(mi, MT_FLAGS);
+    if (!(fl & MTF_DLL) || (fl & (MTF_SYSTEM | MTF_VIRTUAL | MTF_UNLOADED))) return;
+    task_lib_freed(h);
+    if (MTW(mi, MT_USAGE)) MTW(mi, MT_USAGE)--;
+    if (MTW(mi, MT_USAGE) || (fl & MTF_PINNED)) return;
+    wep = (WEPPROC)GetProcAddress(h, "WEP");
+    if (wep) wep(0);                               /* WEP_FREE_DLL */
+    MTW(mi, MT_FLAGS) |= MTF_UNLOADED;
+}
 
 /* ordinal 45 */
 HINSTANCE API LoadModule(LPCSTR name, LPVOID params)
 {
-    (void)params;
-    return LoadLibrary(name);
+    /* LOADPARMS: seg srodowiska, far linia polecen (pierwszy bajt = dlugosc),
+     * far {2, nCmdShow}, 0. Biblioteka trafia do LoadLibrary. */
+    static char cmd[200];
+    WORD __far *p = (WORD __far *)params;
+    LPCSTR tail = 0;
+    WORD show = 1;
+    int n, k;
+    if (params && (DWORD)params != 0xFFFFFFFFUL) {
+        tail = *(LPCSTR __far *)(p + 1);
+        if (HIWORD(*(LPVOID __far *)(p + 3))) show = (*(WORD __far * __far *)(p + 3))[1];
+    } else if (!params) return LoadLibrary(name);
+    kstrcpy((LPSTR)cmd, name);
+    n = kstrlen((LPCSTR)cmd);
+    if (n > 4 && !kstricmp((LPCSTR)cmd + n - 4, ".DLL")) return LoadLibrary(name);
+    if (tail && tail[0]) {
+        cmd[n++] = ' ';
+        for (k = 0; k < (BYTE)tail[0] && n < 198 && tail[k + 1] != 13; k++) cmd[n++] = tail[k + 1];
+        cmd[n] = 0;
+    }
+    return WinExec((LPCSTR)cmd, show);
 }
 
 /* ============================================================

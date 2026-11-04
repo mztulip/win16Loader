@@ -5,6 +5,9 @@
 #include "testlog.h"
 #include <direct.h>
 #include <shellapi.h>
+#include <toolhelp.h>
+
+void FAR PASCAL PostEvent(HANDLE h);
 
 static int g_active, g_paint, g_moves;
 static HTASK g_me;
@@ -143,6 +146,81 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         t0 = GetTickCount();
         while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
         chdir("A:\\");
+    }
+
+    /* kopie jednego programu: hPrevInstance, wspolna klasa, klasa przezywa pierwsza kopie */
+    {
+        UINT h1, h2, h3;
+        HWND w1, w2, w3;
+        /* inny program z ta sama nazwa klasy: kopie dziecka nie moga dostac tej klasy */
+        wc.lpszClassName = "TaskInstW";
+        CHECK(RegisterClass(&wc) != 0, "rodzic rejestruje klase o tej samej nazwie");
+        h1 = WinExec("A:\\TASKCHLD.EXE inst", SW_SHOWNORMAL);
+        h2 = WinExec("A:\\TASKCHLD.EXE inst", SW_SHOWNORMAL);
+        CHECK(h1 > 32 && h2 > 32 && h1 != h2, "dwie kopie dzialaja razem");
+        CHECK_INT(GetNumTasks(), 3, "GetNumTasks: dwie kopie i rodzic");
+        CHECK_INT(GetModuleUsage((HINSTANCE)h1), 2, "GetModuleUsage programu = liczba kopii");
+        t0 = GetTickCount();
+        w2 = 0;
+        while (GetTickCount() - t0 < 300) Yield();
+        for (w1 = GetWindow(me, GW_HWNDFIRST); w1; w1 = GetWindow(w1, GW_HWNDNEXT))
+            if ((UINT)GetWindowWord(w1, GWW_HINSTANCE) == h2) w2 = w1;
+        for (w1 = GetWindow(me, GW_HWNDFIRST); w1; w1 = GetWindow(w1, GW_HWNDNEXT))
+            if ((UINT)GetWindowWord(w1, GWW_HINSTANCE) == h1) break;
+        CHECK(w1 && w2, "okna obu kopii");
+        if (w1 && w2) {
+            CHECK_INT((WORD)SendMessage(w1, WM_USER + 1, 0, 0), 1234 + h1, "okno 1 uzywa danych swojej kopii");
+            CHECK_INT((WORD)SendMessage(w2, WM_USER + 1, 0, 0), 1234 + h2, "okno 2 uzywa danych swojej kopii");
+            CHECK_INT((WORD)SendMessage(w1, WM_USER + 3, 0, 0), 0, "hPrevInstance pierwszej kopii = 0");
+            CHECK_INT((WORD)SendMessage(w2, WM_USER + 3, 0, 0), h1, "hPrevInstance drugiej = pierwsza kopia");
+            /* pierwsza kopia konczy sie: klasa i okno drugiej zostaja */
+            PostMessage(w1, WM_USER + 2, 0, 0);
+            t0 = GetTickCount();
+            while (GetNumTasks() > 2 && GetTickCount() - t0 < 5000UL) Yield();
+            CHECK_INT(GetNumTasks(), 2, "pierwsza kopia zakonczona");
+            CHECK_INT((WORD)SendMessage(w2, WM_USER + 1, 0, 0), 1234 + h2, "druga kopia dziala po koncu pierwszej");
+            h3 = WinExec("A:\\TASKCHLD.EXE inst", SW_SHOWNORMAL);
+            CHECK(h3 > 32, "trzecia kopia po koncu pierwszej");
+            t0 = GetTickCount();
+            while (GetTickCount() - t0 < 300) Yield();
+            for (w3 = GetWindow(me, GW_HWNDFIRST); w3; w3 = GetWindow(w3, GW_HWNDNEXT))
+                if ((UINT)GetWindowWord(w3, GWW_HINSTANCE) == h3) break;
+            CHECK(w3 != 0, "trzecia kopia ma okno klasy przejetej od pierwszej");
+            if (w3) { CHECK_INT((WORD)SendMessage(w3, WM_USER + 1, 0, 0), 1234 + h3, "trzecia kopia: wlasne dane"); PostMessage(w3, WM_USER + 2, 0, 0); }
+            PostMessage(w2, WM_USER + 2, 0, 0);
+            t0 = GetTickCount();
+            while (GetNumTasks() > 1 && GetTickCount() - t0 < 5000UL) Yield();
+            CHECK_INT(GetNumTasks(), 1, "wszystkie kopie zakonczone");
+            CHECK(GetModuleHandle("TASKCHLD") == 0, "GetModuleHandle: zakonczony program nie jest zaladowany");
+        }
+    }
+
+    /* WaitEvent / PostEvent, LoadModule, TaskFirst / TaskNext */
+    {
+        struct { WORD env; LPSTR cmd; WORD FAR *show; DWORD res; } lp;
+        WORD sh[2];
+        static char tail[] = "\x02" "ev\r";
+        TASKENTRY te;
+        int n = 0;
+        HTASK ct = 0;
+        sh[0] = 2; sh[1] = SW_SHOWNORMAL;
+        lp.env = 0; lp.cmd = tail; lp.show = sh; lp.res = 0;
+        h = (UINT)LoadModule("A:\\TASKCHLD.EXE", &lp);
+        CHECK(h > 32, "LoadModule z parametrami");
+        te.dwSize = sizeof(te);
+        if (TaskFirst(&te)) do {
+            n++;
+            if ((UINT)te.hInst == h) ct = te.hTask;
+        } while (TaskNext(&te));
+        CHECK_INT(n, 2, "TaskFirst/TaskNext: wszystkie zadania");
+        CHECK(ct != 0, "TaskFirst: dziecko na liscie");
+        CHECK_INT(GetNumTasks(), 2, "dziecko czeka w WaitEvent");
+        for (n = 0; n < 5; n++) Yield();
+        CHECK_INT(GetNumTasks(), 2, "WaitEvent czeka mimo przelaczen");
+        PostEvent(ct);
+        t0 = GetTickCount();
+        while (GetNumTasks() > 1 && GetTickCount() - t0 < 5000UL) Yield();
+        CHECK_INT(GetNumTasks(), 1, "PostEvent budzi zadanie");
     }
 
     /* wielokrotne uruchomienia: pamiec i uchwyty wracaja, adresy programu te same */

@@ -25,11 +25,13 @@ int FAR PASCAL LibMain(HINSTANCE hi, WORD ds, WORD heap, LPSTR cmd)
 
 void FAR PASCAL __export DemoInfo(DEMOINFO FAR *out)
 {
+    g_i.reads++;                                   /* tylko swieze dane DLL zaczynaja od 1 */
     *out = g_i;
 }
 
 int FAR PASCAL __export WEP(int code)
 {
     (void)code;
+    GlobalAddAtom(WEP_ATOM);                       /* slad dla testu: dane DLL zaraz znikna */
     return 1;
 }

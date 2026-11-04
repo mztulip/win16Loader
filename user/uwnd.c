@@ -23,6 +23,36 @@ HWND wnd_handle(WORD i) { return (HWND)(WNDBASE + (i << 2)); }
 /* ============================================================
  * Klasy
  * ============================================================ */
+/* Wpis MODTAB programu/biblioteki o tym DGROUP */
+static BYTE __far *mt_of_inst(WORD hinst)
+{
+    BYTE __far *mt = (BYTE __far *)MK_FP(0x530, 0);       /* SEL_MODTAB */
+    int i;
+    for (i = 0; i < 64 && mt[i * 128]; i++)
+        if (*(WORD __far *)(mt + i * 128 + 10) == hinst) return mt + i * 128;
+    return 0;
+}
+
+/* Dwie kopie tego samego programu: wspolne klasy, jak dla jednego modulu */
+static BOOL same_program(WORD a, WORD b)
+{
+    BYTE __far *ma, __far *mb;
+    if (a == b) return TRUE;
+    ma = mt_of_inst(a); mb = mt_of_inst(b);
+    return ma && mb && !ustricmp((LPCSTR)ma, (LPCSTR)mb);
+}
+
+/* Adres w kopii 'from' -> ten sam adres w kopii 'to' (kazda kopia ma wlasne selektory) */
+static DWORD addr_in_copy(DWORD a, WORD from, WORD to)
+{
+    BYTE __far *mf = mt_of_inst(from), __far *mt = mt_of_inst(to);
+    WORD s = HIWORD(a), f, n;
+    if (!mf || !mt) return a;
+    f = *(WORD __far *)(mf + 12); n = *(WORD __far *)(mf + 14);
+    if (s < f || s >= f + n * 8) return a;
+    return MAKELONG(LOWORD(a), s - f + *(WORD __far *)(mt + 12));
+}
+
 int cls_find(LPCSTR name, WORD hinst)
 {
     int i, sys = -1;
@@ -33,7 +63,7 @@ int cls_find(LPCSTR name, WORD hinst)
     for (i = 0; i < MAX_CLASS; i++) {
         if (!g_cls[i].used || ustricmp((LPCSTR)g_cls[i].name, name)) continue;
         if (g_cls[i].system) sys = i;
-        else if (!hinst || g_cls[i].hinst == hinst || (g_cls[i].style & 0x4000)) return i;  /* CS_GLOBALCLASS */
+        else if (!hinst || same_program(g_cls[i].hinst, hinst) || (g_cls[i].style & 0x4000)) return i;  /* CS_GLOBALCLASS */
         else if (sys < 0) sys = i;
     }
     return sys;
@@ -48,7 +78,7 @@ static ATOM register_class(WNDCLASS __far *wc, BOOL system)
 {
     int i = cls_find(wc->name, wc->hinst);
     CLASS *c;
-    if (i >= 0 && !g_cls[i].system && g_cls[i].hinst == wc->hinst) return 0;   /* juz jest */
+    if (i >= 0 && !g_cls[i].system && same_program(g_cls[i].hinst, wc->hinst)) return 0;   /* juz jest */
     for (i = 0; i < MAX_CLASS; i++) if (!g_cls[i].used) break;
     if (i == MAX_CLASS) return 0;
     c = &g_cls[i];
@@ -85,12 +115,19 @@ ATOM register_system_class(LPCSTR name, WORD style, WNDPROC proc, int extra, WOR
 }
 
 /* ordinal 403 */
-/* Koniec zadania: klasy tego programu znikaja (inaczej ponowne uruchomienie ich nie zarejestruje) */
-void cls_free_inst(WORD hinst)
+/* Koniec zadania: klasy przechodza na inna dzialajaca kopie programu (next), a gdy jej nie ma,
+ * znikaja (inaczej ponowne uruchomienie ich nie zarejestruje) */
+void cls_free_inst(WORD hinst, WORD next)
 {
     int i;
-    for (i = 0; i < MAX_CLASS; i++)
-        if (g_cls[i].used && !g_cls[i].system && g_cls[i].hinst == hinst) g_cls[i].used = 0;
+    for (i = 0; i < MAX_CLASS; i++) {
+        CLASS *c = &g_cls[i];
+        if (!c->used || c->system || c->hinst != hinst) continue;
+        if (!next) { c->used = 0; continue; }
+        c->proc = (WNDPROC)addr_in_copy((DWORD)c->proc, hinst, next);
+        if (HIWORD(c->menu)) c->menu = (LPCSTR)addr_in_copy((DWORD)c->menu, hinst, next);
+        c->hinst = next;
+    }
 }
 
 BOOL API UnregisterClass(LPCSTR name, WORD hinst)
@@ -371,6 +408,8 @@ HWND API CreateWindowEx(DWORD ex, LPCSTR cname, LPCSTR title, DWORD style, int x
     w->style = style & ~WS_VISIBLE;
     w->exstyle = ex;
     w->proc = g_cls[ci].proc;
+    if (hinst && g_cls[ci].hinst != hinst && !g_cls[ci].system)    /* klasa pierwszej kopii: kod tej kopii */
+        w->proc = (WNDPROC)addr_in_copy((DWORD)w->proc, g_cls[ci].hinst, hinst);
     w->hinst = hinst;
     w->task = GetCurrentTask();
     if (style & WS_CHILD) { w->parent = parent; w->id = menu; }

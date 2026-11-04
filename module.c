@@ -57,7 +57,7 @@ struct ALLOCLOG {
     unsigned s[64 + 8];
 };
 static struct ALLOCLOG __far *g_rec, __far *g_replay;
-static unsigned g_rp_x, g_rp_s, g_replay_idx;
+static unsigned g_rp_x, g_rp_s, g_replay_idx, g_log_dll;
 
 typedef struct {
     char           name[10];
@@ -429,6 +429,14 @@ static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
         }
         fclose(m);
     }
+    if (!ord) {
+        if (stricmp(g_mods[tmod].name, "KERNEL") == 0) {
+            if (stricmp(want, "__AHINCR") == 0) ord = 114;
+            else if (stricmp(want, "__AHSHIFT") == 0) ord = 113;
+            else if (stricmp(want, "CATCH") == 0) ord = 55;
+            else if (stricmp(want, "THROW") == 0) ord = 56;
+        }
+    }
     if (!ord) mlog("  WARN: import po nazwie %s.%s nie znaleziony\n", g_mods[tmod].name, want);
     return ord;
 }
@@ -593,6 +601,8 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     NE_HEADER ne;
     char path[96], full[96], mname[12];
     static char refnames[MAX_MODREFS][10];   /* tylko do uzycia przed rekurencja */
+    static char reload_path[80];
+    int replayed = 0;
     char myrefs[MAX_MODREFS][10];
     int mod_map[MAX_MODREFS];
     NE_SEG_ENTRY __far *segtab = 0;
@@ -602,9 +612,19 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     int system;
     MOD *m;
 
-    if (name) {
+    if (name && !g_replay) {
         int k = find_mod(name);
-        if (k >= 0) return k;
+        if (k >= 0) {
+            unsigned char __far *e = mt_entry(k);
+            if (!(*(unsigned short __far *)(e + MT_FLAGS) & MTF_UNLOADED)) return k;
+            /* po FreeLibrary: od nowa, pod te same adresy (LibEntry zobaczy swieze dane) */
+            if (!g_mods[k].log || g_mods[k].log->bad) return k;
+            _fstrncpy((char __far *)reload_path, (char __far *)e + MT_PATH, sizeof(reload_path) - 1);
+            *(unsigned short __far *)(e + MT_FLAGS) &= ~MTF_UNLOADED;
+            path_hint = reload_path;
+            g_replay = g_mods[k].log; g_replay_idx = k; g_rp_x = g_rp_s = 0;
+            replayed = 1;
+        }
     }
     system = name && is_system_name(name);
 
@@ -652,11 +672,11 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
         if (name) { strncpy(mname, name, 9); mname[9] = 0; }
     }
     if (!_fullpath(full, path, sizeof(full))) strcpy(full, path);
-    if (is_app && g_replay) idx = g_replay_idx;
+    if (g_replay) idx = g_replay_idx;
     else {
         idx = (unsigned)new_mod(mname, (is_app ? 0 : MTF_DLL) | (system ? MTF_SYSTEM : 0), full);
         if ((int)idx < 0) { fclose(f); return -1; }
-        if (is_app) {
+        if (is_app || g_log_dll) {
             g_mods[idx].log = (struct ALLOCLOG __far *)_fmalloc(sizeof(struct ALLOCLOG));
             if (g_mods[idx].log) _fmemset(g_mods[idx].log, 0, sizeof(struct ALLOCLOG));
             g_rec = g_mods[idx].log;
@@ -749,11 +769,17 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     for (i = 0; i < nref; i++) {
         {   /* import zaladowany przy okazji nie nalezy do przydzialow programu */
             struct ALLOCLOG __far *sr = g_rec, __far *sp = g_replay;
-            g_rec = 0; g_replay = 0;
+            unsigned sx = g_rp_x, ss = g_rp_s, si = g_replay_idx, sl = g_log_dll;
+            g_rec = 0; g_replay = 0; g_log_dll = 0;
             mod_map[i] = mod_load(myrefs[i], 0, 0);
-            g_rec = sr; g_replay = sp;
+            g_rec = sr; g_replay = sp; g_rp_x = sx; g_rp_s = ss; g_replay_idx = si; g_log_dll = sl;
         }
         if (mod_map[i] < 0) { fclose(f); return -1; }
+        if (!replayed && !g_replay) {                    /* import statyczny: biblioteka zostaje */
+            unsigned char __far *e = mt_entry(mod_map[i]);
+            *(unsigned short __far *)(e + MT_FLAGS) |= MTF_PINNED;
+            (*(unsigned short __far *)(e + MT_USAGE))++;
+        }
     }
 
     g_imptab_off = mz.e_lfanew + (unsigned long)ne.ne_imptab;
@@ -839,7 +865,8 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     }
     _ffree(segtab);
     mt_set_word(idx, MT_DGROUP, m->dgroup_sel);
-    if (is_app) g_rec = 0;
+    if (is_app || g_log_dll) g_rec = 0;
+    if (replayed) g_replay = 0;
 
     if (is_app) {
         g_entry_cs = ne.ne_cs ? m->first_sel + (ne.ne_cs - 1u) * 8u : 0;
@@ -1063,7 +1090,10 @@ void mod_exec_rm(void)
         g_replay = 0;
     } else {
         base_name(path, base);
+        g_log_dll = 1;                                 /* FreeLibrary pozwoli zaladowac ja ponownie */
         idx = mod_load_named(base, path);
+        g_log_dll = 0;
+        g_replay = 0;
     }
     if (idx >= 0) stubs_resolve();
     gdt_apply();

@@ -1596,13 +1596,14 @@ Stan (galaz tasks):
   Ponowne uruchomienie zakonczonego programu uzywa tych samych adresow.
   Wyjatek przy wielu zadaniach konczy tylko winne zadanie, z komunikatem.
   Calmira uruchamia SKI.EXE, przelaczanie paskiem zadan, zamkniecie, ponowne uruchomienie.
+  Kopie programu: hPrevInstance, GetInstanceData, GetModuleUsage, wspolne klasy, klasa przechodzi na
+  nastepna kopie. FreeLibrary i WEP, ponowne ladowanie DLL, LoadModule z parametrami, TaskFirst/TaskNext,
+  WaitEvent/PostEvent, LockCurrentTask, SetTaskQueue/GetTaskQueue, menu zwalniane z zadaniem.
 - DO ZROBIENIA:
-  * 21e: LoadModule z LOADPARMS, GetModuleUsage, FreeLibrary i WEP
-    (DLL zostaje w pamieci do konca systemu), TaskFirst/TaskNext.
-  * 21f: hPrevInstance, GetInstanceData. Dzialajace rownolegle kopie programu to osobne kopie kodu,
-    kazda zabiera nowy XMS (zwracany dopiero przy ponownym uruchomieniu tej kopii).
-  * USER: menu, ikony i kursory konczonego zadania nie sa zwalniane.
-  * WaitEvent/PostEvent, LockCurrentTask, SetTaskQueue/GetTaskQueue to nadal stuby.
+  * Kazda dzialajaca kopia programu ma wlasna kopie kodu i zasobow (zgodne z API, ale kosztuje XMS);
+    wspoldzielenie kodu wymagaloby instancji DGROUP dla fixupow w kodzie.
+  * DLL z importem statycznym zostaje do konca systemu; licznik nie spada przy koncu programu.
+  * Ikony i kursory zakonczonego zadania nie sa zwalniane.
   * Jedno zadanie: wyjatek to dalej panika calego systemu (nie ma do czego wrocic).
 
 Lepiej niz w oryginale (o ile nie lamie zgodnosci):

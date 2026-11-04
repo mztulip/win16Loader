@@ -1,13 +1,19 @@
-WATCOM  = /opt/watcom
+ifneq ($(wildcard /tmp/watcom/binl64),)
+WATCOM  ?= /tmp/watcom
+else
+WATCOM  ?= /opt/watcom
+endif
 PATH   := $(WATCOM)/binl64:$(PATH)
 INCLUDE = $(WATCOM)/h
+EDPATH  = $(WATCOM)/eddat
+WIPATH  = $(WATCOM)/wipath
 NASM    = nasm
-WCC     = wcc
+WCC     = wcc -i=$(WATCOM)/h
 WLINK   = wlink
-WCL     = wcl
+WCL     = wcl -i=$(WATCOM)/h
 FDBOOT  = FD14-FloppyEdition/144m/x86BOOT.img
 
-export WATCOM INCLUDE PATH
+export WATCOM INCLUDE EDPATH WIPATH PATH
 
 .PHONY: all run run-qemu clean
 

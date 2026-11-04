@@ -813,8 +813,15 @@ LONG  API GetMessageExtraInfo(void)  { return 0; }
 BOOL  API InSendMessage(void)        { return FALSE; }
 void  API ReplyMessage(LONG r)       { (void)r; }
 BOOL  API SetMessageQueue(int n)     { (void)n; return TRUE; }
-BOOL  API GetInputState(void)        { input_poll(); return g_qh != g_qt; }
-DWORD API GetQueueStatus(WORD f)     { (void)f; input_poll(); return g_qh != g_qt ? 0x00040004UL : 0; }
+static BOOL queue_has_mine(void)
+{
+    WORD i, me = GetCurrentTask();
+    for (i = g_qh; i != g_qt; i = (i + 1) % QSIZE)
+        if (g_q[i].message != WM_NULL && g_qtask[i] == me) return TRUE;
+    return FALSE;
+}
+BOOL  API GetInputState(void)        { input_poll(); return queue_has_mine(); }
+DWORD API GetQueueStatus(WORD f)     { (void)f; input_poll(); return queue_has_mine() ? 0x00040004UL : 0; }
 
 /* ordinal 17/70: pozycja kursora */
 void API GetCursorPos(LPPOINT p)     { input_poll(); p->x = g_mx; p->y = g_my; }
@@ -849,9 +856,11 @@ int mouse_y(void) { return g_my; }
 WORD mouse_btn(void) { return g_mbtn; }
 
 
+extern void menus_free_task(WORD task);
+
 /* ordinal 952 (prywatny): koniec zadania, wola KERNEL. fault = wyjatek: kod programu nie jest juz
  * wykonywany (okna dostaja DefWindowProc), a wejscie moglo zostac przerwane w polowie. */
-void API UserTaskExit(WORD task, WORD hinst, BOOL fault)
+void API UserTaskExit(WORD task, WORD hinst, BOOL fault, WORD succ)
 {
     HWND c, next;
     WORD i;
@@ -876,5 +885,6 @@ void API UserTaskExit(WORD task, WORD hinst, BOOL fault)
     k = quit_slot(task);
     if (k >= 0) g_quits[k].task = 0;
     for (k = 0; k < MAX_SENDS; k++) if (g_xs[k].used && g_xs[k].to == task) g_xs[k].done = TRUE;
-    cls_free_inst(hinst);
+    cls_free_inst(hinst, succ);
+    menus_free_task(task);
 }

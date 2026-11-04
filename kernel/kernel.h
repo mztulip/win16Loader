@@ -97,6 +97,9 @@ typedef void (__far __pascal *FARPROC)(void);
 #define MTF_VIRTUAL     0x0002
 #define MTF_SYSTEM      0x0004
 #define MTF_RUNNING     0x0008
+#define MTF_PINNED      0x0010
+#define MTF_UNLOADED    0x0020
+#define MT_USAGE        110
 #define MTE(i)          ((BYTE __far *)MK_FP(SEL_MODTAB, (i) * MT_SIZE))
 #define MTW(i, off)     (*(WORD __far *)(MTE(i) + (off)))
 
@@ -157,11 +160,17 @@ int   rm_int(BYTE intno, RMREGS __far *r);   /* r jest kopiowane do/z RMBUF */
 RMREGS __far *rmregs(void);
 /* ktask.c */
 HTASK API GetCurrentTask(void);
+WORD  API WinExec(LPCSTR cmd, WORD show);
 HINSTANCE API LoadLibrary(LPCSTR name);
+void  API FreeLibrary(HINSTANCE h);
 HMODULE API GetModuleHandle(LPCSTR name);
 FARPROC API GetProcAddress(HMODULE h, LPCSTR name);
 WORD  API GetCurrentPDB(void);
 void  task_init(void);
+BOOL  task_started(void);
+WORD  task_prev(void);
+void  task_lib_loaded(HINSTANCE h);
+void  task_lib_freed(HINSTANCE h);
 void  task_dos_sync(void);
 void  dos_dir_save(BYTE *drive, LPSTR dir);
 void  dos_dir_restore(BYTE drive, LPCSTR dir);

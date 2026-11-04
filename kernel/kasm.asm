@@ -90,14 +90,14 @@ task_switch_:
 
 ; Pierwsze wejscie zadania (adres powrotu w ramce z WinExec). Rejestry jak z loadera:
 ; DS=DGROUP, DI=hInstance, SI=hPrevInstance, ES=PSP, BP=0. Powrot z wejscia = koniec zadania.
-extern _g_boot_cs, _g_boot_ip, _g_boot_ds, _g_boot_psp
+extern _g_boot_cs, _g_boot_ip, _g_boot_ds, _g_boot_psp, _g_boot_prev
 global task_boot_
 task_boot_:
     mov  ax, [_g_boot_cs]
     mov  bx, [_g_boot_ip]
     mov  es, [_g_boot_psp]
     mov  di, [_g_boot_ds]
-    xor  si, si
+    mov  si, [_g_boot_prev]
     xor  bp, bp
     push cs
     push task_returned
@@ -209,4 +209,92 @@ int_entry_:
     pop  di
     pop  si
     pop  ds
+    retf
+
+; ---------------------------------------------------------------------
+; CATCH (ordinal 55): int FAR PASCAL Catch(LPCATCHBUF lpCatchBuf)
+; Ramka:
+; [bp+0]  = stary BP
+; [bp+2]  = return IP
+; [bp+4]  = return CS
+; [bp+6]  = lpCatchBuf offset
+; [bp+8]  = lpCatchBuf selector
+; [bp+10] = caller SP po powrocie
+; ---------------------------------------------------------------------
+global CATCH
+CATCH:
+    push bp
+    mov  bp, sp
+    push ds
+    push es
+    push si
+    push di
+
+    mov  es, [bp+8]
+    mov  di, [bp+6]
+
+    mov  ax, [bp+0]
+    mov  [es:di+0], ax
+    lea  ax, [bp+10]
+    mov  [es:di+2], ax
+    mov  ax, [bp+2]
+    mov  [es:di+4], ax
+    mov  ax, [bp+4]
+    mov  [es:di+6], ax
+    mov  ax, [bp-2]
+    mov  [es:di+8], ax
+    mov  ax, ss
+    mov  [es:di+10], ax
+    mov  ax, [bp-6]
+    mov  [es:di+12], ax
+    mov  ax, [bp-8]
+    mov  [es:di+14], ax
+    mov  ax, [bp-4]
+    mov  [es:di+16], ax
+
+    pop  di
+    pop  si
+    pop  es
+    pop  ds
+    pop  bp
+    xor  ax, ax
+    xor  dx, dx
+    retf 4
+
+; ---------------------------------------------------------------------
+; THROW (ordinal 56): void FAR PASCAL Throw(const LPCATCHBUF lpCatchBuf, int nVal)
+; ---------------------------------------------------------------------
+global THROW
+THROW:
+    push bp
+    mov  bp, sp
+
+    mov  ax, [bp+6]
+    test ax, ax
+    jnz  .val_ok
+    mov  ax, 1
+.val_ok:
+    mov  es, [bp+10]
+    mov  di, [bp+8]
+
+    mov  bx, [es:di+0]
+    mov  cx, [es:di+2]
+    mov  dx, [es:di+4]
+    mov  si, [es:di+6]
+
+    cli
+    mov  ss, [es:di+10]
+    mov  sp, cx
+    sti
+    push si
+    push dx
+
+    mov  bx, [es:di+0]
+    mov  si, [es:di+12]
+    mov  ds, [es:di+8]
+    push word [es:di+16]
+    mov  di, [es:di+14]
+    mov  bp, bx
+    pop  es
+    xor  dx, dx
     retf
