@@ -9,6 +9,7 @@ Uzycie:
                CMD moze zawierac kilka linii rozdzielonych ';'
   KROKI:
     w<sek>        czekaj (np. w2.5)
+    d<sek>        czekaj na linie 'TEST ... DONE' w logu COM1, najdluzej <sek>
     p<nazwa>      screendump -> OUT/<nazwa>.png
     k<klawisz>    sendkey (np. kdown, kalt-f4, kret)
     m<dx>,<dy>    przesun mysz wzglednie
@@ -18,7 +19,7 @@ Uzycie:
 Serial loguje sie do OUT/serial.log (OUT domyslnie ./qemu_out).
 Przed KROKAMI czeka --boot-wait sekund (domyslnie 25).
 """
-import argparse, os, shutil, socket, subprocess, sys, tempfile, time
+import argparse, os, re, shutil, socket, subprocess, sys, tempfile, time
 
 
 def mon(sock, cmd):
@@ -78,6 +79,13 @@ def main():
             k, v = st[0], st[1:]
             if k == 'w':
                 time.sleep(float(v))
+            elif k == 'd':
+                end = time.time() + float(v)
+                while time.time() < end:
+                    with open(serial, errors='replace') as f:
+                        if re.search(r'^TEST \S+ DONE', f.read(), re.M):
+                            break
+                    time.sleep(0.5)
             elif k == 'p':
                 ppm = os.path.join(tmp, v + '.ppm')
                 mon(sock, f'screendump {ppm}')
