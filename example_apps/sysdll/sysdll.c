@@ -71,6 +71,13 @@ static void misc_tests(HINSTANCE hi)
 
     /* TOOLHELP */
     ti.dwSize = sizeof(ti);
+    {   /* wsprintf: precyzja liczb ("%2.2u" = format czasu w SkiFree) */
+        char b[40];
+        wsprintf(b, "%2u:%2.2u:%2.2u.%2.2u", 1, 2, 3, 4);
+        CHECK_STR(b, " 1:02:03.04", "wsprintf %2.2u");
+        wsprintf(b, "%.3d|%5.3d|%05d|%3d", -5, 7, 42, 9);
+        CHECK_STR(b, "-005|  007|00042|  9", "wsprintf precyzja, szerokosc, zera");
+    }
     CHECK(TimerCount(&ti), "TimerCount");
     CHECK(ti.dwmsSinceStart > 0, "TimerCount: czas > 0");
     me.dwSize = sizeof(me);

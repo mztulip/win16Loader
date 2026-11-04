@@ -88,12 +88,15 @@ BOOL API IsCharLower(char c) { return IsCharAlpha(c) && lo(c) == c; }
 /* ============================================================
  * wsprintf / wvsprintf (formaty Win16: %d %u %i %x %X %s %c %ld %lu %lx %%)
  * ============================================================ */
-static int fmt_num(LPSTR out, DWORD v, BOOL neg, int base, BOOL upper, int width, BOOL zero, BOOL left)
+static int fmt_num(LPSTR out, DWORD v, BOOL neg, int base, BOOL upper, int width, int prec, BOOL zero, BOOL left)
 {
-    char b[12];
+    char b[40];
     int n = 0, len, k = 0;
     const char *dig = upper ? "0123456789ABCDEF" : "0123456789abcdef";
     do { b[n++] = dig[(WORD)(v % base)]; v /= base; } while (v);
+    /* precyzja = minimalna liczba cyfr, np. "%2.2u" (czas w SkiFree); wylacza flage 0 */
+    if (prec >= 0) zero = FALSE;
+    while (n < prec && n < 32) b[n++] = '0';
     if (neg) b[n++] = '-';
     len = n;
     if (!left) while (width > len) { out[k++] = zero ? '0' : ' '; width--; }
@@ -122,13 +125,13 @@ int API wvsprintf(LPSTR out, LPCSTR f, WORD __far *a)
         case 'd': case 'i': {
             long v = lng ? *(long __far *)a : (long)(int)*a;
             a += lng ? 2 : 1;
-            k += fmt_num(out + k, (DWORD)(v < 0 ? -v : v), v < 0, 10, FALSE, width, zero, left);
+            k += fmt_num(out + k, (DWORD)(v < 0 ? -v : v), v < 0, 10, FALSE, width, prec, zero, left);
             break;
         }
         case 'u': case 'x': case 'X': {
             DWORD v = lng ? *(DWORD __far *)a : (DWORD)*a;
             a += lng ? 2 : 1;
-            k += fmt_num(out + k, v, FALSE, *f == 'u' ? 10 : 16, *f == 'X', width, zero, left);
+            k += fmt_num(out + k, v, FALSE, *f == 'u' ? 10 : 16, *f == 'X', width, prec, zero, left);
             break;
         }
         case 'c':
