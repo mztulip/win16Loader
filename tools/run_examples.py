@@ -28,6 +28,15 @@ APPS = {
     'iconic':   ('example_apps/iconic', 'ICONTEST.EXE', ['w6', 'pshot', 'a316,216', 'c', 'c', 'w2', 'kalt-f4', 'w1']),
     # poprawnosc szybkich sciezek GDI + regresja wydajnosci (konczy sie sama)
     'gdiperf':  ('example_apps/gdiperf', 'GDIPERF.EXE', ['d400', 'w1', 'pshot']),
+    # ruch mysza i klawisz w trakcie ciaglych odczytow pliku przez DOS (konczy sie DONE)
+    'dosirq':   ('example_apps/dosirq', 'DOSIRQ.EXE',
+                 ['w3'] + ['m25,15', 'w0.02', 'm-25,-15', 'w0.02', 'kshift', 'w0.02'] * 70 + ['d60', 'pshot']),
+    # Wiersze menu: A y~108, B y~126, C y~144; podmenu od x~209, drugi poziom od x~327.
+    # 1: A (otwiera podmenu) -> w dol na B, C -> w gore na B; 2: A -> S1 -> T1 -> skok na C
+    'menuhover': ('example_apps/menuhover', 'MENUHOV.EXE',
+                  ['w4', 'a110,108', 'w0.5'] + ['m0,6', 'w0.1'] * 9 + ['w0.3'] + ['m0,-6', 'w0.1'] * 6
+                  + ['w0.3', 'kesc', 'w1', 'a110,108', 'w0.5', 'm110,0', 'w0.5', 'm120,0', 'w0.5', 'm-230,38', 'w0.5']
+                  + ['kesc', 'd5', 'pshot', 'kalt-f4', 'w1']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

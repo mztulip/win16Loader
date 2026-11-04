@@ -19,6 +19,8 @@ TEST CTLTEST DONE pass=36 fail=0
 | `iconic`   | ICONTEST.EXE | Okna zminimalizowane: ikony na dole ekranu, WM_PAINTICON/WM_ICONERASEBKGND, ArrangeIconicWindows, WM_QUERYOPEN, powrót do maksymalizacji, ptMinPosition, WS_MINIMIZE, tytuł ikony, dwuklik przywraca, domyślna ikona klasy bez ikony, LoadIcon z brakującą nazwą |
 | `irqregs`  | IRQTEST.EXE  | Regresja: przerwania myszy/klawiatury (IRQ12/IRQ1) nie zmieniają rejestrów przerwanego kodu (dawniej AL=20h po EOI → losowe #GP przy ruchu myszą) |
 | `gdiperf`  | GDIPERF.EXE  | Poprawność szybkich ścieżek GDI (ROP-y, granice 64 KB, nakładanie, mono, clip, kursor, tekst, wzory) i regresja wydajności: progi czasu względem pętli kalibracyjnej, niezależne od hosta (`docs/wydajnosc_gdi.md`). Kończy się sama |
+| `dosirq`   | DOSIRQ.EXE   | Regresja: mysz i klawiatura działają w trakcie wywołań DOS (dawniej bajt czekający w 8042 po powrocie do PM zatrzymywał kursor na zawsze) |
+| `menuhover`| MENUHOV.EXE  | Regresja: przejazd myszą bez klikania z otwartego podmenu na pozycje rodzica, także z drugiego poziomu (`WM_MENUSELECT`) |
 
 ## Budowanie i uruchamianie
 
