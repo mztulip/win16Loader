@@ -368,6 +368,7 @@ unsigned long g_bitmaps_phys  = 0;   /* SEL_BITMAPS=0x128: bufor 86 sprite'ow 4b
 
 extern void __far pm_call_app(void);
 extern unsigned short get_int3f_off(void);
+extern unsigned short get_i3f_stack_off(void), get_i3f_depth_off(void);
 extern unsigned short get_rmint_off(void);  /* offset rm_int_service w SEL_CODE16 */  /* zwraca offset int3f_handler w SEL_CODE16 */
 
 /* ============================================================
@@ -466,6 +467,8 @@ static void kcb_set_ext(unsigned kcb_rm, int argc, char *argv[])
     struct find_t ft;
     int i;
     w[KCB_RMINT_OFF / 2]     = get_rmint_off();
+    w[590 / 2]               = get_i3f_stack_off();
+    w[592 / 2]               = get_i3f_depth_off();
     w[KCB_RMBUF_SEG / 2]     = g_rmbuf_seg;
     w[KCB_THUNK_NEXT / 2]    = mod_thunk_next();
     w[KCB_THUNK_LIMIT / 2]   = g_thunk_size;

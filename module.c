@@ -22,6 +22,7 @@
 #include <dos.h>
 #include <i86.h>
 #include <malloc.h>
+#include <io.h>
 #include "serial.h"
 #include "ne.h"
 #include "module.h"
@@ -865,14 +866,83 @@ int mod_load_app(const char *path)
     return 0;
 }
 
+/* Zapas dla modulow ladowanych w trakcie pracy (WinExec): sterta KERNEL i selektory
+ * dynamiczne zaczynaja sie za nim */
+#define LATE_XMS  0x200000UL
+#define LATE_SELS 0x800u
+static unsigned g_sel_limit;
+
 unsigned long mod_xms_end(void)
 {
-    return (g_xms_next + 0xFFFUL) & ~0xFFFUL;
+    unsigned long e = ((g_xms_next + 0xFFFUL) & ~0xFFFUL) + LATE_XMS;
+    if (e > g_xms_limit) e = (g_xms_next + 0xFFFUL) & ~0xFFFUL;     /* malo RAM: bez zapasu */
+    g_xms_limit = e;
+    return e;
 }
 
 unsigned short mod_next_sel(void)
 {
-    return g_next_sel;
+    g_sel_limit = g_next_sel + LATE_SELS;
+    return g_sel_limit;
+}
+
+/* Zapis listy GDT od razu do tablicy (w trakcie pracy, patch_gdt_c dziala tylko przy wejsciu) */
+extern unsigned short g_orig_cs, g_gdt_off_c;
+
+static void gdt_apply(void)
+{
+    unsigned i;
+    for (i = 0; i < g_ngdtp; i++) {
+        GDT_PATCH *p = &g_gdtp[i];
+        unsigned char __far *e = (unsigned char __far *)MK_FP(g_orig_cs, g_gdt_off_c + p->sel);
+        unsigned long lim = p->limit;
+        unsigned char b6 = p->big ? 0x40 : 0x00;
+        if (lim > 0xFFFFFUL) { lim >>= 12; b6 |= 0x80; }
+        e[0] = (unsigned char)lim;
+        e[1] = (unsigned char)(lim >> 8);
+        e[2] = (unsigned char)p->base;
+        e[3] = (unsigned char)(p->base >> 8);
+        e[4] = (unsigned char)(p->base >> 16);
+        e[5] = p->access;
+        e[6] = (unsigned char)(b6 | ((lim >> 16) & 0x0F));
+        e[7] = (unsigned char)(p->base >> 24);
+    }
+    g_ngdtp = 0;
+}
+
+/* INT E0h z rm_int_service (tryb rzeczywisty): zaladuj program dla WinExec.
+ * Wejscie: sciezka w RMBUF+0x100. Wynik tamze: ok, hinst/blad, wejscie, stos, sterta. */
+#define RMBUF_DATA_OFF 0x100
+#define KCB_THUNK_NEXT_OFF 522
+extern unsigned long g_kcb_phys;
+
+void mod_exec_rm(void)
+{
+    static char path[96];
+    unsigned short __far *res = (unsigned short __far *)MK_FP(g_rmbuf_seg, RMBUF_DATA_OFF);
+    unsigned short __far *kcb = (unsigned short __far *)MK_FP((unsigned)(g_kcb_phys >> 4), 0);
+    int idx;
+    _fstrncpy((char __far *)path, (char __far *)res, sizeof(path) - 1);
+    path[sizeof(path) - 1] = 0;
+    g_nthunks = kcb[KCB_THUNK_NEXT_OFF / 2] / THUNK_SIZE;
+    if (g_next_sel + (MAX_SEGS + 4u) * 8u > g_sel_limit) { res[0] = 0; res[1] = 8; return; }
+    if (access(path, 0)) { res[0] = 0; res[1] = 2; return; }
+    dir_of(path, g_appdir);
+    idx = mod_load(0, path, 1);
+    if (idx >= 0) stubs_resolve();
+    gdt_apply();
+    kcb[KCB_THUNK_NEXT_OFF / 2] = g_nthunks * THUNK_SIZE;
+    res = (unsigned short __far *)MK_FP(g_rmbuf_seg, RMBUF_DATA_OFF);
+    if (idx < 0) { res[0] = 0; res[1] = 11; return; }          /* zly format EXE */
+    mlog("WinExec: %s hInst=%04X XMS do %06lX sel do %04X\n", path, g_app_ds, g_xms_next, g_next_sel);
+    res[0] = 1;
+    res[1] = g_app_ds;
+    res[2] = g_entry_cs;
+    res[3] = g_entry_ip;
+    res[4] = g_init_sp;
+    res[5] = g_app_stack;
+    res[6] = g_app_heap;
+    res[7] = g_app_heapstart;
 }
 
 unsigned short mod_thunk_next(void)

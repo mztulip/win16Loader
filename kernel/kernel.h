@@ -68,6 +68,8 @@ typedef void (__far __pascal *FARPROC)(void);
 #define KCB_APP_SP        530
 #define KCB_APP_HEAP      532
 #define KCB_APP_HEAPSTART 534
+#define KCB_I3F_STACK     590   /* offset int3f_stack w SEL_DATA16 */
+#define KCB_I3F_DEPTH     592   /* offset int3f_depth w SEL_DATA16 */
 #define KCB_WINDIR        600
 #define KCB_SYSDIR        664
 #define KCB_CMDLINE       728
@@ -148,6 +150,13 @@ void  local_init_app(void);
 /* ---- kdos.c ---- */
 int   rm_int(BYTE intno, RMREGS __far *r);   /* r jest kopiowane do/z RMBUF */
 RMREGS __far *rmregs(void);
+/* ktask.c */
+HTASK API GetCurrentTask(void);
+WORD  API GetCurrentPDB(void);
+void  task_init(void);
+void  task_exit(WORD ax);
+WORD  task_show(void);
+BOOL  task_is_first(void);
 int   rm_int21(void);                         /* uzywa RMREGS w RMBUF */
 HFILE API _lopen(LPCSTR path, int mode);
 HFILE API _lclose(HFILE h);

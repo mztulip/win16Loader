@@ -479,11 +479,11 @@ void dos3call_c(void)
         g_d3.es = 0; g_d3.bx = 0;
         break;
     case 0x51: case 0x62:                        /* PSP */
-        g_d3.bx = SEL_PSP;
+        g_d3.bx = GetCurrentPDB();
         break;
     case 0x4C:                                   /* koniec programu */
-        dbg_puts("KERNEL: DOS3Call 4C - koniec apki\n");
-        pm_int21(g_d3.ax);
+        dbg_puts("KERNEL: DOS3Call 4C - koniec zadania\n");
+        task_exit(g_d3.ax);
         break;
     case 0x71:                                   /* LFN - brak */
         d3_fail(0x7100);

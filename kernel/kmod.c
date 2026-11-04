@@ -115,14 +115,6 @@ HINSTANCE API LoadModule(LPCSTR name, LPVOID params)
     return LoadLibrary(name);
 }
 
-/* ordinal 166 */
-WORD API WinExec(LPCSTR cmd, WORD show)
-{
-    (void)show;
-    dbg_str("KERNEL: WinExec (nieobslugiwane) ", cmd);
-    return 2;
-}
-
 /* ============================================================
  * Thunki w locie (segment thunkow loadera, format jak w module.c)
  * ============================================================ */

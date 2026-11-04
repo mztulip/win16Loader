@@ -88,7 +88,7 @@ kernel.obj: kernel.c
 libstubs.obj: libstubs.asm
 	$(NASM) -f obj $< -o $@
 
-KOBJS = kernel/kmain.obj kernel/kmem.obj kernel/kdos.obj kernel/kmod.obj \
+KOBJS = kernel/kmain.obj kernel/ktask.obj kernel/kmem.obj kernel/kdos.obj kernel/kmod.obj \
         kernel/kint.obj kernel/kasm.obj kernel/rt386.obj
 
 kernel/%.obj: kernel/%.c kernel/kernel.h
@@ -231,7 +231,7 @@ dlls: $(DLLS)
 .PHONY: dlls
 
 # Aplikacje przykladowe/testowe (example_apps/README.md); testy: python3 tools/run_examples.py
-EXAMPLES = controls odmenu shell sysdll fonts iconic irqregs gdiperf dosirq menuhover dosprompt
+EXAMPLES = controls odmenu shell sysdll fonts iconic irqregs gdiperf dosirq menuhover dosprompt taskchild tasks
 example_apps:
 	for d in $(EXAMPLES); do $(MAKE) -s -C example_apps/$$d || exit 1; done
 .PHONY: example_apps

@@ -14,7 +14,8 @@ ROOT = os.path.dirname(HERE)
 
 # nazwa -> (katalog, plik .EXE, kroki qemu_headless po starcie)
 # Dodatkowe pliki na dyskietke: EXTRA[nazwa] = [(zrodlo, nazwa na dyskietce)]
-EXTRA = {'shell': [('example_apps/app.ico', 'SHELLTST.ICO')]}
+EXTRA = {'shell': [('example_apps/app.ico', 'SHELLTST.ICO')],
+         'tasks': [('example_apps/taskchild/TASKCHLD.EXE', 'TASKCHLD.EXE')]}
 APPS = {
     'controls': ('example_apps/controls', 'CTLTEST.EXE', ['w4', 'pshot', 'kesc', 'w1']),
     'odmenu':   ('example_apps/odmenu', 'ODMENU.EXE', ['w4', 'pshot', 'kesc', 'w1', 'kesc', 'w1']),
@@ -39,6 +40,8 @@ APPS = {
                   + ['kesc', 'd5', 'pshot', 'kalt-f4', 'w1']),
     # dysk B: przy jednej stacji i wyjeta dyskietka: DOS nie moze prosic o klawisz (konczy sie DONE)
     'dosprompt': ('example_apps/dosprompt', 'DOSPROMP.EXE', ['Meject -f floppy0', 'w0.5', 'kshift', 'd40', 'pshot']),
+    # zadania: WinExec, Yield, koniec zadania (konczy sie sama)
+    'tasks':    ('example_apps/tasks', 'TASKTEST.EXE', ['d40', 'w1', 'pshot']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

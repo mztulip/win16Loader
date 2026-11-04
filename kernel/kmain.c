@@ -122,33 +122,13 @@ void API OutputDebugString(LPCSTR s)   { dbg_puts(s); }
  * pStackTop/pStackMin/pStackBottom) i inicjalizuje local heap apki.
  * ============================================================ */
 WORD g_it_ax, g_it_bx, g_it_cx, g_it_dx, g_it_si, g_it_di, g_it_es;
-static WORD g_task;
-
-static void task_init(void)
-{
-    WORD hinst = KCBW(KCB_APP_HINST);
-    BYTE __far *tdb;
-    int mi;
-    if (g_task) return;
-    g_task = (WORD)GlobalAlloc(0x40, 256);
-    if (!g_task) return;
-    tdb = (BYTE __far *)MK_FP(g_task, 0);
-    *(WORD __far *)(tdb + 0x1C) = hinst;              /* TDB_hInstance */
-    mi = mod_from_handle(hinst);
-    if (mi >= 0) {
-        *(WORD __far *)(tdb + 0x1E) = MTW(mi, MT_HMOD);  /* TDB_hModule */
-        kstrncpy((LPSTR)(tdb + 0xF2), (LPCSTR)(MTE(mi) + MT_NAME), 8);
-    }
-    tdb[0xFA] = 'T'; tdb[0xFB] = 'D';
-}
-
 void inittask_c(void)
 {
     WORD hinst = KCBW(KCB_APP_HINST);
     WORD sp    = KCBW(KCB_APP_SP);
     WORD stk   = KCBW(KCB_APP_STACK);
     WORD __far *inst = (WORD __far *)MK_FP(hinst, 0);
-    BYTE __far *psp  = (BYTE __far *)MK_FP(SEL_PSP, 0);
+    BYTE __far *psp;
     LPCSTR cmd = KCBS(KCB_CMDLINE);
     int n = kstrlen(cmd);
 
@@ -156,13 +136,18 @@ void inittask_c(void)
     kdos_init();
     task_init();
 
-    /* Linia polecen w PSP: [0x80]=dlugosc, [0x81..]=tekst, 0x0D */
-    if (n > 125) n = 125;
-    psp[0x80] = (BYTE)(n ? n + 1 : 0);
-    psp[0x81] = ' ';
-    kmemcpy(psp + (n ? 0x82 : 0x81), cmd, n);
-    psp[(n ? 0x82 : 0x81) + n] = 0x0D;
-    psp[(n ? 0x83 : 0x82) + n] = 0;
+    psp = (BYTE __far *)MK_FP(GetCurrentPDB(), 0);
+    if (task_is_first()) {
+        /* Linia polecen w PSP: [0x80]=dlugosc, [0x81..]=tekst, 0x0D (kolejne zadania: WinExec) */
+        if (n > 125) n = 125;
+        psp[0x80] = (BYTE)(n ? n + 1 : 0);
+        psp[0x81] = ' ';
+        kmemcpy(psp + (n ? 0x82 : 0x81), cmd, n);
+        psp[(n ? 0x82 : 0x81) + n] = 0x0D;
+        psp[(n ? 0x83 : 0x82) + n] = 0;
+    } else {
+        n = psp[0x80] ? psp[0x80] - 1 : 0;
+    }
 
     /* Obszar instancji DGROUP: [0x0A]=pStackTop [0x0C]=pStackMin [0x0E]=pStackBottom */
     inst[0x0A / 2] = (WORD)(sp - stk);
@@ -174,14 +159,14 @@ void inittask_c(void)
     g_it_ax = 1;
     g_it_bx = n ? 0x82 : 0x81;
     g_it_cx = stk;
-    g_it_dx = 1;                /* nCmdShow = SW_SHOWNORMAL */
+    g_it_dx = task_show();
     g_it_si = 0;                /* hPrevInstance */
     g_it_di = hinst;
-    g_it_es = SEL_PSP;
+    g_it_es = GetCurrentPDB();
     dbg_puts("KERNEL: InitTask hInst="); dbg_hex(hinst, 4);
     dbg_puts(" SP="); dbg_hex(sp, 4);
     dbg_puts(" stack="); dbg_hex(stk, 4);
-    dbg_puts(" task="); dbg_hex(g_task, 4); dbg_puts("\n");
+    dbg_puts(" task="); dbg_hex(GetCurrentTask(), 4); dbg_puts("\n");
 }
 
 /* ============================================================
@@ -194,32 +179,20 @@ DWORD API GetWinFlags(void)     { return 0x0415; }
 /* ordinal 105 */
 WORD  API GetExeVersion(void)   { return 0x030A; }
 
-/* ordinal 36 */
-HTASK API GetCurrentTask(void)  { task_init(); return g_task; }
-/* ordinal 37 */
-WORD  API GetCurrentPDB(void)   { return SEL_PSP; }
-/* ordinal 320 */
-BOOL  API IsTask(HTASK h)       { return h && h == g_task; }
 /* ordinal 30 */
 BOOL  API WaitEvent(HTASK h)    { (void)h; return FALSE; }
 /* ordinal 31 */
 BOOL  API PostEvent(HTASK h)    { (void)h; return TRUE; }
-/* ordinal 29 */
-void  API Yield(void)           { }
-/* ordinal 150 */
-void  API DirectedYield(HTASK h) { (void)h; }
 /* ordinal 155 */
 HINSTANCE API GetTaskDS(void)   { return KCBW(KCB_APP_HINST); }
 /* ordinal 122 */
 BOOL  API IsTaskLocked(void)    { return FALSE; }
 /* ordinal 33 */
-HTASK API LockCurrentTask(BOOL f) { (void)f; return g_task; }
+HTASK API LockCurrentTask(BOOL f) { (void)f; return GetCurrentTask(); }
 /* ordinal 34 */
 HANDLE API SetTaskQueue(HTASK t, HANDLE q) { (void)t; (void)q; return 0; }
 /* ordinal 35 */
 HANDLE API GetTaskQueue(HTASK t) { (void)t; return 0; }
-/* ordinal 152 */
-int   API GetNumTasks(void)     { return 1; }
 
 static WORD g_errmode;
 /* ordinal 107 */

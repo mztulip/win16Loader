@@ -48,6 +48,69 @@ INITTASK:
     retf
 
 ; ---------------------------------------------------------------------
+; task_switch(save_ss [ax], save_sp [dx], new_ss [bx], new_sp [cx]): near.
+; Stan zadania lezy na jego stosie. FS/GS moga trzymac selektor zwolniony w czasie,
+; gdy zadanie nie dzialalo: taki zastap zerem, zamiast #GP przy pop.
+; ---------------------------------------------------------------------
+global task_switch_
+task_switch_:
+    pushf
+    push bp
+    push si
+    push di
+    push ds
+    push es
+    push fs
+    push gs
+    mov  si, ax
+    mov  [si], ss
+    mov  si, dx
+    mov  [si], sp
+    cli
+    mov  ss, bx
+    mov  sp, cx
+    mov  bp, sp
+    mov  cx, 4
+.check:
+    verr word [ss:bp]
+    jz   .ok
+    mov  word [ss:bp], 0
+.ok:
+    add  bp, 2
+    loop .check
+    pop  gs
+    pop  fs
+    pop  es
+    pop  ds
+    pop  di
+    pop  si
+    pop  bp
+    popf
+    ret
+
+; Pierwsze wejscie zadania (adres powrotu w ramce z WinExec). Rejestry jak z loadera:
+; DS=DGROUP, DI=hInstance, SI=hPrevInstance, ES=PSP, BP=0. Powrot z wejscia = koniec zadania.
+extern _g_boot_cs, _g_boot_ip, _g_boot_ds, _g_boot_psp
+global task_boot_
+task_boot_:
+    mov  ax, [_g_boot_cs]
+    mov  bx, [_g_boot_ip]
+    mov  es, [_g_boot_psp]
+    mov  di, [_g_boot_ds]
+    xor  si, si
+    xor  bp, bp
+    push cs
+    push task_returned
+    push ax
+    push bx
+    mov  ds, di
+    sti
+    retf
+task_returned:
+    mov  ax, 0x4C00
+    int  0x21
+
+; ---------------------------------------------------------------------
 ; DOS3CALL (ordinal 102): INT 21h z rejestrow wolajacego. DS wolajacego jest
 ; w KCB (int3f_handler podmienil DS na DGROUP KERNEL). Wynik: rejestry + CF.
 ; g_d3: ax bx cx dx si di ds es flags

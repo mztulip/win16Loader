@@ -72,6 +72,7 @@ PIC_BASE_M      equ 0x50    ; IRQ0-7  -> INT 50h-57h
 PIC_BASE_S      equ 0x58    ; IRQ8-15 -> INT 58h-5Fh
 KCB_INT_CB      equ 538     ; DWORD: far ptr dyspozytora przerwan programowych (KERNEL)
 KCB_CALLER_DS   equ 520     ; WORD: DS wolajacego ostatnie API (int3f_handler)
+RMX_INT         equ 0xE0    ; rm_int_service -> loader NE (WinExec), kernel/ktask.c
 KCB_TRACE       equ 536     ; WORD: !=0 -> int3f_handler loguje kazde wywolanie API
 MT_SHIFT        equ 7       ; 128 B na wpis tablicy modulow
 MT_DGROUP       equ 10      ; offset WORD dgroup (DS modulu) we wpisie
@@ -102,6 +103,9 @@ segment _TEXT public class=CODE use16
 global pm_call_app_
 global get_int3f_off_
 global get_rmint_off_
+global get_i3f_stack_off_
+global get_i3f_depth_off_
+extern mod_exec_rm_
 global get_softint_off_
 global get_iretstub_off_
 global get_int21_off_
@@ -158,6 +162,14 @@ get_int3f_off_:
 
 get_rmint_off_:
     mov  ax, rm_int_service
+    ret
+
+get_i3f_stack_off_:
+    mov  ax, int3f_stack
+    ret
+
+get_i3f_depth_off_:
+    mov  ax, int3f_depth
     ret
 
 get_softint_off_:
@@ -968,11 +980,6 @@ softint_common:
     push cx
     push bx
 
-    cmp  al, 0x21
-    jne  .not_exit
-    cmp  byte [bp+3], 0x4C          ; AH oryginalnego AX
-    je   .to_int21
-.not_exit:
     mov  bx, SEL_KCB
     mov  es, bx
     cmp  word [es:KCB_INT_CB + 2], 0
@@ -1116,6 +1123,8 @@ rmi_rm_entry:
     mov  [es:0x2F*4+2], cs
     mov  word [es:0x24*4], rmi_hook24
     mov  [es:0x24*4+2], cs
+    mov  word [es:RMX_INT*4], rmx_load
+    mov  [es:RMX_INT*4+2], cs
     mov  es, [rmi_buf_seg]
     mov  ax, [es:14]
     test ax, ax
@@ -1175,6 +1184,7 @@ rmi_int_op:
     mov  ax, [rmi_old24+2]
     mov  [es:0x24*4+2], ax
 
+    lgdt [gdtr]                 ; INT 15h/87h (loader NE) ustawia wlasny GDT
     lidt [idtr]
     mov  eax, cr0
     or   eax, 1
@@ -1243,6 +1253,30 @@ rmi_hook24:
     mov  al, 3
     iret
 
+; INT E0h (tylko z rm_int_service): uruchom loader NE dla WinExec. Sciezka i wynik w RMBUF.
+; Kod C potrzebuje swojego DS i stosu z chwili wejscia do PM (pod saved_sp nic juz nie lezy).
+rmx_load:
+    pusha
+    push ds
+    push es
+    mov  [cs:rmx_ss], ss
+    mov  [cs:rmx_sp], sp
+    mov  ss, [cs:saved_ss]
+    mov  sp, [cs:saved_sp]
+    mov  ds, [cs:saved_ds]
+    mov  es, [cs:saved_ds]
+    sti
+    call far mod_exec_rm_
+    cli
+    mov  ss, [cs:rmx_ss]
+    mov  sp, [cs:rmx_sp]
+    pop  es
+    pop  ds
+    popa
+    iret
+
+rmx_ss          dw 0
+rmx_sp          dw 0
 rmi_old2f       dw 0, 0
 rmi_old24       dw 0, 0
 rmi_rm_ptr      dw rmi_rm_entry, 0     ; CS = segment RM loadera (patch)
