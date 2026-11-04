@@ -652,7 +652,7 @@ int main(int argc, char *argv[])
 
         /* Reset KCB pomiedzy uruchomieniami: tick, keyboard, mouse,
          * dynamiczne selektory GlobalAlloc i wskazniki heapow */
-        kcb_ptr->tick_ms        = 0UL;
+        kcb_ptr->tick_ms        = 55UL;    /* GetTickCount > 0 juz przed pierwszym IRQ0 */
         kcb_ptr->app_hinstance  = g_app_ds;
         kcb_ptr->next_dyn_sel   = mod_next_sel();      /* GlobalAlloc: za segmentami modulow */
         kcb_ptr->heap_phys      = mod_xms_end();       /* i za ich danymi w XMS */

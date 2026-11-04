@@ -1710,8 +1710,8 @@ gpf_print_hex4:
     ret
 
 ; =====================================================================
-; irq0_handler: IRQ0 (PIT, 100 Hz) w PM. Wpis w IDT[0x20] (po remapie PIC).
-; Inkrementuje tick_ms (DWORD) w KCB o 10ms (1000ms / 100Hz).
+; irq0_handler: IRQ0 (PIT, 18.2 Hz) w PM.
+; Inkrementuje tick_ms (DWORD) w KCB o 55ms.
 ; Wyslij EOI do master PIC (0x20).
 ; =====================================================================
 KCB_TICK_OFF equ 28
