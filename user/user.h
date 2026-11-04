@@ -105,7 +105,7 @@ typedef struct {
 #define WF_MINIMIZED  0x0100
 #define WF_CREATED    0x0200       /* WM_CREATE zakonczony */
 #define WF_HIDDENPOPUP 0x0800      /* ukryte przez ShowOwnedPopups(FALSE) */
-#define WF_NEEDSIZE   0x0400       /* WM_SIZE/WM_MOVE jeszcze nie wyslane (pierwszy ShowWindow) */
+#define WF_NEEDSIZE   0x0400       /* WM_SIZE/WM_MOVE jeszcze nie wyslane (pierwsze pokazanie) */
 #define WF_RESTOREMAX 0x1000       /* zminimalizowane z maksymalizacji: SW_RESTORE -> maksymalizuj */
 #define WF_ICONPOS    0x2000       /* iconpos zapamietane (jak WINDOWPLACEMENT.ptMinPosition) */
 #define WF_ICONTITLE  0x4000       /* okno tytulu ikony (klasa #32772) */

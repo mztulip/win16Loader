@@ -557,6 +557,22 @@ typedef struct { HWND hwnd, after; int x, y, cx, cy; WORD flags; } WINDOWPOS;
 #define SWP_SHOWWINDOW   0x0040
 #define SWP_HIDEWINDOW   0x0080
 
+/* Pierwsze pokazanie okna: WM_SIZE i WM_MOVE, ktorych CreateWindow nie wyslal */
+static void first_size(HWND h)
+{
+    WND __far *w = WP(h);
+    if (w && (w->flags & WF_NEEDSIZE)) {
+        WORD t = (w->flags & WF_MAXIMIZED) ? 2 : (w->flags & WF_MINIMIZED) ? 1 : 0;
+        int mx = w->cr.left, my = w->cr.top;
+        w->flags &= ~WF_NEEDSIZE;
+        send_msg(h, WM_SIZE, t, MAKELONG(w->cr.right - w->cr.left, w->cr.bottom - w->cr.top));
+        if ((w = WP(h)) != 0) {
+            if (w->style & WS_CHILD) { mx -= WP(w->parent)->cr.left; my -= WP(w->parent)->cr.top; }
+            send_msg(h, WM_MOVE, 0, MAKELONG(mx, my));
+        }
+    }
+}
+
 BOOL API SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, WORD fl)
 {
     WND __far *w = WP(h), __far *p;
@@ -622,6 +638,7 @@ BOOL API SetWindowPos(HWND h, HWND after, int x, int y, int cx, int cy, WORD fl)
     if (!sized) wp.flags |= SWP_NOSIZE;
     if (moved || sized || (fl & 0x00C0)) mouse_windows_changed();     /* SWP_SHOWWINDOW, SWP_HIDEWINDOW */
     send_msg(h, WM_WINDOWPOSCHANGED, 0, (LONG)(WINDOWPOS __far *)&wp);
+    if (fl & SWP_SHOWWINDOW) first_size(h);
     return TRUE;
 }
 
@@ -670,18 +687,8 @@ static void iconize(HWND h, WORD swp)
 BOOL API ShowWindow(HWND h, int cmd)
 {
     BOOL r = show_window(h, cmd);
-    WND __far *w = WP(h);
     mouse_windows_changed();
-    if (cmd && w && (w->flags & WF_NEEDSIZE)) {
-        WORD t = (w->flags & WF_MAXIMIZED) ? 2 : (w->flags & WF_MINIMIZED) ? 1 : 0;
-        int mx = w->cr.left, my = w->cr.top;
-        w->flags &= ~WF_NEEDSIZE;
-        send_msg(h, WM_SIZE, t, MAKELONG(w->cr.right - w->cr.left, w->cr.bottom - w->cr.top));
-        if ((w = WP(h)) != 0) {
-            if (w->style & WS_CHILD) { mx -= WP(w->parent)->cr.left; my -= WP(w->parent)->cr.top; }
-            send_msg(h, WM_MOVE, 0, MAKELONG(mx, my));
-        }
-    }
+    if (cmd) first_size(h);
     return r;
 }
 

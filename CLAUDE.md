@@ -161,7 +161,10 @@ Pogrubiony MS Sans Serif to prawdziwy font `fonts/sserifb.fon` (generator `tools
 - **DLGPROC zwraca BOOL** (tylko AX) - wynik obcinac do WORD. GetSystemDebugState = DWORD.
 - **-zu (SS != DS)**: wskazniki do zmiennych lokalnych musza byc far; dlugosci > 0x7FFF
   przekazywane jako `int` robia sie ujemne (bufor EDIT = 0x7FF0).
-- **WM_SIZE/WM_MOVE** wysylane przy pierwszym ShowWindow (WF_NEEDSIZE), nie w CreateWindow.
+- **WM_SIZE/WM_MOVE** wysylane przy pierwszym pokazaniu (WF_NEEDSIZE), nie w CreateWindow. Dotyczy
+  ShowWindow i SetWindowPos(SWP_SHOWWINDOW): tak VCL pokazuje kontrolki, a strona TNotebook bez WM_SIZE
+  rodzica zostaje 0x0 (pusty Task Manager Calmiry).
+- **SetWindowPos(WPF_SETMINPOSITION)** musi przesuwac tez okno, ktore juz jest ikona (pulpit Calmiry, Line up icons).
 - **CREATESTRUCT**: lpszName @22, lpszClass @26 (CS_NAME_OFF).
 
 ## Multitasking model

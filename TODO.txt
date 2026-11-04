@@ -1605,6 +1605,10 @@ Stan (galaz tasks):
   * DLL z importem statycznym zostaje do konca systemu; licznik nie spada przy koncu programu.
   * Ikony i kursory zakonczonego zadania nie sa zwalniane.
   * Jedno zadanie: wyjatek to dalej panika calego systemu (nie ma do czego wrocic).
+  * Okno "Run Program" Calmiry (zauwazone, nie badane): Enter w polu Open nie uruchamia programu, trzeba
+    kliknac OK; po ponownym otwarciu poprzedni tekst nie jest zaznaczony, a kursor stoi na poczatku.
+  * Ikona bez zapisanej pozycji trafia na pierwsze wolne miejsce u dolu, a rozmieszczanie nie uwzglednia
+    paska Calmiry (nie sprawdzone, czy ikona wchodzi pod pasek).
 
 Lepiej niz w oryginale (o ile nie lamie zgodnosci):
 - wyjatek w programie konczy tylko to zadanie (komunikat zamiast paniki calego systemu) [zrobione],
