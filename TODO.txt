@@ -1564,3 +1564,34 @@ Uwaga: 640*480*3 = 921600 B
   okno 13: B[851968..917503]   -> wiersze 443..477
   okno 14: B[917504..921599]   -> wiersze 478..479 (limit=4095)
   Razem: 15 okien; 0xA0 + 14*8 = 0xA0+0x70 = 0x110; SEL_FONT = 0x118
+
+
+================================================================================
+ETAP 21: Zadania jak w Windows 3.1 (Calmira uruchamia SKI.EXE)  [galaz win31-tasks]
+================================================================================
+Cel: wielozadaniowosc kooperacyjna zgodna z Windows 3.1 (Win16 ma zadania, nie watki);
+programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w 3.1, bez lamania API.
+
+21a  Ladowanie w trakcie pracy: KERNEL w PM wola loader NE w trybie rzeczywistym.
+     Zarezerwowac XMS i selektory dla pozniej ladowanych modulow (dzis sterta zaczyna
+     sie zaraz za modulami), wspolny licznik thunkow, LibEntry nowych DLL.
+21b  Przelaczanie zadan: TDB, osobny stos i rejestry; przelaczanie w GetMessage,
+     PeekMessage, WaitMessage, Yield, DirectedYield, WaitEvent/PostEvent.
+     Stan thunka INT 3Fh na zadanie. HLT dopiero gdy zadne zadanie nie ma pracy.
+21c  Kolejki komunikatow na zadanie, WM_QUIT na zadanie, wejscie trafia do zadania
+     wlasciciela okna, SendMessage miedzy zadaniami, WM_ACTIVATEAPP, GetWindowTask,
+     EnumTaskWindows, SetActiveWindow miedzy programami.
+21d  Koniec zadania: INT 21h/4Ch i powrot z WinMain koncza tylko to zadanie: niszcza okna,
+     zwalniaja pamiec, obiekty GDI, pliki, timery, hooki. Koniec ostatniego = powrot do DOS.
+21e  WinExec, LoadModule (LOADPARMS), ShellExecute, GetModuleUsage, zliczanie uzycia modulow
+     i FreeLibrary, IsTask, GetNumTasks, TaskFirst/TaskNext (TOOLHELP), PSP na zadanie
+     (katalog biezacy, linia polecen, srodowisko, uchwyty plikow).
+21f  Wiele instancji jednego programu jak w 3.1: wspolny kod, osobny DGROUP, hPrevInstance,
+     GetInstanceData.
+
+Lepiej niz w 3.1 (o ile nie lamie zgodnosci):
+- wyjatek w programie konczy tylko to zadanie (komunikat zamiast paniki calego systemu),
+- zadne zadanie nie ma pracy = HLT, zamiast aktywnego czekania.
+
+Testy: kazdy etap w example_apps; pierwszy cel: program uruchamia drugi przez WinExec
+i wymienia z nim komunikaty, dopiero potem Calmira + SKI.EXE.
