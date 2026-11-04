@@ -38,6 +38,9 @@ panic.bin: panic.c panic.ld
 # PM glue
 # DEBUG_STACK=1: zrzut rejestrow/stosu/ramek BP przy wyjatku (make DEBUG_STACK=0 wylacza)
 DEBUG_STACK ?= 1
+# Log QEMU. Diagnoza: make run-qemu QEMU_D=cpu_reset,int,guest_errors - "int" loguje kazde
+# wywolanie API (INT 3Fh) z pelnym stanem CPU, dziesiatki MB/s w petli gry
+QEMU_D ?= cpu_reset,guest_errors
 pm_call.obj: pm_call.asm panic.bin
 	$(NASM) -f obj -DDEBUG_STACK=$(DEBUG_STACK) pm_call.asm -o pm_call.obj
 
@@ -360,7 +363,7 @@ run-skitest: boot_skitest.img
 	qemu-system-i386 -fda boot_skitest.img -boot a -m 16 \
 	    -no-reboot -no-shutdown \
 	    -serial stdio \
-	    -d cpu_reset,int,guest_errors -D qemu.log
+	    -d $(QEMU_D) -D qemu.log
 
 # -------------------------------------------------------
 # boot_test.img - obraz do testowania (bez SKI.EXE)
@@ -381,7 +384,7 @@ run-test14e: boot_test.img
 	qemu-system-i386 -fda boot_test.img -boot a -m 16 \
 	    -no-reboot -no-shutdown \
 	    -serial stdio \
-	    -d cpu_reset,int,guest_errors -D qemu.log
+	    -d $(QEMU_D) -D qemu.log
 
 # -------------------------------------------------------
 # WIN1APP.EXE - Win16 example app (ETAP 19 - okno + chrome)
@@ -410,7 +413,7 @@ run-qemu: boot.img
 	qemu-system-i386 -fda boot.img -boot a -m 16 \
 	    -no-reboot -no-shutdown \
 	    -serial stdio \
-	    -d cpu_reset,int,guest_errors -D qemu.log
+	    -d $(QEMU_D) -D qemu.log
 
 # run-shell: tryb shell (bez argumentu LOADER.EXE) - tymczasowo podmienia fdauto.bat
 run-shell: boot.img
@@ -421,7 +424,7 @@ run-shell: boot.img
 	qemu-system-i386 -fda boot.img -boot a -m 16 \
 	    -no-reboot -no-shutdown \
 	    -serial stdio \
-	    -d cpu_reset,int,guest_errors -D qemu.log ; \
+	    -d $(QEMU_D) -D qemu.log ; \
 	mcopy -oi boot.img fdauto.bat ::fdauto.bat
 
 run: boot.img

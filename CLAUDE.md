@@ -34,7 +34,8 @@ Profil kodu goscia: `tools/qemu_prof.py --run "LOADER.EXE SKI.EXE" --mouse --sec
 make run-qemu   # writes to qemu.log
 tail -50 qemu.log
 ```
-Flags used: `-no-reboot -no-shutdown -d cpu_reset,int,guest_errors -D qemu.log`
+Flags used: `-no-reboot -no-shutdown -d cpu_reset,guest_errors -D qemu.log`
+Z logiem przerwan: `make run-qemu QEMU_D=cpu_reset,int,guest_errors` (kazde wywolanie API = pelny stan CPU w logu).
 
 **Compile individual files:**
 ```bash
