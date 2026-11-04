@@ -556,11 +556,39 @@ int menu_popup_height(HMENU hm)
     return ch;
 }
 
+/* Otwarte poziomy menu: podmenu sprawdza, czy mysz nie przeszla na pozycje rodzica */
+#define MAX_MENU_DEPTH 8
+#define MENU_TO_PARENT (-3)                   /* podmenu zamkniete: mysz jest nad rodzicem */
+static HWND  g_lvw[MAX_MENU_DEPTH];
+static HMENU g_lvm[MAX_MENU_DEPTH];
+static int   g_lvs[MAX_MENU_DEPTH];           /* pozycja, ktora otworzyla kolejny poziom */
+static int   g_depth;
+
+static BOOL over_parent(int depth, int x, int y)
+{
+    int a;
+    for (a = depth - 1; a >= 0; a--) {
+        int hit;
+        if (a >= MAX_MENU_DEPTH) continue;
+        hit = popup_hit(g_lvw[a], g_lvm[a], x, y);
+        /* na pozycji, ktora otworzyla to podmenu, zostajemy otwarci */
+        if (hit >= 0 && (hit != g_lvs[a] || a < depth - 1)) return TRUE;
+    }
+    return FALSE;
+}
+
+/* Po zamknieciu podmenu przez ruch myszy: rodzic ocenia pozycje od razu, bez nowego ruchu */
+static BOOL sub_result(HWND pw, int result)
+{
+    if (result == MENU_TO_PARENT) post_msg(pw, WM_MOUSEMOVE, 0, 0);
+    return result > 0;
+}
+
 int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
 {
     MENU __far *m = mptr(hm);
     HWND pw;
-    int cw, ch, sel = -1, result = 0, i;
+    int cw, ch, sel = -1, result = 0, i, depth;
     MSG msg;
     BOOL moved = FALSE;
     if (!m || !m->n) return 0;
@@ -578,11 +606,14 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
     SetWindowPos(pw, 0xFFFF, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040 | 0x0010);
     UpdateWindow(pw);
     SetCapture(pw);
+    depth = g_depth++;
+    if (depth < MAX_MENU_DEPTH) { g_lvw[depth] = pw; g_lvm[depth] = hm; }
     while (modal_next((LPMSG)&msg)) {
         int mx = mouse_x(), my = mouse_y();
         if (msg.message == WM_MOUSEMOVE || msg.message == WM_NCMOUSEMOVE) {
             int hit = popup_hit(pw, hm, mx, my);
             moved = TRUE;
+            if (hit == -2 && over_parent(depth, mx, my)) { result = MENU_TO_PARENT; break; }
             if (hit >= 0 && hit != sel) {
                 sel = hit;
                 popup_select(pw, sel);
@@ -591,12 +622,11 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
                     WND __far *w = WP(pw);
                     int yy = w->cr.top + 2, k;
                     for (k = 0; k < sel; k++) yy += popup_item_h(&m->it[k]);
+                    if (depth < MAX_MENU_DEPTH) g_lvs[depth] = sel;
                     result = menu_track_popup(m->it[sel].id, w->wr.right - 2, yy, owner, sys);
                     SetCapture(pw);
-                    if (result > 0 || result == 0) {
-                        if (result > 0) break;
-                        if (!(mouse_btn() & 1) && popup_hit(pw, hm, mouse_x(), mouse_y()) == -2) break;
-                    }
+                    if (sub_result(pw, result)) break;
+                    if (result == 0 && !(mouse_btn() & 1) && popup_hit(pw, hm, mouse_x(), mouse_y()) == -2) break;
                     result = 0;
                 }
             }
@@ -623,9 +653,10 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
             } else if (k == 0x0D || (k == 0x27 && sel >= 0)) {
                 if (sel >= 0 && (m->it[sel].flags & MF_POPUP)) {
                     WND __far *w = WP(pw);
+                    if (depth < MAX_MENU_DEPTH) g_lvs[depth] = sel;
                     result = menu_track_popup(m->it[sel].id, w->wr.right - 2, w->wr.top + 2, owner, sys);
                     SetCapture(pw);
-                    if (result > 0) break;
+                    if (sub_result(pw, result)) break;
                     result = 0;
                 } else if (sel >= 0 && !(m->it[sel].flags & (MF_GRAYED | MF_DISABLED))) {
                     result = m->it[sel].id;
@@ -642,8 +673,10 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
                 if (t[k] && !(m->it[i].flags & (MF_GRAYED | MF_DISABLED))) {
                     if (m->it[i].flags & MF_POPUP) {
                         WND __far *w = WP(pw);
+                        if (depth < MAX_MENU_DEPTH) g_lvs[depth] = i;
                         result = menu_track_popup(m->it[i].id, w->wr.right - 2, w->wr.top + 2, owner, sys);
                         SetCapture(pw);
+                        sub_result(pw, result);
                     } else result = m->it[i].id;
                     break;
                 }
@@ -652,6 +685,7 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
             result = 0;
         }
     }
+    g_depth = depth;
     ReleaseCapture();
     DestroyWindow(pw);
     return result;
