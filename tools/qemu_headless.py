@@ -15,7 +15,8 @@ Uzycie:
     k<klawisz>    sendkey (np. kdown, kalt-f4, kret)
     m<dx>,<dy>    przesun mysz wzglednie
     a<x>,<y>      ustaw mysz bezwzglednie (najpierw do rogu 0,0)
-    c             klik lewym przyciskiem
+    c             klik lewym przyciskiem (wolny, ok. 0,4 s: dwa takie to nie zawsze dwuklik)
+    C             szybki dwuklik, jak czlowiek
     u<tekst>      wpisz tekst (litery/cyfry)
 Serial loguje sie do OUT/serial.log (OUT domyslnie ./qemu_out).
 Przed KROKAMI czeka --boot-wait sekund (domyslnie 25).
@@ -112,6 +113,14 @@ def main():
                     sx, sy = min(x, 40), min(y, 40)
                     mon(sock, f'mouse_move {sx} {sy}')
                     x -= sx; y -= sy
+            elif k == 'C':
+                for cmd, pause in (('1', 0.03), ('0', 0.07), ('1', 0.03), ('0', 0.1)):
+                    sock.sendall(f'mouse_button {cmd}\n'.encode())
+                    time.sleep(pause)
+                try:
+                    sock.recv(65536)
+                except OSError:
+                    pass
             elif k == 'c':
                 mon(sock, 'mouse_button 1'); time.sleep(0.1); mon(sock, 'mouse_button 0')
             elif k == 'u':

@@ -23,7 +23,7 @@ python3 tools/run_examples.py   # testy aplikacji przykladowych (example_apps/) 
 ```
 
 Headless: `tools/qemu_headless.py --fd boot.img [--hd calmira.img] --run "LOADER.EXE X.EXE" KROKI`
-(`w` czekaj, `p` zrzut PNG, `k` klawisz, `a x,y` mysz bezwzglednie, `m dx,dy`, `c` klik).
+(`w` czekaj, `p` zrzut PNG, `k` klawisz, `a x,y` mysz bezwzglednie, `m dx,dy`, `c` klik, `C` szybki dwuklik).
 Dodatkowy krok `d<sek>` = czekaj na linie `TEST ... DONE` w logu COM1.
 Opcja loadera `-t` = trace wywolan API na COM1 (`>mod off cs:ip`, nazwy z map: `*/*.map`).
 Profil kodu goscia: `tools/qemu_prof.py --run "LOADER.EXE SKI.EXE" --mouse --secs 20`
@@ -127,7 +127,7 @@ z katalogu systemowego (`A:\`) `*.FON`. Potem przechodzi do PM i woła LibEntry 
 
 Eksporty: `tools/gen_lnk.py MODUL pliki.c` (ordynaly z .spec Wine, prywatne w PRIVATE),
 weryfikacja `retf N` vs .spec: `tools/check_args.py plik:MODUL` (KERNEL.354 = falszywy alarm).
-Calmira II (`../win31_apps/cal3101p`) dziala: pulpit, pasek zadan, menu Start, dialogi.
+Calmira II 3.3 (`../win31_apps/english_calmira/calmii33`) dziala: pulpit, pasek zadan, menu Start, dialogi.
 Zadania kooperacyjne (`kernel/ktask.c`): WinExec/ShellExecute/LoadLibrary laduja moduly w trakcie pracy przez `INT E0h` (`mod_exec_rm`), stan w `TODO.txt` ETAP 21.
 Brak: COMMDLG (zawsze "Anuluj"), DDE.
 

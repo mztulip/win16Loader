@@ -523,20 +523,20 @@ run-test-rc: boot_test_rc.img
 
 # -------------------------------------------------------
 # Calmira: dysk twardy C: (64MB FAT16) z C:\CALMIRA, start z dyskietki boot.img
-# Calmira II D 3.101.d (GPL-2.0+): http://gaby.de/ftp/pub/win3x/cal3101p.zip -> ../win31_apps/cal3101p
+# Calmira II 3.3 (GPL-2.0+): http://www.calmira.org/downloads/ -> ../win31_apps/english_calmira/calmii33
 # zrodla: http://web.archive.org/web/20101101214316/http://www.vv-soft.de/calmira/cal3101q.zip
 # Loader szuka systemowych DLL (KERNEL/USER/GDI) w swoim katalogu (A:\).
 # -------------------------------------------------------
-CALMIRA_DIR = ../win31_apps/cal3101p
+CALMIRA_DIR = ../win31_apps/english_calmira/calmii33
 HDD_MB      = 64
 
-calmira.img: $(wildcard $(CALMIRA_DIR)/*) windir/WIN.INI windir/SYSTEM.INI
+calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI
 	rm -f $@
 	truncate -s $(HDD_MB)M $@
 	echo 'start=2048, type=6, bootable' | sfdisk -q $@
 	mkfs.fat -F 16 -n CALMIRA --offset 2048 $@ $$(( ($(HDD_MB)*1024*1024 - 2048*512) / 1024 )) >/dev/null
 	mmd   -i $@@@1M ::CALMIRA
-	mcopy -i $@@@1M $(CALMIRA_DIR)/* ::CALMIRA/
+	mcopy -s -i $@@@1M $(CALMIRA_DIR)/* ::CALMIRA/
 	mmd   -i $@@@1M ::WINDOWS
 	mcopy -i $@@@1M windir/WIN.INI windir/SYSTEM.INI ::WINDOWS/
 	@echo "[OK] calmira.img gotowy"
