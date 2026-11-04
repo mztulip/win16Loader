@@ -110,7 +110,9 @@ static void dir_of(const char *path, char *out)
  * ============================================================ */
 static unsigned long xms_alloc(unsigned long size)
 {
-    unsigned long p = (g_xms_next + 15UL) & ~15UL;
+    /* Kazdy blok na wlasnych stronach 4KB: kod i dane (stos!) na jednej stronie to w QEMU
+     * wolna sciezka przy kazdym zapisie - wykrywanie kodu samomodyfikujacego (docs/wydajnosc_gdi.md) */
+    unsigned long p = (g_xms_next + 4095UL) & ~4095UL;
     if (p + size > g_xms_limit) {
         mlog("ERROR: brak XMS (potrzeba %lu B @%06lX, limit %06lX)\n", size, p, g_xms_limit);
         return 0;
