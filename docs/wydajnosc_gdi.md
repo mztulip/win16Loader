@@ -72,15 +72,30 @@ blicie ekran→ekran wykluczenie celu było pomijane. Teraz każde wywołanie sp
 
 Żeby ich nie powtarzać; wszystkie wyglądały przekonująco, a pomiar je obalił.
 
-- **`-d int` w `run-qemu`.** Log rośnie, ale flaga była tam od dawna, a pomiary z nią i bez
-  niej są praktycznie równe.
+- **`-d int` w `run-qemu`.** Flaga była tam od dawna i nie ona spowodowała spowolnienie.
+  Stała się jednak problemem po przyspieszeniu (zob. niżej).
 - **Zegar IRQ0.** Komentarz „100 Hz, +10 ms” był nieaktualny; kod dolicza 55 ms przy 18 Hz.
-- **Brak `HLT` w `PeekMessage`.** Stary USER usypiał tam CPU, nowy kręci się w pętli. Marnuje to
-  czas hosta, ale nie jest przyczyną: dodanie `HLT` nic nie poprawiło.
+- **Brak `HLT` w `PeekMessage`.** Stary USER usypiał tam CPU, nowy kręcił się w pętli. Nie było to
+  przyczyną spowolnienia: dodanie `HLT` nic nie poprawiło (ale zob. niżej).
 - **`dt = 0` przy szybkiej pętli.** SkiFree samo ogranicza klatki (`[0xb50] = 40 ms`).
 - **Koszt far call w TCG.** Spodziewałem się wiele po `-ms`, a wyszło ok. 10%.
 - **Liczenie zmian ekranu.** Licznik pokazywał „25 klatek/s”, gdy gra stała w miejscu. Mierz
   postęp gry (`Dist`), nie zmiany pikseli.
+
+## Skutek uboczny przyspieszenia: pętla `PeekMessage` i rozmiar logu
+
+Gdy rysowanie przestało zajmować cały czas, SkiFree zaczęło czekać w `PeekMessage` +
+`GetCurrentTime` tysiące razy na sekundę. Przy `-d int` każde wywołanie (INT 3Fh) to pełny stan
+CPU w `qemu.log`: zmierzone **45,6 MB/s**, czyli ok. 2,7 GB na minutę gry.
+
+- `PeekMessage` po 64 pustych wywołaniach w jednym ticku robi `HLT` (do następnego przerwania).
+  Gra rysuje najwyżej raz na tick, więc nic nie traci, a host nie jest zajęty w 100%.
+  Aplikacja wykonująca pracę między wywołaniami zwykle nie dochodzi do limitu; najgorszy przypadek
+  to ok. 1150 pustych `PeekMessage`/s.
+- `make run-qemu` domyślnie nie loguje przerwań; włącza je `QEMU_D=cpu_reset,int,guest_errors`.
+
+Po poprawce log z `-d int` rośnie o ok. 2,3 MB/s, a bez tej flagi w ogóle. Zużycie CPU hosta
+przez QEMU podczas gry spadło z 99% do 11%.
 
 ## Jak to diagnozować
 
@@ -110,5 +125,3 @@ szybkości hosta. Zweryfikowane przez cofnięcie poprawek: bez wyrównania XMS p
   wynika z TCG; na prawdziwym CPU i pod Bochsem jej wielkość nie była mierzona.
 - **Pamięć konwencjonalna.** Dane `pm_call.asm` leżą przy kodzie, a thunki i KCB blisko siebie.
   Wywołanie API kosztuje dziś ok. 5 µs (przed wyrównaniem XMS ok. 24 µs), więc nie jest to pilne.
-- **Pętla `PeekMessage`** nadal zajmuje 100% jednego rdzenia hosta, gdy aplikacja czeka.
-  Nie wpływa na szybkość gościa.

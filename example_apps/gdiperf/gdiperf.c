@@ -411,6 +411,33 @@ static void measure(const char *name, BENCHFN fn, long px, long maxpct)
     t_log(n, maxpct == 0 || pct <= maxpct, d);
 }
 
+/* Puste PeekMessage w petli czekajacej oddaja CPU (PEEK_SPIN w user/umsg.c), ale gra
+ * dalej dostaje kontrole co tick. Zuzyty czas hosta i log QEMU: docs/wydajnosc_gdi.md */
+static void test_peek_idle(void)
+{
+    MSG m;
+    DWORD t0, el;
+    long peeks = 0, ticks = 0;
+    char d[60];
+    while (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&m);
+    t0 = GetTickCount();
+    while (GetTickCount() == t0) ;
+    t0 = GetTickCount();
+    {
+        DWORD last = t0;
+        do {
+            if (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) DispatchMessage(&m);
+            peeks++;
+            el = GetTickCount();
+            if (el != last) { ticks++; last = el; }
+            el -= t0;
+        } while (el < 1100);
+    }
+    wsprintf(d, "%ld na tick, tickow %ld", peeks / (ticks ? ticks : 1), ticks);
+    t_log("puste PeekMessage oddaja CPU", peeks / (ticks ? ticks : 1) <= 100, d);
+    t_log("petla dostaje kazdy tick", ticks >= 18, d);
+}
+
 LRESULT FAR PASCAL __export WTestProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_PAINT) {
@@ -528,6 +555,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     test_cursor();
     test_text();
     test_pattern();
+    test_peek_idle();
     run_perf(hi);
     t_done();
     ReleaseDC(g_hw, g_scr);

@@ -601,11 +601,25 @@ BOOL API GetMessage(LPMSG m, HWND filt, WORD mn, WORD mx)
     return m->message != WM_QUIT;
 }
 
+/* Tyle pustych PeekMessage w jednym ticku, zanim oddamy CPU do nastepnego przerwania.
+ * Petle czekajace (SkiFree) nie kreca sie wtedy tysiace razy na sekunde, a aplikacje
+ * robiace prace miedzy wywolaniami nie zwalniaja, bo zwykle nie dochodza do limitu. */
+#define PEEK_SPIN 64
+
 /* ordinal 109 */
 BOOL API PeekMessage(LPMSG m, HWND filt, WORD mn, WORD mx, WORD fl)
 {
+    static DWORD tick0;
+    static WORD empty;
     user_init();
-    if (!get_msg(m, filt, mn, mx, (fl & 1) != 0)) { caret_blink(); return FALSE; }
+    if (!get_msg(m, filt, mn, mx, (fl & 1) != 0)) {
+        DWORD t = tick();
+        caret_blink();
+        if (t != tick0) { tick0 = t; empty = 0; }
+        if (++empty > PEEK_SPIN) cpu_idle();
+        return FALSE;
+    }
+    empty = 0;
     if (fl & 1) run_hooks(3, 0, 0, (LONG)m);
     return TRUE;
 }
