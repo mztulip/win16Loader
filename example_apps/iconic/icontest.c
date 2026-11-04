@@ -146,6 +146,31 @@ static void tests(HINSTANCE hi)
     GetWindowRect(c, &r);
     CHECK(!IsIconic(c) && rw(&r) == 200 && rh(&r) == 120, "WS_MINIMIZE: przywrocone do rozmiaru z CreateWindow");
     DestroyWindow(c);
+    /* LoadIcon z nazwa, ktorej nie ma w module: pierwsza ikona modulu (SkiFree: "iconSki") */
+    CHECK(LoadIcon(hi, "BrakTakiejIkony") != NULL, "LoadIcon: brak nazwy -> pierwsza ikona modulu");
+    /* klasa bez ikony, WM_PAINT z DefWindowProc: domyslna ikona na tle pulpitu, nie bialy kwadrat */
+    c = CreateWindow("NoIcon", "Domyslna", WS_OVERLAPPEDWINDOW, 10, 10, 200, 100, NULL, NULL, hi, NULL);
+    ShowWindow(c, SW_SHOWMINNOACTIVE);
+    UpdateWindow(c);
+    pump();
+    GetWindowRect(c, &r);
+    {
+        HDC sdc = GetDC(0);
+        COLORREF bg = GetSysColor(COLOR_BACKGROUND);
+        CHECK(GetPixel(sdc, r.left, r.top) == bg, "ikona domyslna: rog ma tlo pulpitu");
+        CHECK(GetPixel(sdc, r.left + 16, r.top + 8) == RGB(0x0A, 0x6E, 0x7E), "ikona domyslna: pasek tytulu");
+        CHECK(GetPixel(sdc, r.left + 16, r.top + 20) == RGB(255, 255, 255), "ikona domyslna: wnetrze");
+        /* wlasne malowanie aplikacji bez ikony klasy zostaje nietkniete */
+        ShowWindow(g_b, SW_SHOWMINNOACTIVE);
+        UpdateWindow(g_b);
+        pump();
+        GetWindowRect(g_b, &rb);
+        CHECK(GetPixel(sdc, rb.left + 16, rb.top + 16) == RGB(255, 200, 0), "wlasny WM_PAINT ikony: rysunek aplikacji");
+        CHECK(GetPixel(sdc, rb.left + 1, rb.top + 1) == RGB(255, 255, 255), "wlasny WM_PAINT ikony: tlo klasy");
+        ReleaseDC(0, sdc);
+    }
+    DestroyWindow(c);
+    pump();
 }
 
 LRESULT FAR PASCAL __export WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)

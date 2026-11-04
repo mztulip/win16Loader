@@ -131,6 +131,11 @@ HWND paint_pending(HWND filt) { return find_paint(HDESKTOP, filt); }
 
 /* Okno zminimalizowane z ikona klasy dostaje WM_PAINTICON i WM_ICONERASEBKGND (Win 3.x) */
 static BOOL class_icon_paint(WND __far *w) { return (w->flags & WF_MINIMIZED) && g_cls[w->cls].icon; }
+static HBRUSH icon_bg_brush(WND __far *w)
+{
+    if (w->style & WS_CHILD) return WP(w->parent) ? g_cls[WP(w->parent)->cls].brush : 0;
+    return sysbrush(COLOR_BACKGROUND);
+}
 WORD paint_msg(HWND h) { WND __far *w = WP(h); return (w && class_icon_paint(w)) ? WM_PAINTICON : WM_PAINT; }
 
 HDC API BeginPaint(HWND h, PAINTSTRUCT __far *ps)
@@ -1102,8 +1107,7 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
     }
     case WM_ICONERASEBKGND: {                                /* tlo ikony = tlo rodzica */
         RECT r;
-        HBRUSH b = sysbrush(COLOR_BACKGROUND);
-        if (w->style & WS_CHILD) b = WP(w->parent) ? g_cls[WP(w->parent)->cls].brush : 0;
+        HBRUSH b = icon_bg_brush(w);
         if (!b) return 0;
         GetClientRect(h, (LPRECT)&r);
         FillRect((HDC)wp, (LPRECT)&r, b);
@@ -1113,11 +1117,20 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
     case WM_PAINT: {                                          /* ikona: ikona klasy na srodku */
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, (PAINTSTRUCT __far *)&ps);
-        if (dc && (w = WP(h)) != 0 && class_icon_paint(w)) {
+        if (dc && (w = WP(h)) != 0 && (w->flags & WF_MINIMIZED)) {
             extern BOOL API DrawIcon(HDC, int, int, HICON);
+            extern HICON API LoadIcon(WORD, LPCSTR);
             RECT r;
+            HICON ic = g_cls[w->cls].icon;
             GetClientRect(h, (LPRECT)&r);
-            DrawIcon(dc, (r.right - sysmetric(11)) / 2, (r.bottom - sysmetric(12)) / 2, g_cls[w->cls].icon);
+            if (!ic) {
+                /* Klasa bez ikony i bez wlasnego WM_PAINT: w Windows zostalby pusty kwadrat
+                 * w kolorze klasy. Aplikacje malujace wlasna ikone tu nie trafiaja. */
+                HBRUSH b = icon_bg_brush(w);
+                if (b) FillRect(dc, (LPRECT)&r, b);
+                ic = LoadIcon(0, (LPCSTR)MAKELONG(32512, 0));   /* IDI_APPLICATION */
+            }
+            DrawIcon(dc, (r.right - sysmetric(11)) / 2, (r.bottom - sysmetric(12)) / 2, ic);
         }
         EndPaint(h, (PAINTSTRUCT __far *)&ps);
         return 0;

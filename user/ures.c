@@ -192,7 +192,11 @@ static HICON make_sysicon(int kind)
     {
         WORD br = CreateSolidBrush(col[kind]), obr = SelectObject(dc, br);
         extern BOOL API Ellipse(HDC, int, int, int, int);
-        if (kind == 0) Rectangle(dc, 2, 4, 30, 28);
+        if (kind == 0) {                                  /* okienko w stylu projektu (czarny = przezroczysty) */
+            fill_color(dc, 2, 4, 30, 28, RGB(0x00, 0x40, 0x48));
+            fill_color(dc, 3, 5, 29, 11, RGB(0x0A, 0x6E, 0x7E));
+            fill_color(dc, 3, 12, 29, 27, RGB(255, 255, 255));
+        }
         else Ellipse(dc, 2, 2, 30, 30);
         SelectObject(dc, obr);
         DeleteObject(br);
@@ -227,7 +231,14 @@ HICON API LoadIcon(WORD hinst, LPCSTR name)
         if (!g_sysicon[k]) g_sysicon[k] = make_sysicon(k);
         return g_sysicon[k];
     }
-    return load_group(hinst, name, FALSE);
+    {
+        /* Nazwy brak w module: pierwsza ikona modulu. SkiFree prosi o "iconSki", a ma tylko
+         * ikony numerowane; w Windows dostaloby NULL i kwadrat z kawalkiem gry jako ikone */
+        HICON ic = load_group(hinst, name, FALSE);
+        int id;
+        for (id = 1; !ic && id <= 32; id++) ic = load_group(hinst, (LPCSTR)MAKELONG(id, 0), FALSE);
+        return ic;
+    }
 }
 
 HCURSOR API LoadCursor(WORD hinst, LPCSTR name)
