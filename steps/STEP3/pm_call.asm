@@ -259,7 +259,7 @@ rm_real:
 ; =====================================================================
 ;  DANE LOKALNE (w _TEXT, dostepne przez CS: w realmode, przez SEL_DATA* w PM)
 ; =====================================================================
-pm_msg          db "PM Loader: calling 16-bit NE app (Win3.1 style)...", 0
+pm_msg          db "PM Loader: calling 16-bit NE app (Win16 style)...", 0
 saved_ss        dw 0
 saved_sp        dw 0
 saved_ds        dw 0

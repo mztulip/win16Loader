@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Purpose
 
-Przykładowa aplikacja Win16 zaadaptowana do kompilacji **Open Watcom** (oryginalnie: Microsoft C 4 + Windows 1 SDK). Używana jako materiał referencyjny dla projektu Win16 OS clone w `../i486_win16/`. Wynikowy NE executable działa pod Windows 3.1 (nie Windows 1.x — patrz sekcja "Co zmieniono").
+Przykładowa aplikacja Win16 zaadaptowana do kompilacji **Open Watcom** (oryginalnie: Microsoft C 4 + Windows 1 SDK). Używana jako materiał referencyjny dla projektu Win16 OS clone w `../i486_win16/`. Wynikowy NE executable działa pod Win16 (nie Windows 1.x — patrz sekcja "Co zmieniono").
 
 ## Build
 
@@ -48,8 +48,8 @@ Funkcje `__cdecl` (domyślne w C) mają podkreślnik na końcu: `ShowAboutDialog
 | Zmiana | Powód |
 |--------|-------|
 | K&R → ANSI deklaracje funkcji | Watcom wymaga ANSI C |
-| `WS_TILEDWINDOW` → `WS_OVERLAPPEDWINDOW` | `WS_TILEDWINDOW` to alias Win 1.x, brak w nagłówkach Win3.x Watcoma |
-| `ChangeMenu` → `AppendMenu` (2×) | `ChangeMenu` to API Windows 1.x/2.x, usunięte w Win3.x |
+| `WS_TILEDWINDOW` → `WS_OVERLAPPEDWINDOW` | `WS_TILEDWINDOW` to alias Win 1.x, brak w nagłówkach Win16 Watcoma |
+| `ChangeMenu` → `AppendMenu` (2×) | `ChangeMenu` to API Windows 1.x/2.x, usunięte w Win16 |
 | Usunięto `MakeProcInstance`/`FreeProcInstance` | Watcom generuje własny prolog/epilog naprawiający DS — thunki zbędne |
 | `WORD wParam` → `unsigned wParam` w WndProc/DlgProc | Watcom definiuje `WNDPROC` z `unsigned` (UINT), nie `WORD` (unsigned short) |
 | `Resource.rc`: `"resource.h"` → `"Resource.h"` | Linux: case-sensitive filesystem |

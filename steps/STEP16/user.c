@@ -5,7 +5,7 @@
  *   - TranslateMessage (USER.113): generuje WM_CHAR z WM_KEYDOWN dla klawiszy ASCII
  *   - g_active_hwnd: globalna zmienna uzywana przez IRQ1 handler w pm_call.asm
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1.
+ * Eksporty pod prawdziwymi numerami ordynalow Win16.
  * Funkcje wymagane przez SKI.EXE (i win16app.c):
  *
  *   1   = MessageBox         (stub: zwroc IDOK)

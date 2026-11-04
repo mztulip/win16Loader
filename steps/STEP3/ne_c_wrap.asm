@@ -69,7 +69,7 @@ ne_header:
     dw 0                ; ne_gangstart
     dw 0                ; ne_ganglength
     dw 0                ; ne_swaparea
-    dw 0x030A           ; ne_expver: Windows 3.10
+    dw 0x030A           ; ne_expver: Win16
 
 ; =====================================================================
 ;  SEGMENT TABLE

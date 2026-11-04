@@ -1,10 +1,10 @@
 # win16Loader
 
-A minimal Win16 / Windows 3.1 compatible loader for i486, running on top of FreeDOS.
+A minimal Win16 compatible loader for i486, running on top of FreeDOS.
 
 ## Goal
 
-The goal of this project is to run original Win16 applications on bare metal (or emulated) i486 hardware without a full Windows installation. The primary target application is **SkiFree** — the classic 1991 skiing game originally written for Windows 3.1, available at https://ski.ihoc.net/
+The goal of this project is to run original Win16 applications on bare metal (or emulated) i486 hardware without a full Windows installation. The primary target application is **SkiFree** — the classic 1991 skiing game originally written for Win16, available at https://ski.ihoc.net/
 
 ## How it works
 

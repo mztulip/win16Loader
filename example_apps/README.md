@@ -13,7 +13,7 @@ TEST CTLTEST DONE pass=36 fail=0
 |------------|--------------|------------|
 | `controls` | CTLTEST.EXE  | Kontrolki USER w dialogu z zasobu: BUTTON (check/radio/3-state/group), EDIT (jedno- i wieloliniowy, EM_*), LISTBOX (sortowanie, LB_*), COMBOBOX (lista i z polem edycji), SCROLLBAR (SB_CTL), STATIC/SS_ICON, *DlgItem* |
 | `odmenu`   | ODMENU.EXE   | Menu z zasobu i tworzone w kodzie, MF_OWNERDRAW (WM_MEASUREITEM/WM_DRAWITEM), podmenu, Check/Enable/Modify/Insert/DeleteMenu, TrackPopupMenu |
-| `shell`    | SHELLTST.EXE | SHELL.DLL: rejestr 3.1 (RegCreateKey/SetValue/QueryValue/EnumKey/DeleteKey), ExtractIcon z NE i .ICO, Drag* |
+| `shell`    | SHELLTST.EXE | SHELL.DLL: rejestr (RegCreateKey/SetValue/QueryValue/EnumKey/DeleteKey), ExtractIcon z NE i .ICO, Drag* |
 | `sysdll`   | SYSDLL.EXE   | KEYBOARD.DRV (AnsiToOem/OemToAnsi, VkKeyScan, MapVirtualKey), atomy globalne USER, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG |
 | `fonts`    | FONTTEST.EXE | Fonty .FON (EnumFonts, CreateFont, GetTextFace/Metrics/Extent, pogrubienie, tło tekstu) |
 | `iconic`   | ICONTEST.EXE | Okna zminimalizowane: ikony na dole ekranu, WM_PAINTICON/WM_ICONERASEBKGND, ArrangeIconicWindows, WM_QUERYOPEN, powrót do maksymalizacji, ptMinPosition, WS_MINIMIZE, tytuł ikony, dwuklik przywraca, domyślna ikona klasy bez ikony, LoadIcon z brakującą nazwą |
@@ -22,7 +22,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `dosirq`   | DOSIRQ.EXE   | Regresja: mysz i klawiatura działają w trakcie wywołań DOS (dawniej bajt czekający w 8042 po powrocie do PM zatrzymywał kursor na zawsze) |
 | `menuhover`| MENUHOV.EXE  | Regresja: przejazd myszą bez klikania z otwartego podmenu na pozycje rodzica, także z drugiego poziomu (`WM_MENUSELECT`) |
 | `dosprompt`| DOSPROMP.EXE | Regresja: przy jednej stacji dysk B: nie istnieje (`GetDriveType` = 0, ścieżka zwraca błąd), a brak dyskietki nie wiesza systemu (DOS prosił o klawisz przy zamaskowanej klawiaturze) |
-| `tasks`    | TASKTEST.EXE | Zadania jak w Windows 3.1: WinExec, Yield, własny stos i PSP, koniec dziecka nie kończy rodzica (`taskchild` = program potomny) |
+| `tasks`    | TASKTEST.EXE | Zadania jak w Win16: WinExec, Yield, własny stos i PSP, koniec dziecka nie kończy rodzica (`taskchild` = program potomny) |
 
 ## Budowanie i uruchamianie
 

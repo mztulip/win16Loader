@@ -16,7 +16,7 @@ accompanies the
 [Building Win16 GUI Applications in C](http://www.transmissionzero.co.uk/computing/win16-apps-in-c/)
 article on [Transmission Zero](http://www.transmissionzero.co.uk/).
 
-The application runs under Windows 3.0 to Windows ME, and all versions of
+The application runs under Win16 to Windows ME, and all versions of
 Windows NT which support Win16 apps (Windows NT 3.1 to at least the x86 version
 of Windows 10). It does not run under Windows 1 or 2, but there is a
 [Windows 1 Version](https://github.com/TransmissionZero/Windows-1-Example-Application)
@@ -38,7 +38,7 @@ The application can also be built with [Open Watcom](http://openwatcom.org/),
 which is free to download.
 
 With a few small changes to the Makefile, the application will build with
-Microsoft C / C++ 7.0 and the Windows 3.1 SDK. It won't build  with the Windows
+Microsoft C / C++ 7.0 and the Win16 SDK. It won't build  with the Windows
 3.0 SDK because the headers don't define some of the required types, and it does
 not have the "ver.h" header which is required for the version information
 resource.
@@ -91,7 +91,7 @@ The Open Watcom build of the application doesn't work correctly under Windows
 missing and the about dialog won't display. I've found Open Watcom to be a bit
 hit and miss, where certain seemingly harmless changes of compiler option result
 in an application which crashes, so it may be possible to fix this by changing
-the compiler options. It runs fine under Windows 3.0 in Standard Mode and 386
+the compiler options. It runs fine under Win16 in Standard Mode and 386
 Enhanced Mode.
 
 The Open Watcom build of the application has optimisations switched off. With
@@ -124,7 +124,7 @@ article. If you are still having trouble, you can
 2. 2013-08-26: Version 1.1
   - Added a VERSIONINFO resource to the executable, so that version information
     can be viewed in File Manager or Windows Explorer.
-  - Open Watcom build now runs in Windows 3.0 (but not in real mode).
+  - Open Watcom build now runs in Win16 (but not in real mode).
   - Ensured all source files are no more than 8.3 characters long.
 
 1. 2011-07-06: Version 1.0

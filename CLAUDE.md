@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Goal
 
-Windows 3.1 / Win16 clone written from scratch, running on top of FreeDOS under Bochs/QEMU. Compatible with the Win16 API. Executables use the **NE (New Executable)** format — predecessor of PE, used by all 16-bit Windows apps.
+Win16 clone written from scratch, running on top of FreeDOS under Bochs/QEMU. Compatible with the Win16 API. Executables use the **NE (New Executable)** format — predecessor of PE, used by all 16-bit Windows apps.
 
 ## Build & Run
 
@@ -121,8 +121,8 @@ z katalogu systemowego (`A:\`) `*.FON`. Potem przechodzi do PM i woła LibEntry 
 |---------|-------|-------|-------|
 | `kernel/` | KERNEL.EXE | -ms -zu | pamiec (XMS, selektory, LocalHeap), DOS3Call z tlumaczeniem wskaznikow, INI, moduly/zasoby, INT 21h z PM |
 | `gdi/` | GDI.EXE | -ms -zu | DC, obiekty, ROP2/ROP3, regiony, bitmapy DIB/DDB, fonty .FON (FNT 2/3), kursor myszy (prywatne Gdi* 900-914) |
-| `user/` | USER.EXE | -mm -zu | okna, klasy, kolejka, malowanie NC w stylu 3.1, menu (owner-draw), dialogi, kontrolki (uctl.c), schowek, DCE (dce_update), ikony okien zminimalizowanych jak w 3.1 (uicon.c: miejsca na dole rodzica, ArrangeIconicWindows, tytul #32772, WM_PAINTICON), prywatne UserIcon* 950-951 |
-| `dlls/` | SHELL.DLL, KEYBOARD.DRV, TOOLHELP.DLL, DDEML.DLL, VER.DLL, MMSYSTEM.DLL, COMMDLG.DLL | -ms -zu | rejestr 3.1 w `<windir>\REG.TXT`, ExtractIcon, ANSI<->OEM; reszta zwraca "brak/anuluj" |
+| `user/` | USER.EXE | -mm -zu | okna, klasy, kolejka, malowanie NC w stylu Win16, menu (owner-draw), dialogi, kontrolki (uctl.c), schowek, DCE (dce_update), ikony okien zminimalizowanych jak w Win16 (uicon.c: miejsca na dole rodzica, ArrangeIconicWindows, tytul #32772, WM_PAINTICON), prywatne UserIcon* 950-951 |
+| `dlls/` | SHELL.DLL, KEYBOARD.DRV, TOOLHELP.DLL, DDEML.DLL, VER.DLL, MMSYSTEM.DLL, COMMDLG.DLL | -ms -zu | rejestr w `<windir>\REG.TXT`, ExtractIcon, ANSI<->OEM; reszta zwraca "brak/anuluj" |
 | `example_apps/` | testy | aplikacje | po jednej na funkcjonalnosc, wyniki `TEST ...` na COM1 (README.md) |
 
 Eksporty: `tools/gen_lnk.py MODUL pliki.c` (ordynaly z .spec Wine, prywatne w PRIVATE),
@@ -201,7 +201,7 @@ Wszystkie ścieżki do LFB chronią child windows przez **per-pixel `excl_contai
 
 KCB layout dla child windows (SEL_KCB=0x98): `wnd_ox[8]`@208, `wnd_oy[8]`@224, `wnd_w[8]`@240, `wnd_h[8]`@256.
 
-### TextOut — tryb OPAQUE (Windows 3.1 default)
+### TextOut — tryb OPAQUE (Win16 default)
 
 `draw_char_gdi`: bit fontu=0 → `draw_pixel(0xFF,0xFF,0xFF)` (białe tło), bit=1 → kolor fg.
 Eliminuje nawarstwianie napisów (trail effect).

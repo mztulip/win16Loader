@@ -64,7 +64,7 @@ int __far __pascal LibMain(unsigned hInstance, unsigned wDataSeg,
  * te funkcje z KERNEL. Nigdy nie sa wywolywane przez nasz loader,
  * ale fixup resolver musi znalezc ich offsety zeby nie logowac ERROR.
  *
- * Nazwy odpowiadaja prawdziwym Windows 3.1 KERNEL exports:
+ * Nazwy odpowiadaja prawdziwym Win16 KERNEL exports:
  *   ordinal 3:   GlobalFree
  *   ordinal 4:   LocalInit    (inicjalizuje lokalny stertos DLL)
  *   ordinal 113: LocalHeap    (zwraca handle lokalnego stertosu)

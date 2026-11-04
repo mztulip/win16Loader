@@ -1,5 +1,5 @@
 ; ne_app.asm - reczne zbudowany minimalny plik NE (New Executable)
-;              16-bit kod, jak prawdziwa aplikacja Win16/Win3.1
+;              16-bit kod, jak prawdziwa aplikacja Win16
 ;
 ; Layout pliku:
 ;   offset   0 : MZ header (64 B)
@@ -72,7 +72,7 @@ ne_header:
     dw 0                ; ne_gangstart
     dw 0                ; ne_ganglength
     dw 0                ; ne_swaparea
-    dw 0x030A           ; ne_expver: Windows 3.10
+    dw 0x030A           ; ne_expver: Win16
 
 ; =====================================================================
 ;  SEGMENT TABLE (offset 128)
@@ -144,6 +144,6 @@ bits 16
     retf                    ; far return do loadera
 
 msg:
-    db " *** HELLO FROM 16-BIT NE APP! WIN3.1 STYLE! *** ", 0
+    db " *** HELLO FROM 16-BIT NE APP! WIN16 STYLE! *** ", 0
 
 code_end:

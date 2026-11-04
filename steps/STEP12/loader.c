@@ -2,7 +2,7 @@
  * loader.c - STEP11: prawdziwe Win16 ordynaly (KERNEL/USER/GDI)
  *
  * Laduje KERNEL.EXE, USER.EXE, GDI.EXE z poprawnymi numerami ordynalow
- * zgodnymi z Windows 3.1 SDK, nastepnie WIN16APP.EXE jako test.
+ * zgodnymi z Win16 SDK, nastepnie WIN16APP.EXE jako test.
  *
  * Kompilacja:
  *   wcl -ml -l=dos -q loader.c pm_call.obj serial.obj -fe=loader.exe
@@ -1015,7 +1015,7 @@ int load_ne(const char *filename)
             file_size  = seg.ns_cbseg ? seg.ns_cbseg : 0;
             alloc_size = seg.ns_minalloc ? seg.ns_minalloc : 65535;
             if (file_size > alloc_size) alloc_size = file_size;
-            /* Segment danych aplikacji: dodaj ne_heap + ne_stack jak Windows 3.1.
+            /* Segment danych aplikacji: dodaj ne_heap + ne_stack jak Win16.
              * Przyklad SKI.EXE: ns_minalloc=3016, ne_heap=16384, ne_stack=16384
              * -> alloc=35784, wiec offset 0x404A (16458) jest w zakresie. */
             if (ne.ne_autodata != 0 && i == (unsigned)(ne.ne_autodata - 1)) {

@@ -1,7 +1,7 @@
 /*
  * win16app.c - STEP11: Hello, Win16!  (prawdziwe Win16 ordynaly)
  *
- * Importuje pod prawdziwymi numerami ordynalow Windows 3.1:
+ * Importuje pod prawdziwymi numerami ordynalow Win16:
  *   OUTPUTDEBUGSTRING z KERNEL (ordinal 115)
  *   REGISTERCLASS     z USER   (ordinal 1)
  *   CREATEWINDOW      z USER   (ordinal 2)

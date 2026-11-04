@@ -1,7 +1,7 @@
 /*
  * user.c - USER.EXE (STEP11)
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1.
+ * Eksporty pod prawdziwymi numerami ordynalow Win16.
  * Funkcje wymagane przez SKI.EXE (i win16app.c):
  *
  *   1   = MessageBox         (stub: zwroc IDOK)

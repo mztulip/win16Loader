@@ -506,7 +506,7 @@ game_loop (CS:0x3F8A):
 
 === WIN16 TLO I RUCH SPRITEOW ===
 
-W Windows 3.1 GDI NIE ma żadnego automatycznego save-behind dla sprite'ów.
+W Win16 GDI NIE ma żadnego automatycznego save-behind dla sprite'ów.
 Stare pozycje sprite'ów są kasowane przez background rendering gry (terrain drawing,
 FillRect na śnieg) wykonywanym NA POCZĄTKU każdej klatki — nie przez GDI.
 

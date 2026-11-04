@@ -1,4 +1,4 @@
-Win16 / Windows 3.1 clone - plan budowy
+Win16 clone - plan budowy
 ========================================
 
 ETAP 1 - Srodowisko (FreeDOS + Bochs)                              [DONE]
@@ -144,7 +144,7 @@ Cel: "Hello, Win16!" widoczne w dowolnym miejscu ekranu graficznego 640x480.
 Problem: TextOut w GDI.EXE ograniczony do y<20 (pierwsze 64KB LFB).
   640*480*3 = 921600 B > 65535 -> nie miesci sie w 16-bit offsetie.
 
-Rozwiazanie (historycznie wierne - jak Windows 3.1 SVGA driver):
+Rozwiazanie (historycznie wierne - jak Win16 SVGA driver):
   Mechanizm "huge selectors": 15 kolejnych selektorow GDT, kazdy 64KB fragment LFB.
   GDI wybiera odpowiedni selektor na podstawie flat_offset >> 16.
 
@@ -213,7 +213,7 @@ Rozwiazanie (historycznie wierne - jak Windows 3.1 SVGA driver):
     - Weryfikacja: serial "GDI: TextOut 'Hello, Win16!'" + "STEP10: loop done."
 
 ===========================================================================
-CEL: URUCHOMIENIE SKIFREE (SKI.EXE - oryginalna gra Windows 3.1, 1992)
+CEL: URUCHOMIENIE SKIFREE (SKI.EXE - oryginalna gra Win16, 1992)
 ===========================================================================
 SKI.EXE: 88848B, 2 segmenty (CODE 23KB + DATA 3KB), 86 relokacji
   - 65 importow: KERNEL (17 ord), GDI (14 ord), USER (34 ord)
@@ -537,7 +537,7 @@ SKI.EXE importuje 65 funkcji: KERNEL(17) + GDI(14) + USER(34).
 [x] GetClientRect(33) - dla child: zwraca rozmiar z KCB; dla root: {0,0,640,480}
 [x] PostMessage(28) / PostQuitMessage(6) - ring buffer 64 MSG
 [x] GetMessage(108) - UWAGA: nie blokuje gdy kolejka pusta (zwraca 1 od razu)
-        W Win3.1 blokowaloby; tu OK bo SKI uzywa PeekMessage w game loop,
+        W Win16 blokowaloby; tu OK bo SKI uzywa PeekMessage w game loop,
         GetMessage tylko przy inicjalizacji/zamknieciu.
 [x] PeekMessage(109) - nieblokujacy; PM_NOREMOVE/PM_REMOVE; +55ms do g_tick_ms
 [x] DispatchMessage(114) - wywoluje WndProc apki przez int3f_trampoline
@@ -552,7 +552,7 @@ SKI.EXE importuje 65 funkcji: KERNEL(17) + GDI(14) + USER(34).
 [x] GetTickCount(13) - zwraca g_tick_ms (+=55 per PeekMessage, 18.2Hz)
     MessageBox(1)    - stub: serial print, returns IDOK=1
     InitApp(5)       - stub: returns 1
-    SetFocus(22)     - stub: returns 0 (Win3.1 zwraca stary HWND; SKI nie sprawdza)
+    SetFocus(22)     - stub: returns 0 (Win16 zwraca stary HWND; SKI nie sprawdza)
     IsIconic(31)     - stub: returns 0
     SetWindowText(37) - stub: returns 1
     OpenIcon(44)     - stub: returns 0
@@ -582,7 +582,7 @@ powyzej y=480 nie sa zapisywane -> sprity niewyrenderowane.
 Tymczasowe obejscie (USUNIETE w tym etapie):
   g_atlas[90]: tablica (dc, y_off) -> sprite_hbm rejestrowana w Case 1.
   Case 2B: atlas_lookup(hdcSrc, ySrc) -> renderuj sprite bezposrednio.
-  Zle: hack nie zgodny z Win3.1; zawodzi przy czesciowych odczytach (xSrc!=0).
+  Zle: hack nie zgodny z Win16; zawodzi przy czesciowych odczytach (xSrc!=0).
 
 Poprawna implementacja zgodna z Win16:
   CreateCompatibleBitmap(hdc, w, h) alokuje bufor XMS o rozmiarze w*h*4 B.
@@ -742,7 +742,7 @@ Tests (STEP17/):
 
 Poprawki GDI/USER post-DONE (status bar rendering):
 
-[x] TextOut OPAQUE mode (Windows 3.1 default):
+[x] TextOut OPAQUE mode (Win16 default):
       draw_char_gdi rysuje biale tlo dla pikseli nienalezacych do znaku.
       Poprzednio: tylko foreground -> napisy na ekranie sie nakladaly (trail effect).
       Poprawka: draw_pixel(0xFF,0xFF,0xFF) dla bit==0 (background = bialy).
@@ -911,7 +911,7 @@ Plik implementacji: rc_loader.c
         Budowa: make boot_win16test.img; run: make run-win16test.
 
 ---------------------------------------------------------------------------
-ETAP 19 - Okno Win3.1: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [DONE]
+ETAP 19 - Okno Win16: chrome (ramka, pasek tytulu, przyciski), menu, dialogi [DONE]
 ---------------------------------------------------------------------------
 Cel: Win16 app zbudowana z Watcom clibs (WinMain + WS_OVERLAPPEDWINDOW) uruchamia
      sie i pokazuje okno z paskiem tytulu, przyciskami min/max/zamknij, ramka.
@@ -949,7 +949,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
           char title[64];               /* tytul okna (z CreateWindow lpWindowName) */
           unsigned char state;          /* 0=normal, 1=minimized, 2=maximized */
 
-        NC metryki (stale, Windows 3.1 styl):
+        NC metryki (stale, Win16 styl):
           CAPTION_H = 20    /* px: wysokosc paska tytulu */
           BORDER_W  = 4     /* px: szerokosc ramki (WS_THICKFRAME) */
           BORDER_W_THIN = 1 /* px: ramka bez WS_THICKFRAME */
@@ -979,7 +979,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
           Stub: ignoruj dwExStyle, wywolaj CreateWindow.
 
 [x] 19c: Rysowanie chrome okna (WM_NCPAINT)
-        Win3.1 styl (bez 3D shadow z Win95):
+        Win16 styl (bez 3D shadow z Win95):
           - Zewnetrzna ramka: 1px czarna (0x000000)
           - Wewnetrzna ramka (WS_THICKFRAME): 3px szara (0xC0C0C0)
           - Pasek tytulu: prostokat (CAPTION_H px) w kolorze aktywnym (0x000080 navy)
@@ -988,7 +988,7 @@ Referencja: STEP19/win16_example_app/ i STEP19/win16_example_app2/
           - Przycisk sysmenu (lewy): 18x18, szary (0xC0C0C0), z "-" lub "=" glyph
           - Przycisk minimize (prawy): 18x18, szary, z "_" glyph
           - Przycisk maximize (prawy-1): 18x18, szary, z "^" lub "[]" glyph
-            (Win3.1 ma min i max jako trojkaty - u nas "_" i "^" z fontu)
+            (Win16 ma min i max jako trojkaty - u nas "_" i "^" z fontu)
 
         Implementacja:
           Dodac do gdi.c funkcje (wywolywane z user.c, nie eksportowane):
@@ -1169,7 +1169,7 @@ Wymagania wstepne:
           GetMenuItemCount (USER.263)
 
 [x] 20a-bis: "Midnight Teal" kolorystyka + DestroyWindow clear
-        Zmiana palety z Win3.1-szarej na wlasny motyw:
+        Zmiana palety z Win16-szarej na wlasny motyw:
           Desktop:       #1C5058 (ciemny teal)
           Caption bar:   #0A6E7E
           Granica wewn.: #88C8D0
@@ -1371,10 +1371,10 @@ Wymagania wstepne:
         - Sysmenu popup: first_up_done=1 (pierwsze klikniecie w item przepadalo).
         Test: SKI->Alt+F4->shell->WIN1APP->Close->SKI->X ... DOS free stale.
 
-ETAP 21 - Prawdziwa kolejka komunikatow (jak Windows 3.1)              [TODO]
+ETAP 21 - Prawdziwa kolejka komunikatow (jak Win16)              [TODO]
 ---------------------------------------------------------------------------
 Cel: Zastapic bezposredni odczyt mouse/keyboard z KCB prawdziwa kolejka
-     komunikatow (system queue → app queue), jak w Windows 3.1.
+     komunikatow (system queue → app queue), jak w Win16.
 
 Obecny stan (STEP20):
   - IRQ12 handler zapisuje surowe dane myszy do KCB[282..290]
@@ -1387,7 +1387,7 @@ Obecny stan (STEP20):
     * Brak jednego zrodla prawdy — mysz w KCB, klawiatura w KCB, reszta w kolejce
     * NC handling duplikowany w PeekMessage i GetMessage
 
-Architektura Win3.1:
+Architektura Win16:
   - System queue: jedna globalna kolejka, IRQ handler wstawia MSG
   - App queue: per-task kolejka, system queue -> app queue przy GetMessage/PeekMessage
   - Raw input -> driver -> USER.EXE system queue -> app queue -> GetMessage/PeekMessage
@@ -1567,10 +1567,10 @@ Uwaga: 640*480*3 = 921600 B
 
 
 ================================================================================
-ETAP 21: Zadania jak w Windows 3.1 (Calmira uruchamia SKI.EXE)  [galaz win31-tasks]
+ETAP 21: Zadania jak w Win16 (Calmira uruchamia SKI.EXE)  [galaz tasks]
 ================================================================================
-Cel: wielozadaniowosc kooperacyjna zgodna z Windows 3.1 (Win16 ma zadania, nie watki);
-programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w 3.1, bez lamania API.
+Cel: wielozadaniowosc kooperacyjna zgodna z Win16 (Win16 ma zadania, nie watki);
+programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w oryginale, bez lamania API.
 
 21a  Ladowanie w trakcie pracy: KERNEL w PM wola loader NE w trybie rzeczywistym.
      Zarezerwowac XMS i selektory dla pozniej ladowanych modulow (dzis sterta zaczyna
@@ -1586,10 +1586,10 @@ programy bez zmian. Tam, gdzie mozna bezpiecznie, lepiej niz w 3.1, bez lamania 
 21e  WinExec, LoadModule (LOADPARMS), ShellExecute, GetModuleUsage, zliczanie uzycia modulow
      i FreeLibrary, IsTask, GetNumTasks, TaskFirst/TaskNext (TOOLHELP), PSP na zadanie
      (katalog biezacy, linia polecen, srodowisko, uchwyty plikow).
-21f  Wiele instancji jednego programu jak w 3.1: wspolny kod, osobny DGROUP, hPrevInstance,
+21f  Wiele instancji jednego programu jak w Win16: wspolny kod, osobny DGROUP, hPrevInstance,
      GetInstanceData.
 
-Stan (galaz win31-tasks):
+Stan (galaz tasks):
 - ZROBIONE: 21a, 21b, 21c (bez GetQueueStatus na zadanie), czesc 21d (okna, timery, kolejka, klasy),
   czesc 21e (WinExec, ShellExecute, IsTask, GetNumTasks, PSP z linia polecen).
   Calmira uruchamia SKI.EXE, przelaczanie paskiem zadan, zamkniecie, ponowne uruchomienie.
@@ -1603,7 +1603,7 @@ Stan (galaz win31-tasks):
   * WaitEvent/PostEvent, LockCurrentTask, SetTaskQueue/GetTaskQueue to nadal stuby.
   * Wyjatek w programie konczy caly system; ma konczyc tylko zadanie.
 
-Lepiej niz w 3.1 (o ile nie lamie zgodnosci):
+Lepiej niz w oryginale (o ile nie lamie zgodnosci):
 - wyjatek w programie konczy tylko to zadanie (komunikat zamiast paniki calego systemu),
 - zadne zadanie nie ma pracy = HLT, zamiast aktywnego czekania.
 

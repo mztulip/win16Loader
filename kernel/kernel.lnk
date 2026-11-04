@@ -1,4 +1,4 @@
-# kernel.lnk - eksporty KERNEL.EXE (ordinale jak w Windows 3.1)
+# kernel.lnk - eksporty KERNEL.EXE (ordinale jak w Win16)
 export FATALEXIT.1
 export EXITKERNEL.2
 export GETVERSION.3

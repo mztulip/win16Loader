@@ -5,7 +5,7 @@
  *   - TranslateMessage (USER.113): generuje WM_CHAR z WM_KEYDOWN dla klawiszy ASCII
  *   - g_active_hwnd: globalna zmienna uzywana przez IRQ1 handler w pm_call.asm
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1.
+ * Eksporty pod prawdziwymi numerami ordynalow Win16.
  * Funkcje wymagane przez SKI.EXE (i win16app.c):
  *
  *   1   = MessageBox         (stub: zwroc IDOK)
@@ -920,7 +920,7 @@ LRESULT __far __pascal DefWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     if (msg == WM_NCLBUTTONDOWN) {
         /* wp = HT code, lp = MAKELONG(screen_x, screen_y) */
         if (wp == HTSYSMENU) {
-            /* Klikniecie na sysmenu = zamknij okno (Win3.1: double-click; my: single) */
+            /* Klikniecie na sysmenu = zamknij okno (Win16: double-click; my: single) */
             push_msg(hwnd, WM_SYSCOMMAND, (WPARAM)SC_CLOSE, lp);
         }
         /* HTCAPTION/HTMINBUTTON/HTMAXBUTTON: brak akcji w tej wersji */
@@ -987,7 +987,7 @@ BOOL __far __pascal InvalidateRect(HWND hwnd, const RECT __far *lpRect, BOOL bEr
     (void)lpRect; (void)bErase;
     push_msg(hwnd, WM_PAINT, 0, 0L);
     /* Jesli lpRect==NULL (cale okno): przekaz WM_PAINT do wszystkich dzieci.
-     * Windows 3.1: InvalidateRect rodzica invaliduje zachodzace okna potomne. */
+     * Win16: InvalidateRect rodzica invaliduje zachodzace okna potomne. */
     if (!lpRect) {
         for (i = 0; i < MAX_WINDOWS; i++) {
             if (g_windows[i].used && g_windows[i].parent == hwnd)

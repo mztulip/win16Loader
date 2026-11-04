@@ -1,6 +1,6 @@
 # SKIFREE
 
-[SkiFree](https://ski.ihoc.net/) is a classic Windows 3.1 skiing game written by
+[SkiFree](https://ski.ihoc.net/) is a classic Win16 skiing game written by
 **Chris Pirih** and originally shipped with Windows Entertainment Pack 3 (1991).
 This directory contains the original `SKI.EXE` (Win16 NE format) used as the
 primary test target for the win16Loader project.
@@ -12,7 +12,7 @@ primary test target for the win16Loader project.
 ## NE Explorer
 
 `ne_explorer_gui.py` is a GUI tool for inspecting NE (New Executable) binaries —
-the 16-bit executable format used by Windows 3.x apps (`.exe`, `.dll`, `.drv`).
+the 16-bit executable format used by Win16 apps (`.exe`, `.dll`, `.drv`).
 
 It auto-opens `SKI.EXE` on startup if it is present in the same directory.
 

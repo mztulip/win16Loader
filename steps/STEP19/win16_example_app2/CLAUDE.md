@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Purpose
 
-This is a reference Win16 NE-format example application from Transmission Zero, used as a test target for the win16Loader STEP18 NE loader. It demonstrates the canonical structure of a Win16 Windows 3.x GUI application.
+This is a reference Win16 NE-format example application from Transmission Zero, used as a test target for the win16Loader STEP18 NE loader. It demonstrates the canonical structure of a Win16 Win16 GUI application.
 
 ## Building
 

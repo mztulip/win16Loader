@@ -1,7 +1,7 @@
 /*
  * gdi.c - GDI.EXE (STEP15)
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1:
+ * Eksporty pod prawdziwymi numerami ordynalow Win16:
  *   29  = PatBlt             (WHITENESS/BLACKNESS -> wypelnienie)
  *   33  = TextOut            (rysuje 8x16 na LFB przez huge selectors)
  *   34  = BitBlt             (4bpp sprite z SEL_BITMAPS -> LFB, przezroczystosc)
@@ -28,7 +28,7 @@
  *   CreateCompatibleDC alokuje bufor 640x480x4 (BGRA) z XMS (19 okien GDT).
  *   Przypadki BitBlt: 1 (sprite->memDC), 2B (memDC->memDC), A (screen->memDC),
  *   B (SRCAND/SRCPAINT), C (memDC->screen z auto-clear alpha).
- *   Atlas tracking calkowicie usuniety (ETAP 15f): Windows 3.1 mial prawdziwe bufory.
+ *   Atlas tracking calkowicie usuniety (ETAP 15f): Win16 mial prawdziwe bufory.
  */
 
 #define MK_FP(seg, off) \

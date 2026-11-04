@@ -488,7 +488,7 @@ pm16_call_app:
     mov  sp, [cs:local_init_sp]  ; SP obliczony z ne_heap+ne_stack
 
 .call_app:
-    ; Przemapuj PIC: master IRQ0-7 -> INT 0x20-0x27 (jak Windows 3.1)
+    ; Przemapuj PIC: master IRQ0-7 -> INT 0x20-0x27 (jak Win16)
     ; Bez tego IRQ0 trafia do IDT[8] = double fault (konflikt CPU/PIC w PM).
     mov  al, 0x11       ; ICW1: cascade, ICW4 needed
     out  0x20, al

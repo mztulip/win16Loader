@@ -5,7 +5,7 @@
  *   - TranslateMessage (USER.113): generuje WM_CHAR z WM_KEYDOWN dla klawiszy ASCII
  *   - g_active_hwnd: globalna zmienna uzywana przez IRQ1 handler w pm_call.asm
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1.
+ * Eksporty pod prawdziwymi numerami ordynalow Win16.
  * Funkcje wymagane przez SKI.EXE (i win16app.c):
  *
  *   1   = MessageBox         (stub: zwroc IDOK)
@@ -693,7 +693,7 @@ BOOL __far __pascal InvalidateRect(HWND hwnd, const RECT __far *lpRect, BOOL bEr
     (void)lpRect; (void)bErase;
     push_msg(hwnd, WM_PAINT, 0, 0L);
     /* Jesli lpRect==NULL (cale okno): przekaz WM_PAINT do wszystkich dzieci.
-     * Windows 3.1: InvalidateRect rodzica invaliduje zachodzace okna potomne. */
+     * Win16: InvalidateRect rodzica invaliduje zachodzace okna potomne. */
     if (!lpRect) {
         for (i = 0; i < MAX_WINDOWS; i++) {
             if (g_windows[i].used && g_windows[i].parent == hwnd)

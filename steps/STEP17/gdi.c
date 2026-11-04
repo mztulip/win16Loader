@@ -3,7 +3,7 @@
  *
  * Bez zmian vs STEP15.
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1:
+ * Eksporty pod prawdziwymi numerami ordynalow Win16:
  *   29  = PatBlt             (WHITENESS/BLACKNESS -> wypelnienie)
  *   33  = TextOut            (rysuje 8x16 na LFB przez huge selectors)
  *   34  = BitBlt             (4bpp sprite z SEL_BITMAPS -> LFB, przezroczystosc)
@@ -30,7 +30,7 @@
  *   CreateCompatibleDC alokuje bufor 640x480x4 (BGRA) z XMS (19 okien GDT).
  *   Przypadki BitBlt: 1 (sprite->memDC), 2B (memDC->memDC), A (screen->memDC),
  *   B (SRCAND/SRCPAINT), C (memDC->screen z auto-clear alpha).
- *   Atlas tracking calkowicie usuniety (ETAP 15f): Windows 3.1 mial prawdziwe bufory.
+ *   Atlas tracking calkowicie usuniety (ETAP 15f): Win16 mial prawdziwe bufory.
  */
 
 #define MK_FP(seg, off) \
@@ -557,7 +557,7 @@ BOOL __far __pascal BitBlt(HDC hdcDst, int xDst, int yDst, int w, int h,
                         /* Transparentne piksele zostaja alpha=0 — Case C je
                          * pomija, wiec tlo (inne sprity) jest widoczne przez
                          * przezroczyste obszary gondoli. Gondola na wierzchu
-                         * z prawdziwą przezroczystoscia (jak w Win3.1). */
+                         * z prawdziwą przezroczystoscia (jak w Win16). */
                         draw_dc_pixel(buf_sel1, bo1,
                             (unsigned char)(pix1 >> 16),
                             (unsigned char)(pix1 >> 8),

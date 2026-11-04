@@ -102,7 +102,7 @@ static struct {
 static unsigned g_next_hwnd = 1;
 
 /* ============================================================
- * Kolejka komunikatow (ring buffer, jak Windows 3.1)
+ * Kolejka komunikatow (ring buffer, jak Win16)
  * Jedna globalna kolejka w DGROUP USER.
  * PostMessage: wstawia (asynchronicznie).
  * SendMessage: omija kolejke, wywoluje WndProc bezposrednio.

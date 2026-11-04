@@ -1,7 +1,7 @@
 /*
  * kernel.c - KERNEL.EXE (STEP11)
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1:
+ * Eksporty pod prawdziwymi numerami ordynalow Win16:
  *   1   = FatalExit
  *   3   = stub (Watcom DLL prolog import)
  *   4   = stub (Watcom DLL prolog import)

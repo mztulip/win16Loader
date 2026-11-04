@@ -1,7 +1,7 @@
 ; pm_call.asm - PM glue (STEP10)
 ;
 ; Rozszerzenia vs STEP9c:
-;   - 15 okien VESA (huge selectors, jak Win3.1 SVGA driver):
+;   - 15 okien VESA (huge selectors, jak Win16 SVGA driver):
 ;     SEL_VESA_BASE=0xA0, okna 0..14 co 0x08, kazde 64KB
 ;     okno i: base = g_lfb_phys + i*65536, limit=65535 (ostatnie: 4095)
 ;   - SEL_FONT przesuniety z 0x98 na 0x118 (za oknami VESA)

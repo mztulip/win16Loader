@@ -2,7 +2,7 @@
  * loader.c - STEP11: prawdziwe Win16 ordynaly (KERNEL/USER/GDI)
  *
  * Laduje KERNEL.EXE, USER.EXE, GDI.EXE z poprawnymi numerami ordynalow
- * zgodnymi z Windows 3.1 SDK, nastepnie WIN16APP.EXE jako test.
+ * zgodnymi z Win16 SDK, nastepnie WIN16APP.EXE jako test.
  *
  * Kompilacja:
  *   wcl -ml -l=dos -q loader.c pm_call.obj serial.obj -fe=loader.exe

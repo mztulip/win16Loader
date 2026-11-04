@@ -1,7 +1,7 @@
 /*
  * gdi.c - GDI.EXE (STEP12/ETAP14)
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1:
+ * Eksporty pod prawdziwymi numerami ordynalow Win16:
  *   29  = PatBlt             (WHITENESS/BLACKNESS -> wypelnienie)
  *   33  = TextOut            (rysuje 8x16 na LFB przez huge selectors)
  *   34  = BitBlt             (4bpp sprite z SEL_BITMAPS -> LFB, przezroczystosc)
