@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NE (New Executable) format explorer GUI
-For Win16 / Windows 3.1 executables (.exe, .dll)
+For Win16 executables (.exe, .dll)
 """
 
 import tkinter as tk

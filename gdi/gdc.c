@@ -279,7 +279,7 @@ DWORD API ScaleWindowExt(HDC hdc, int xn, int xd, int yn, int yd)
 DWORD API ScaleViewportExt(HDC hdc, int xn, int xd, int yn, int yd)
 { DCW(); old = pt(dc->vex, dc->vey); if (dc->mapmode >= 7 && xd && yd) { dc->vex = (int)((long)dc->vex * xn / xd); dc->vey = (int)((long)dc->vey * yn / yd); } return old; }
 
-/* Wersje Ex (Win 3.1): stara wartosc do POINT/SIZE */
+/* Wersje Ex: stara wartosc do POINT/SIZE */
 static BOOL ex(DWORD v, LPPOINT p) { if (p) { p->x = (int)LOWORD(v); p->y = (int)HIWORD(v); } return TRUE; }
 BOOL API SetWindowOrgEx(HDC h, int x, int y, LPPOINT p)   { return ex(SetWindowOrg(h, x, y), p); }
 BOOL API SetViewportOrgEx(HDC h, int x, int y, LPPOINT p) { return ex(SetViewportOrg(h, x, y), p); }

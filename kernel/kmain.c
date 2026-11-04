@@ -172,7 +172,7 @@ void inittask_c(void)
 /* ============================================================
  * Wersja, flagi, zadania
  * ============================================================ */
-/* ordinal 3: Windows 3.10, DOS 6.22 */
+/* ordinal 3: wersja 3.10, DOS 6.22 */
 DWORD API GetVersion(void)      { return MAKELONG(0x0A03, 0x0616); }
 /* ordinal 132: PMODE | CPU386 | STANDARD | 80x87 (= __WINFLAGS) */
 DWORD API GetWinFlags(void)     { return 0x0415; }

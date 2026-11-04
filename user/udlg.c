@@ -110,7 +110,7 @@ HWND API CreateDialogIndirectParam(WORD hinst, LPVOID tmpl, HWND owner, WNDPROC 
         if (r.left < 0) { r.left = 0; r.right = w; }
         if (r.top < 0) { r.top = 0; r.bottom = hh; }
     }
-    if (style & 0x0800) {                                /* DS_CENTER (3.1+) */
+    if (style & 0x0800) {                                /* DS_CENTER */
         int w = r.right - r.left, hh = r.bottom - r.top;
         r.left = (SCR_W - w) / 2; r.top = (SCR_H - hh) / 2; r.right = r.left + w; r.bottom = r.top + hh;
     }

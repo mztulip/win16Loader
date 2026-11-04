@@ -1,9 +1,9 @@
-/* uicon.c - USER: okna zminimalizowane (ikony), zachowanie jak w Windows 3.1:
+/* uicon.c - USER: okna zminimalizowane (ikony):
  * ikona 32x32 w wolnym miejscu na dole obszaru klienta rodzica (rzedy od lewej, od dolu,
  * odstepy SM_CXICONSPACING/SM_CYICONSPACING), ArrangeIconicWindows, osobne okno tytulu
  * ikony (klasa #32772), przeciaganie ikony, klik = menu systemowe, dwuklik = przywroc.
  * Malowanie ikony: WM_PAINTICON/WM_ICONERASEBKGND (upaint.c). Wyglad tytulu: kolory paska
- * tytulu (wlasny styl), font MS Sans Serif 8 jak w Windows 3.1: aplikacje projektuja pulpit
+ * tytulu (wlasny styl), font MS Sans Serif 8: aplikacje projektuja pulpit
  * pod te szerokosci ("My Computer" w Fixedsys nie miescilo sie w odstepie ikon). */
 #include "user.h"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""make_ico.py - generuje prosta ikone 32x32, 16 kolorow (.ICO, format Windows 3.x).
+"""make_ico.py - generuje prosta ikone 32x32, 16 kolorow (.ICO).
 
 Uzycie: tools/make_ico.py plik.ico [kolor_tla_indeks]
 Wzor: ramka okna z paskiem tytulu i kolorowymi kwadratami (paleta VGA).

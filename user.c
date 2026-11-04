@@ -5,7 +5,7 @@
  *   - TranslateMessage (USER.113): generuje WM_CHAR z WM_KEYDOWN dla klawiszy ASCII
  *   - g_active_hwnd: globalna zmienna uzywana przez IRQ1 handler w pm_call.asm
  *
- * Eksporty pod prawdziwymi numerami ordynalow Windows 3.1.
+ * Eksporty pod prawdziwymi numerami ordynalow Win16.
  * Funkcje wymagane przez SKI.EXE (i win16app.c):
  *
  *   1   = MessageBox         (stub: zwroc IDOK)
@@ -1034,7 +1034,7 @@ static unsigned draw_and_run_popup(int mi, HWND target_hwnd)
     for (i = 0; i < n; i++)
         draw_popup_item(mi, i, px, py, pw, item_h, 0);
 
-    /* Petla menu - tryb "click to open, click to close" (Windows 3.1):
+    /* Petla menu - tryb "click to open, click to close":
      * Pierwsze WM_LBUTTONUP (puszczenie przycisku ktory otwarl menu) jest
      * ignorowane. Potem: DOWN na itemie = pressed, UP na tym samym = wykonaj.
      *   - DOWN/UP poza popupem -> zamknij
@@ -1540,7 +1540,7 @@ BOOL __far __pascal PeekMessage(MSG __far *pmsg, HWND hwnd,
     unsigned char vk;
     (void)hwnd; (void)msgMin; (void)msgMax;
 
-    /* PostQuitMessage wywolane: zwroc WM_QUIT (jak Win3.1 - PeekMessage zwraca TRUE).
+    /* PostQuitMessage wywolane: zwroc WM_QUIT (PeekMessage zwraca TRUE).
      * PM_NOREMOVE zostawia WM_QUIT dla nastepnego GetMessage (SKI.EXE tak robi). */
     if (g_quit_posted) {
         serial_puts("USER: QUIT (PeekMessage)\n");
@@ -2110,7 +2110,7 @@ BOOL __far __pascal InvalidateRect(HWND hwnd, const RECT __far *lpRect, BOOL bEr
     (void)lpRect; (void)bErase;
     push_msg(hwnd, WM_PAINT, 0, 0L);
     /* Jesli lpRect==NULL (cale okno): przekaz WM_PAINT do wszystkich dzieci.
-     * Windows 3.1: InvalidateRect rodzica invaliduje zachodzace okna potomne. */
+     * InvalidateRect rodzica invaliduje zachodzace okna potomne. */
     if (!lpRect) {
         for (i = 0; i < MAX_WINDOWS; i++) {
             if (g_windows[i].used && g_windows[i].parent == hwnd)

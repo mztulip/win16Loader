@@ -171,7 +171,7 @@ static void tests(HINSTANCE hi)
     }
     DestroyWindow(c);
     pump();
-    /* Tytul ikony: MS Sans Serif jak w Windows 3.1; szeroki font ucinal "My Computer" (Calmira) */
+    /* Tytul ikony: MS Sans Serif; szeroki font ucinal "My Computer" (Calmira) */
     c = CreateWindow("NoIcon", "My Computer", WS_OVERLAPPEDWINDOW, 10, 10, 200, 100, NULL, NULL, hi, NULL);
     ShowWindow(c, SW_SHOWMINNOACTIVE);
     pump();

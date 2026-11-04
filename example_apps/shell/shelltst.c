@@ -1,4 +1,4 @@
-/* shelltst.c - test SHELL.DLL: rejestr 3.1 (RegCreateKey/SetValue/QueryValue/
+/* shelltst.c - test SHELL.DLL: rejestr (RegCreateKey/SetValue/QueryValue/
  * EnumKey/DeleteKey), ExtractIcon z wlasnego pliku i z .ICO, Drag*.
  * Okno pokazuje wyciagniete ikony (DrawIcon). Alt+F4 zamyka.
  */
