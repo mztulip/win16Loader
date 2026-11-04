@@ -236,12 +236,22 @@ void API DragFinish(HANDLE d)                         { (void)d; }
 BOOL API DragQueryPoint(HANDLE d, LPVOID p)           { (void)d; if (p) w_memset(p, 0, 4); return FALSE; }
 
 /* ---- ShellExecute / FindExecutable ---- */
+/* INT 21h z PM: dyspozytor KERNEL (DS:SI, DS:DX w DGROUP tej biblioteki) */
+BYTE dos_getdrive(void);
+#pragma aux dos_getdrive = "mov ah, 19h" "int 21h" value [al] modify [ax];
+void dos_setdrive(BYTE d);
+#pragma aux dos_setdrive = "mov ah, 0Eh" "int 21h" parm [dl] modify [ax dx];
+void dos_getdir(char *b);
+#pragma aux dos_getdir = "mov ah, 47h" "xor dl, dl" "int 21h" parm [si] modify [ax dx];
+void dos_chdir(char *p);
+#pragma aux dos_chdir = "mov ah, 3Bh" "int 21h" parm [dx] modify [ax];
+
 HINSTANCE API ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR par, LPCSTR dir, int show)
 {
     static char cmd[200];
     int n = 0, i;
     WORD r;
-    (void)h; (void)dir;
+    (void)h;
     if (op && HIWORD(op) && lstrcmpi(op, "open")) return 31;   /* SE_ERR_NOASSOC: inne operacje */
     if (!file || !HIWORD(file)) return 2;
     for (i = 0; file[i] && n < 190; i++) cmd[n++] = file[i];
@@ -250,6 +260,21 @@ HINSTANCE API ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR par, LPCSTR di
         for (i = 0; par[i] && n < 198; i++) cmd[n++] = par[i];
     }
     cmd[n] = 0;
+    /* Katalog startowy: nowe zadanie dziedziczy biezacy, wiec na czas startu ustaw go u siebie */
+    if (dir && HIWORD(dir) && dir[0]) {
+        static char old[70], nd[70];
+        BYTE odrv = dos_getdrive();
+        old[0] = (char)('A' + odrv); old[1] = ':'; old[2] = '\\';
+        dos_getdir(old + 3);
+        for (i = 0; dir[i] && i < 69; i++) nd[i] = dir[i];
+        nd[i] = 0;
+        if (nd[1] == ':') dos_setdrive((BYTE)((nd[0] | 0x20) - 'a'));
+        dos_chdir(nd);
+        r = WinExec((LPCSTR)cmd, show);
+        dos_setdrive(odrv);
+        dos_chdir(old);
+        return r;
+    }
     r = WinExec((LPCSTR)cmd, show);
     return r;
 }

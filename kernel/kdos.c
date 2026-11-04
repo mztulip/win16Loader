@@ -29,9 +29,48 @@ void kdos_init(void)
 RMREGS __far *rmregs(void) { return (RMREGS __far *)MK_FP(SEL_RMBUF, 0); }
 
 /* Wywolanie przerwania z RMREGS w RMBUF. Zwraca 1 gdy CF. */
+/* Katalog biezacy i dysk DOS sa jeden na system, a kazde zadanie ma swoje. Przelaczenie przy kazdym
+ * Yield to dwa przejscia do trybu rzeczywistego, wiec dopiero przed wywolaniem DOS przez zadanie
+ * inne niz to, ktorego stan jest ustawiony (task_dos_sync w ktask.c). */
+#define RM_DIR_BUF 0xF000                         /* obszar RMBUF wolny od danych wywolan */
+
+static WORD rm_dir_call(RMREGS __far *r, WORD ax, WORD dx, WORD si)
+{
+    kmemset(r, 0, sizeof(RMREGS));
+    r->ax = ax; r->dx = dx; r->si = si;
+    rm_call(0x21);
+    return r->ax;
+}
+
+void dos_dir_save(BYTE *drive, LPSTR dir)
+{
+    static RMREGS keep;
+    RMREGS __far *r = rmregs();
+    kmemcpy((LPVOID)&keep, r, sizeof(RMREGS));
+    *drive = (BYTE)rm_dir_call(r, 0x1900, 0, 0);
+    rm_dir_call(r, 0x4700, 0, RM_DIR_BUF);
+    if (r->flags & CF_FLAG) dir[0] = 0;
+    else kstrncpy(dir, (LPCSTR)RBUF(RM_DIR_BUF), 64);
+    kmemcpy(r, (LPVOID)&keep, sizeof(RMREGS));
+}
+
+void dos_dir_restore(BYTE drive, LPCSTR dir)
+{
+    static RMREGS keep;
+    RMREGS __far *r = rmregs();
+    LPSTR b = (LPSTR)RBUF(RM_DIR_BUF);
+    kmemcpy((LPVOID)&keep, r, sizeof(RMREGS));
+    rm_dir_call(r, 0x0E00, drive, 0);
+    b[0] = '\\';
+    kstrncpy(b + 1, dir, 64);
+    rm_dir_call(r, 0x3B00, RM_DIR_BUF, 0);
+    kmemcpy(r, (LPVOID)&keep, sizeof(RMREGS));
+}
+
 int rm_int21(void)
 {
     kdos_init();
+    task_dos_sync();
     rm_call(0x21);
     return (rmregs()->flags & CF_FLAG) ? 1 : 0;
 }
@@ -40,6 +79,7 @@ int rm_int(BYTE intno, RMREGS __far *r)
 {
     kdos_init();
     if (r != rmregs()) kmemcpy(rmregs(), r, sizeof(RMREGS));
+    task_dos_sync();
     rm_call(intno);
     if (r != rmregs()) kmemcpy(r, rmregs(), sizeof(RMREGS));
     return (r->flags & CF_FLAG) ? 1 : 0;
@@ -466,13 +506,16 @@ static void dos3call_do(void)
         else g_d3.ax = (WORD)n;
         break;
     }
-    case 0x47:                                   /* getcwd -> DS:SI (64 B) */
+    case 0x47: {                                 /* getcwd -> DS:SI (64 B) */
+        WORD si = g_d3.si;                       /* d3_from_rm nadpisze: to adres w RMBUF */
         r = rm_from_d3();
         r->si = RMBUF_DATA;
         rm_int21();
         d3_from_rm(r);
-        if (!(g_d3.flags & CF_FLAG)) kstrncpy(pm_ptr(g_d3.ds, g_d3.si), (LPCSTR)RBUF(RMBUF_DATA), 64);
+        g_d3.si = si;
+        if (!(g_d3.flags & CF_FLAG)) kstrncpy(pm_ptr(g_d3.ds, si), (LPCSTR)RBUF(RMBUF_DATA), 64);
         break;
+    }
     case 0x1A:                                   /* set DTA */
         g_pm_dta = MK_FP(g_d3.ds, g_d3.dx);
         break;

@@ -14,12 +14,15 @@ typedef struct {
     WORD  stack, initsp, heap, heapstart;
     WORD  entry_cs, entry_ip;
     BOOL  dying;                     /* konczone po wyjatku */
+    BYTE  drive;                     /* dysk i katalog biezacy, gdy DOS ma ustawiony stan innego zadania */
+    char  dir[66];
     WORD  depth;                     /* stan thunka INT 3Fh */
     WORD  i3f[I3F_MAX * 3];
 } TASK;
 
 static TASK g_t[MAX_TASKS];
 static int  g_cur, g_n;
+static int  g_dos_owner = -1;        /* zadanie, ktorego katalog jest teraz ustawiony w DOS */
 
 extern void fault_entry(void);
 
@@ -103,6 +106,18 @@ WORD task_owner(void)
     return g_t[g_cur].h;
 }
 
+/* Przed kazdym wywolaniem DOS (kdos.c). Pierwsze wywolanie: DOS ma juz stan startowego zadania. */
+void task_dos_sync(void)
+{
+    static BOOL busy;
+    if (!g_n || busy || g_dos_owner == g_cur) return;
+    busy = TRUE;
+    if (g_dos_owner >= 0) dos_dir_save(&g_t[g_dos_owner].drive, (LPSTR)g_t[g_dos_owner].dir);
+    if (g_dos_owner != -1) dos_dir_restore(g_t[g_cur].drive, (LPCSTR)g_t[g_cur].dir);
+    g_dos_owner = g_cur;
+    busy = FALSE;
+}
+
 static void switch_to(int i)
 {
     TASK *o = &g_t[g_cur], *n = &g_t[i];
@@ -155,6 +170,9 @@ void API DirectedYield(HTASK h)
 HTASK API GetCurrentTask(void)  { task_init(); return g_t[g_cur].h; }
 /* ordinal 37 */
 WORD  API GetCurrentPDB(void)   { task_init(); return g_t[g_cur].psp; }
+/* ordinal 130: powiadomienia o zmianach plikow. Nic ich jeszcze nie wysyla, ale wywolanie sie udaje. */
+FARPROC API FileCDR(FARPROC proc)  { (void)proc; return (FARPROC)MK_FP(0, 1); }
+
 /* ordinal 152 */
 int   API GetNumTasks(void)     { task_init(); return g_n; }
 
@@ -190,6 +208,7 @@ void task_exit(WORD ax)
     kdos_close_task(t->h);
     kmem_free_task(t->h);
     set_running(t->hinst, FALSE);
+    if (g_dos_owner == g_cur) g_dos_owner = -2;          /* stan DOS niczyj: nie zapisuj */
     if (t->psp != SEL_PSP) GlobalFree(t->psp);
     GlobalFree(t->h);
     t->used = FALSE;
@@ -340,6 +359,8 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     t->heap = res->heap;
     t->heapstart = res->heapstart;
     t->show = show;
+    task_dos_sync();                                     /* nowe zadanie dziedziczy katalog */
+    dos_dir_save(&t->drive, (LPSTR)t->dir);
     if (!run_libentries(res)) return 20;                 /* jak LoadLibrary: blad DLL */
     t->h = tdb_new(t->hinst);
     t->psp = (WORD)GlobalAlloc(0x40, 256);

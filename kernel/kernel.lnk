@@ -125,3 +125,4 @@ export HMEMCPY.348
 export _HREAD.349
 export _HWRITE.350
 export LSTRCPYN.353
+export FILECDR.130

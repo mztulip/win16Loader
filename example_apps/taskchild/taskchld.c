@@ -3,6 +3,7 @@
  * WM_USER+2 = koniec programu. */
 #include <windows.h>
 #include "testlog.h"
+#include <direct.h>
 
 static int g_timer;
 
@@ -47,6 +48,19 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         for (k = 0; k < 8; k++) if (GlobalAlloc(GMEM_FIXED, 32768L)) mem++;
         wsprintf(d, "pliki=%d pedzle=%d bloki=%d", files, brushes, mem);
         t_log("zasoby nieposprzatane", files == 10 && brushes == 200 && mem == 8, d);
+        return 0;
+    }
+    if (cmd[0] == 'w') {                              /* "wd KATALOG": katalog biezacy zadania */
+        char want[80], cur[80];
+        int k = 0, n;
+        for (cmd += 3; *cmd && *cmd != ' ' && *cmd != 13 && k < 79; cmd++) want[k++] = *cmd;
+        want[k] = 0;
+        getcwd(cur, sizeof(cur));
+        CHECK_STR(cur, want, "katalog dziedziczony przy uruchomieniu");
+        chdir("A:\\");
+        for (n = 0; n < 10; n++) Yield();             /* rodzic zmienia swoj katalog w tym czasie */
+        getcwd(cur, sizeof(cur));
+        CHECK_STR(cur, "A:\\", "zmiana katalogu innego zadania mnie nie dotyczy");
         return 0;
     }
     if (cmd[0] == 'c') {                              /* "crash": wyjatek w programie */

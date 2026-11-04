@@ -3,6 +3,8 @@
  * jedno zadanie, koniec dziecka sprzata jego okna i nie konczy rodzica. */
 #include <windows.h>
 #include "testlog.h"
+#include <direct.h>
+#include <shellapi.h>
 
 static int g_active, g_paint, g_moves;
 static HTASK g_me;
@@ -120,6 +122,29 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     t0 = GetTickCount();
     while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
     CHECK_INT(GetNumTasks(), 1, "drugie dziecko zakonczone");
+    /* katalog biezacy: osobny dla kazdego zadania, nowe zadanie dziedziczy */
+    {
+        char cur[80];
+        chdir("A:\\FREEDOS");
+        h = WinExec("A:\\TASKCHLD.EXE wd A:\\FREEDOS", SW_SHOWNORMAL);
+        CHECK(h > 32, "uruchomienie: test katalogu");
+        getcwd(cur, sizeof(cur));
+        CHECK_STR(cur, "A:\\FREEDOS", "chdir dziecka nie zmienia katalogu rodzica");
+        chdir("A:\\FREEDOS\\BIN");
+        t0 = GetTickCount();
+        while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
+        getcwd(cur, sizeof(cur));
+        CHECK_STR(cur, "A:\\FREEDOS\\BIN", "katalog rodzica po koncu dziecka");
+        /* ShellExecute: katalog startowy nowego programu, bez zmiany u wolajacego */
+        h = (UINT)ShellExecute(0, "open", "A:\\TASKCHLD.EXE", "wd A:\\FREEDOS", "A:\\FREEDOS", SW_SHOWNORMAL);
+        CHECK(h > 32, "ShellExecute: katalog startowy");
+        getcwd(cur, sizeof(cur));
+        CHECK_STR(cur, "A:\\FREEDOS\\BIN", "ShellExecute nie zmienia katalogu wolajacego");
+        t0 = GetTickCount();
+        while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
+        chdir("A:\\");
+    }
+
     /* wielokrotne uruchomienia: pamiec i uchwyty wracaja, adresy programu te same */
     {
         DWORD free0 = 0;
