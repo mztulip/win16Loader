@@ -1205,6 +1205,20 @@ rmi_pm_entry:
     mov  ss, [rmi_pm_ss]
     mov  sp, [rmi_pm_sp]
     call kbc_drain
+    ; Rejestr moze trzymac selektor zwolnionego bloku: moduly Watcom -3 uzywaja FS/GS do far
+    ; pointerow (Calmira: otwarcie katalogu z DESCRIPT.ION, FS=zwolniony selektor).
+    ; Procesor nie sprawdza go, dopoki nie zostanie zaladowany ponownie, a pop dalby tu #GP:
+    ; nieaktualny selektor zastap zerem (GS, FS, ES, DS nad PUSHA).
+    mov  bp, sp
+    mov  cx, 4
+    add  bp, 16
+.check_seg:
+    verr word [ss:bp]
+    jz   .seg_ok
+    mov  word [ss:bp], 0
+.seg_ok:
+    add  bp, 2
+    loop .check_seg
     popa
     pop  gs
     pop  fs
