@@ -11,6 +11,7 @@ Uzycie:
     w<sek>        czekaj (np. w2.5)
     d<sek>        czekaj na linie 'TEST ... DONE' w logu COM1, najdluzej <sek>
     p<nazwa>      screendump -> OUT/<nazwa>.png
+    M<polecenie>  polecenie monitora QEMU (np. 'Meject -f floppy0')
     k<klawisz>    sendkey (np. kdown, kalt-f4, kret)
     m<dx>,<dy>    przesun mysz wzglednie
     a<x>,<y>      ustaw mysz bezwzglednie (najpierw do rogu 0,0)
@@ -91,6 +92,8 @@ def main():
                 mon(sock, f'screendump {ppm}')
                 time.sleep(0.5)
                 subprocess.run(['magick', ppm, os.path.join(a.out, v + '.png')])
+            elif k == 'M':
+                mon(sock, v)
             elif k == 'k':
                 mon(sock, f'sendkey {v}')
             elif k == 'm':

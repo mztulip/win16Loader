@@ -37,6 +37,8 @@ APPS = {
                   ['w4', 'a110,108', 'w0.5'] + ['m0,6', 'w0.1'] * 9 + ['w0.3'] + ['m0,-6', 'w0.1'] * 6
                   + ['w0.3', 'kesc', 'w1', 'a110,108', 'w0.5', 'm110,0', 'w0.5', 'm120,0', 'w0.5', 'm-230,38', 'w0.5']
                   + ['kesc', 'd5', 'pshot', 'kalt-f4', 'w1']),
+    # dysk B: przy jednej stacji i wyjeta dyskietka: DOS nie moze prosic o klawisz (konczy sie DONE)
+    'dosprompt': ('example_apps/dosprompt', 'DOSPROMP.EXE', ['Meject -f floppy0', 'w0.5', 'kshift', 'd40', 'pshot']),
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),

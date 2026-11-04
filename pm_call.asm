@@ -1102,6 +1102,20 @@ rmi_rm_entry:
     mov  ds, ax
     mov  ss, ax
     lidt [rm_idtr]
+    xor  ax, ax                 ; haki na czas wywolania (zob. rmi_hook2f)
+    mov  es, ax
+    mov  ax, [es:0x2F*4]
+    mov  [rmi_old2f], ax
+    mov  ax, [es:0x2F*4+2]
+    mov  [rmi_old2f+2], ax
+    mov  ax, [es:0x24*4]
+    mov  [rmi_old24], ax
+    mov  ax, [es:0x24*4+2]
+    mov  [rmi_old24+2], ax
+    mov  word [es:0x2F*4], rmi_hook2f
+    mov  [es:0x2F*4+2], cs
+    mov  word [es:0x24*4], rmi_hook24
+    mov  [es:0x24*4+2], cs
     mov  es, [rmi_buf_seg]
     mov  ax, [es:14]
     test ax, ax
@@ -1150,6 +1164,17 @@ rmi_int_op:
     pop  ax
     mov  [es:18], ax
 
+    xor  ax, ax
+    mov  es, ax
+    mov  ax, [rmi_old2f]
+    mov  [es:0x2F*4], ax
+    mov  ax, [rmi_old2f+2]
+    mov  [es:0x2F*4+2], ax
+    mov  ax, [rmi_old24]
+    mov  [es:0x24*4], ax
+    mov  ax, [rmi_old24+2]
+    mov  [es:0x24*4+2], ax
+
     lidt [idtr]
     mov  eax, cr0
     or   eax, 1
@@ -1188,6 +1213,24 @@ rmi_pm_entry:
     popf
     retf
 
+; Haki trybu rzeczywistego na czas wywolania DOS: klawiatura jest wtedy zamaskowana, wiec
+; kazda prosba DOS-a o klawisz wieszalaby system. Windows hakuje te same przerwania.
+; INT 2Fh AX=4A00h: dysk B: na jednej stacji; CX=FFFFh = bez komunikatu o zamianie dyskietki.
+rmi_hook2f:
+    cmp  ax, 0x4A00
+    jne  .next
+    mov  cx, 0xFFFF
+    iret
+.next:
+    jmp  far [cs:rmi_old2f]
+
+; INT 24h: blad krytyczny (np. brak dyskietki); AL=3 = Fail, zamiast "Abort, Retry, Fail?"
+rmi_hook24:
+    mov  al, 3
+    iret
+
+rmi_old2f       dw 0, 0
+rmi_old24       dw 0, 0
 rmi_rm_ptr      dw rmi_rm_entry, 0     ; CS = segment RM loadera (patch)
 rmi_buf_seg     dw 0
 rmi_tmp_ds      dw 0
