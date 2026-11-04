@@ -89,7 +89,7 @@ static void load_fon(LPCSTR mod)
 
 void font_init(void)
 {
-    static const char * const files[] = { "SSERIFE", "VGASYS", "VGAFIX", "COURE", "SMALLE",
+    static const char * const files[] = { "SSERIFE", "SSERIFB", "VGASYS", "VGAFIX", "COURE", "SMALLE",
                                           "SSERIFF", "SERIFE", "VGAOEM", 0 };
     int i;
     if (g_nfnt) return;
@@ -354,6 +354,7 @@ BOOL API GetTextExtentPoint(HDC hdc, LPCSTR s, int n, LPPOINT sz)
     return TRUE;
 }
 
+#pragma pack(push, 1)                  /* jak w Win16: tmOverhang zaraz za bajtami */
 typedef struct {
     int  tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading;
     int  tmAveCharWidth, tmMaxCharWidth, tmWeight;
@@ -361,6 +362,7 @@ typedef struct {
     BYTE tmDefaultChar, tmBreakChar, tmPitchAndFamily, tmCharSet;
     int  tmOverhang, tmDigitizedAspectX, tmDigitizedAspectY;
 } TEXTMETRIC;
+#pragma pack(pop)
 
 static void fill_tm(FONTSEL __far *fs, FONTOBJ __far *fo, TEXTMETRIC __far *tm)
 {

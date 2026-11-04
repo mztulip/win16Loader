@@ -49,12 +49,42 @@ static void font_tests(HWND hwnd, HINSTANCE hi)
     CHECK(LOWORD(ext) > 15 && LOWORD(ext) < 60, "GetTextExtent: rozsadna szerokosc");
     CHECK_INT(HIWORD(ext), tm.tmHeight, "GetTextExtent: wysokosc = tmHeight");
 
+    {   /* DrawText: GetTextMetrics pisal poza za mala lokalna strukture i niszczyl szerokosc */
+        RECT rc;
+        SetRect(&rc, 0, 0, 0, 0);
+        DrawText(dc, "Hello", -1, &rc, DT_CALCRECT | DT_SINGLELINE);
+        CHECK_INT(rc.right, LOWORD(ext), "DrawText DT_CALCRECT: szerokosc");
+        CHECK_INT(rc.bottom, tm.tmHeight, "DrawText DT_CALCRECT: wysokosc");
+    }
+
     fb = make_font(-11, FW_BOLD, "MS Sans Serif");
     SelectObject(dc, fb);
     GetTextMetrics(dc, &tmb);
     extb = GetTextExtent(dc, "Hello", 5);
     CHECK(tmb.tmWeight >= FW_BOLD, "pogrubienie: tmWeight");
-    CHECK(LOWORD(extb) > LOWORD(ext), "pogrubienie: tekst szerszy");
+    /* MS Sans Serif ma prawdziwy font pogrubiony (fonts/sserifb.fon), bez syntezy */
+    CHECK_INT(tmb.tmOverhang, 0, "pogrubienie MS Sans Serif: prawdziwy font");
+    {
+        HDC d2 = GetDC(0);
+        HFONT o2 = SelectObject(d2, fb);
+        char face[32];
+        GetTextFace(d2, sizeof(face), face);
+        CHECK_STR(face, "MS Sans Serif", "pogrubienie MS Sans Serif: nazwa");
+        CHECK(LOWORD(GetTextExtent(d2, "Start", 5)) <= 22, "pogrubione Start miesci sie jak w Calmirze");
+        SelectObject(d2, o2);
+        {   /* font bez wersji pogrubionej: synteza jak dotad */
+            HFONT cr = make_font(0, FW_NORMAL, "Courier"), cb = make_font(0, FW_BOLD, "Courier");
+            int wr, wb;
+            o2 = SelectObject(d2, cr);
+            wr = LOWORD(GetTextExtent(d2, "Start", 5));
+            SelectObject(d2, cb);
+            wb = LOWORD(GetTextExtent(d2, "Start", 5));
+            CHECK(wb > wr, "pogrubienie syntetyczne: tekst szerszy");
+            SelectObject(d2, o2);
+            DeleteObject(cr); DeleteObject(cb);
+        }
+        ReleaseDC(0, d2);
+    }
     SelectObject(dc, old);
     DeleteObject(fb);
     DeleteObject(f);

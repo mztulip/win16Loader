@@ -139,6 +139,7 @@ pulpit ciemny teal (0x1C5058), ramka 1 px czarna + 3 px jasny teal (0x88C8D0), p
 z ramka 0x004048, zaznaczenie 0x0A6E7E. Paleta kolorow systemowych: `g_col` w `user/umisc.c`
 i `[colors]` w `windir/WIN.INI`. Nie zmieniac na kolory/ksztalty Windows bez prosby uzytkownika.
 Tytuly ikon: font MS Sans Serif 8, nie Fixedsys (aplikacje projektuja pulpit pod te szerokosci).
+Pogrubiony MS Sans Serif to prawdziwy font `fonts/sserifb.fon` (generator `tools/ttf2fon.py`), nie synteza.
 
 ### Pulapki wydajnosci (`docs/wydajnosc_gdi.md`) - nie powtarzac
 

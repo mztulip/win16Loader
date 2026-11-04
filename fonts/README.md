@@ -12,7 +12,32 @@ our GDI. The loader preloads every `*.FON` from the system directory (`A:\`),
 | `coure.fon`   | Courier | `courier.sfd` |
 | `smalle.fon`  | Small Fonts | `small_fonts.sfd` |
 
-## Origin
+`sserifb.fon` is not from Wine, see below.
+
+## Bold MS Sans Serif (`sserifb.fon`)
+
+Wine has no bold bitmap MS Sans Serif, so GDI would embolden the regular face by adding
+1 px per letter. That does not fit layouts sized for narrow text: "Start" in the Calmira
+button needs 27 px with 22 px available. `sserifb.fon` is a real bold face, exactly 22 px for
+"Start", which `font_match` selects for bold requests.
+
+Rendered from **PT Sans Narrow Bold**, copyright (c) 2010 ParaType Ltd., under the SIL Open
+Font License 1.1: [`OFL-PTSansNarrow.txt`](OFL-PTSansNarrow.txt).
+
+- Font page: <https://fonts.google.com/specimen/PT+Sans+Narrow>
+- Source and license: <https://github.com/google/fonts/tree/main/ofl/ptsansnarrow>
+- File used: <https://raw.githubusercontent.com/google/fonts/main/ofl/ptsansnarrow/PT_Sans-Narrow-Web-Bold.ttf>
+
+The license covers this file only. It is a different design carrying the face name
+"MS Sans Serif" so applications get it by that name. Regenerate with:
+
+```bash
+tools/ttf2fon.py fonts/sserife.fon PT_Sans-Narrow-Web-Bold.ttf fonts/sserifb.fon \
+    --face "MS Sans Serif" --module "MS SansSerifB" \
+    --size 12:13:11:2:8 --size 14:16:13:3:10 --size 17:20:16:4:12
+```
+
+## Origin of the Wine fonts
 
 Copied unmodified from the Wine 11.20 binary package (Arch Linux `wine 11.20-1`,
 `/usr/share/wine/fonts/`). In Wine they are generated from the FontForge sources

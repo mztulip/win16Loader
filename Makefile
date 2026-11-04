@@ -25,7 +25,7 @@ endif
 # Fonty bitmapowe z Wine (LGPL-2.1+, zrodlo i licencja: fonts/README.md);
 # GDI laduje je jako moduly .FON z katalogu systemowego
 WINE_FONTS = fonts
-FONTS = sserife vgasys vgafix coure smalle
+FONTS = sserife sserifb vgasys vgafix coure smalle
 
 all: kernel.exe $(USER_BIN) $(GDI_BIN) loader.exe win16_example_app/Win1App.exe boot.img
 
