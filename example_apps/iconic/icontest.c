@@ -146,6 +146,43 @@ static void tests(HINSTANCE hi)
     GetWindowRect(c, &r);
     CHECK(!IsIconic(c) && rw(&r) == 200 && rh(&r) == 120, "WS_MINIMIZE: przywrocone do rozmiaru z CreateWindow");
     DestroyWindow(c);
+    /* SetWindowPlacement na oknie, ktore juz jest ikona: musi je przesunac, jak robi to Calmira.
+     * 1: ikona utworzona z WS_MINIMIZE dostaje pozycje z INI */
+    c = CreateWindow("NoIcon", "Pozycja", WS_OVERLAPPEDWINDOW | WS_MINIMIZE, 10, 10, 200, 100, NULL, NULL, hi, NULL);
+    wp.length = sizeof(wp);
+    GetWindowPlacement(c, &wp);
+    wp.ptMinPosition.x = 23; wp.ptMinPosition.y = 2;
+    wp.flags |= WPF_SETMINPOSITION;
+    wp.showCmd = SW_SHOWMINNOACTIVE;
+    SetWindowPlacement(c, &wp);
+    pump();
+    GetWindowRect(c, &r);
+    CHECK(r.left == 23 && r.top == 2, "ikona z WS_MINIMIZE: SetWindowPlacement przesuwa");
+    /* 2: ukrycie, nowa pozycja, pokazanie (Line up icons) */
+    wp.length = sizeof(wp);
+    GetWindowPlacement(c, &wp);
+    wp.ptMinPosition.x = 98; wp.ptMinPosition.y = 77;
+    wp.flags |= WPF_SETMINPOSITION;
+    wp.showCmd = SW_SHOWMINNOACTIVE;
+    ShowWindow(c, SW_HIDE);
+    SetWindowPlacement(c, &wp);
+    pump();
+    GetWindowRect(c, &r);
+    CHECK(r.left == 98 && r.top == 77, "ikona ukryta: SetWindowPlacement przesuwa");
+    CHECK(IsWindowVisible(c) && IsIconic(c), "ikona znow widoczna po SetWindowPlacement");
+    wp.length = sizeof(wp);
+    GetWindowPlacement(c, &wp);
+    CHECK(wp.ptMinPosition.x == 98 && wp.ptMinPosition.y == 77, "GetWindowPlacement: nowa pozycja ikony");
+    /* 3: bez WPF_SETMINPOSITION ikona zostaje */
+    wp.flags &= ~WPF_SETMINPOSITION;
+    wp.ptMinPosition.x = 200; wp.ptMinPosition.y = 200;
+    wp.showCmd = SW_SHOWMINNOACTIVE;
+    SetWindowPlacement(c, &wp);
+    GetWindowRect(c, &r);
+    CHECK(r.left == 98 && r.top == 77, "bez WPF_SETMINPOSITION ikona zostaje");
+    DestroyWindow(c);
+    pump();
+
     /* LoadIcon z nazwa, ktorej nie ma w module: pierwsza ikona modulu (SkiFree: "iconSki") */
     CHECK(LoadIcon(hi, "BrakTakiejIkony") != NULL, "LoadIcon: brak nazwy -> pierwsza ikona modulu");
     /* klasa bez ikony, WM_PAINT z DefWindowProc: domyslna ikona na tle pulpitu, nie bialy kwadrat */

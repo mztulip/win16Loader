@@ -1235,7 +1235,17 @@ BOOL API SetWindowPlacement(HWND h, WINDOWPLACEMENT __far *p)
 {
     WND __far *w = WP(h);
     if (!w) return FALSE;
-    if (p->flags & 1) { w->iconpos = p->ptMin; w->flags |= WF_ICONPOS; }   /* WPF_SETMINPOSITION */
+    if (p->flags & 1) {                                            /* WPF_SETMINPOSITION */
+        w->iconpos = p->ptMin;
+        if (p->ptMin.x == -1 && p->ptMin.y == -1) w->flags &= ~WF_ICONPOS;   /* system wybierze miejsce */
+        else w->flags |= WF_ICONPOS;
+        if (w->flags & WF_MINIMIZED) {                             /* juz ikona: ShowWindow jej nie przesunie */
+            RECT r;
+            icon_place(h, (LPRECT)&r);
+            SetWindowPos(h, 0, r.left, r.top, 0, 0, 0x0001 | 0x0004 | 0x0010);   /* NOSIZE NOZORDER NOACTIVATE */
+            if (!(w = WP(h))) return FALSE;
+        }
+    }
     if (w->flags & (WF_MINIMIZED | WF_MAXIMIZED)) w->normal = p->rcNormal;
     else MoveWindow(h, p->rcNormal.left, p->rcNormal.top, p->rcNormal.right - p->rcNormal.left,
                     p->rcNormal.bottom - p->rcNormal.top, TRUE);
