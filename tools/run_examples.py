@@ -18,6 +18,8 @@ EXTRA = {'shell': [('example_apps/app.ico', 'SHELLTST.ICO')],
          'tasks': [('example_apps/taskchild/TASKCHLD.EXE', 'TASKCHLD.EXE')],
          'libdemo': [('example_apps/libdemo/' + f, 'LIBDEMO/' + f)
                      for f in ('LIBCHLD.EXE', 'DEMODLL.DLL', 'DEMODYN.DLL', 'DEMOBAD.DLL')]}
+# programy zamykane Alt+F4 jako jedyne zadanie: loader musi wrocic do DOS
+BACK_TO_DOS = ('shell', 'sysdll', 'fonts')
 APPS = {
     'controls': ('example_apps/controls', 'CTLTEST.EXE', ['w4', 'pshot', 'kesc', 'w1']),
     'odmenu':   ('example_apps/odmenu', 'ODMENU.EXE', ['w4', 'pshot', 'kesc', 'w1', 'kesc', 'w1']),
@@ -96,7 +98,11 @@ def main():
             print(f'  {n}: {t}')
         for e in exc:
             print(f'  {n}: {e}')
-        ok = not fails and (done or d is None) and not exc
+        loop = log.count('koniec zadania') > 50          # zapetlony koniec ostatniego zadania
+        nodos = n in BACK_TO_DOS and 'App zakonczyla' not in log
+        if loop: print(f'  {n}: koniec zadania powtarza sie {log.count("koniec zadania")} razy')
+        if nodos: print(f'  {n}: po zamknieciu brak powrotu do DOS (brak "App zakonczyla")')
+        ok = not fails and (done or d is None) and not exc and not loop and not nodos
         bad |= not ok
         summary.append(f'{n:10s} {"OK  " if ok else "BLAD"} {done[0] if done else ("dymny" if d is None else "brak DONE")}'
                        f'{"  " + exc[0] if exc else ""}')

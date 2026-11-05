@@ -309,7 +309,13 @@ void task_exit(WORD ax)
     TASK *t;
     int n;
     task_init();
-    if (g_n <= 1) { pm_int21(ax); return; }
+    if (g_n <= 1) {
+        /* Bez dyspozytora (KCB_INT_CB = 0) INT 21h idzie prosto do pm_call.asm i wraca do loadera
+         * w trybie rzeczywistym. Przez dyspozytor wrocilby tu (4Ch -> task_exit) bez konca. */
+        KCBW(KCB_INT_CB + 2) = 0;
+        pm_int21(ax);
+        return;
+    }
     t = &g_t[g_cur];
     g_locked = FALSE;
     {   /* biblioteki z LoadLibrary, ktorych zadanie nie zwolnilo */

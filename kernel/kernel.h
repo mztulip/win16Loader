@@ -69,6 +69,7 @@ typedef void (__far __pascal *FARPROC)(void);
 #define KCB_APP_HEAP      532
 #define KCB_APP_HEAPSTART 534
 #define KCB_I3F_STACK     590   /* offset int3f_stack w SEL_DATA16 */
+#define KCB_INT_CB        538   /* DWORD: dyspozytor przerwan programowych (int_entry) */
 #define KCB_I3F_DEPTH     592   /* offset int3f_depth w SEL_DATA16 */
 #define KCB_EXC_CB        544   /* DWORD: wejscie KERNEL dla wyjatku, gdy dziala wiele zadan */
 #define KCB_EXC_INFO      548   /* 3 WORD: numer wyjatku, IP, CS */
