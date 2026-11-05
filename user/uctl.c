@@ -560,7 +560,7 @@ static LRESULT __far __pascal EditProc(HWND h, WORD m, WORD wp, LONG lp)
     }
     case WM_ERASEBKGND: return 1;
     case WM_GETDLGCODE:
-        return 0x0001 | 0x0080 | ((STYLE(h) & ES_MULTILINE) ? 0x0004 : 0);   /* ARROWS|HASSETSEL|(ALLKEYS) */
+        return 0x0001 | 0x0008 | 0x0080 | ((STYLE(h) & ES_MULTILINE) ? 0x0004 : 0);   /* ARROWS|HASSETSEL|CHARS|(ALLKEYS) */
     case WM_SETTEXT: {
         LPCSTR s = (LPCSTR)lp;
         ustrncpy(etext(h), s && HIWORD(s) ? s : "", EBUF);
@@ -952,7 +952,7 @@ static LRESULT __far __pascal ListBoxProc(HWND h, WORD m, WORD wp, LONG lp)
         return 0;
     case WM_PAINT: { PS ps; HDC dc = BeginPaint(h, (LPVOID)&ps); lb_paint(h, dc); EndPaint(h, (LPVOID)&ps); return 0; }
     case WM_ERASEBKGND: return 1;
-    case WM_GETDLGCODE: return 0x0001 | 0x0004;           /* ARROWS | (CHARS) */
+    case WM_GETDLGCODE: return 0x0001 | 0x0080;           /* ARROWS | CHARS */
     case WM_SETFOCUS:   lb_redraw(h); lb_notify(h, 4); return 0;
     case WM_KILLFOCUS:  lb_redraw(h); lb_notify(h, 5); return 0;
     case WM_SIZE:       lb_sb(h); return 0;
@@ -1151,12 +1151,13 @@ static LRESULT __far __pascal ListBoxProc(HWND h, WORD m, WORD wp, LONG lp)
 
 /* ============================================================
  * COMBOBOX (extra: 0 font, 2 lista (popup LISTBOX), 4 edycja, 6 rozwinieta,
- *           8 wysokosc listy)
+ *           8 wysokosc listy, 10 byl juz fokus)
  * ============================================================ */
 #define C_LB    2
 #define C_ED    4
 #define C_DROP  6
 #define C_LH    8
+#define C_SEL   10
 
 static void cb_show(HWND h, BOOL show)
 {
@@ -1184,7 +1185,10 @@ static void cb_sync_text(HWND h)
     char t[MAX_TITLE];
     t[0] = 0;
     if (i >= 0 && (!(STYLE(h) & 0x30) || (STYLE(h) & 0x200))) SendMessage(XW(h, C_LB), WM_USER + 10, i, (LONG)(LPSTR)(char __far *)t);
-    if (XW(h, C_ED)) SetWindowText(XW(h, C_ED), (LPCSTR)(char __far *)t);
+    if (XW(h, C_ED)) {
+        SetWindowText(XW(h, C_ED), (LPCSTR)(char __far *)t);
+        if (GetFocus() == XW(h, C_ED)) SendMessage(XW(h, C_ED), WM_USER + 1, 0, MAKELONG(0, -1));
+    }
     else DefWindowProc(h, WM_SETTEXT, 0, (LONG)(LPCSTR)(char __far *)t);
     InvalidateRect(h, 0, FALSE);
 }
@@ -1287,9 +1291,16 @@ static LRESULT __far __pascal ComboProc(HWND h, WORD m, WORD wp, LONG lp)
         return 0;
     case WM_PAINT: { PS ps; HDC dc = BeginPaint(h, (LPVOID)&ps); cb_paint(h, dc); EndPaint(h, (LPVOID)&ps); return 0; }
     case WM_ERASEBKGND: return 1;
-    case WM_GETDLGCODE: return 0x0001 | 0x0004;
+    case WM_GETDLGCODE:                                  /* ARROWS | CHARS; Enter i Esc do listy tylko gdy rozwinieta */
+        return 0x0001 | 0x0080 | (XW(h, C_DROP) ? 0x0004 : 0);
     case WM_SETFOCUS:
-        if (XW(h, C_ED)) SetFocus(XW(h, C_ED));
+        if (XW(h, C_ED)) {
+            SetFocus(XW(h, C_ED));
+            if (!XW(h, C_SEL)) {                         /* pierwszy fokus zaznacza caly tekst */
+                XW(h, C_SEL) = 1;
+                SendMessage(XW(h, C_ED), WM_USER + 1, 0, MAKELONG(0, -1));
+            }
+        }
         InvalidateRect(h, 0, FALSE);
         send_msg(WP(h)->parent, WM_COMMAND, WP(h)->id, MAKELONG(h, 3));
         return 0;

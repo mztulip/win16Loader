@@ -1599,14 +1599,13 @@ Stan (galaz tasks):
   Kopie programu: hPrevInstance, GetInstanceData, GetModuleUsage, wspolne klasy, klasa przechodzi na
   nastepna kopie. FreeLibrary i WEP, ponowne ladowanie DLL, LoadModule z parametrami, TaskFirst/TaskNext,
   WaitEvent/PostEvent, LockCurrentTask, SetTaskQueue/GetTaskQueue, menu zwalniane z zadaniem.
+  Okno "Run Program" Calmiry: Enter w polu Open uruchamia program, po ponownym otwarciu tekst jest zaznaczony.
 - DO ZROBIENIA:
   * Kazda dzialajaca kopia programu ma wlasna kopie kodu i zasobow (zgodne z API, ale kosztuje XMS);
     wspoldzielenie kodu wymagaloby instancji DGROUP dla fixupow w kodzie.
   * DLL z importem statycznym zostaje do konca systemu; licznik nie spada przy koncu programu.
   * Ikony i kursory zakonczonego zadania nie sa zwalniane.
   * Jedno zadanie: wyjatek to dalej panika calego systemu (nie ma do czego wrocic).
-  * Okno "Run Program" Calmiry (zauwazone, nie badane): Enter w polu Open nie uruchamia programu, trzeba
-    kliknac OK; po ponownym otwarciu poprzedni tekst nie jest zaznaczony, a kursor stoi na poczatku.
   * Ikona bez zapisanej pozycji trafia na pierwsze wolne miejsce u dolu, a rozmieszczanie nie uwzglednia
     paska Calmiry (nie sprawdzone, czy ikona wchodzi pod pasek).
 

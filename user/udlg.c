@@ -26,6 +26,13 @@ static int g_bx = 6, g_by = 13;          /* jednostki bazowe dialogu (font syste
 
 LRESULT API DefDlgProc(HWND h, WORD m, WORD wp, LONG lp);
 
+/* Fokus od menedzera dialogu: pole edycji (DLGC_HASSETSEL) zaznacza caly tekst */
+static void dlg_focus(HWND c)
+{
+    if (send_msg(c, WM_GETDLGCODE, 0, 0) & 0x0008) send_msg(c, WM_USER + 1, 0, MAKELONG(0, -1));
+    SetFocus(c);
+}
+
 static void dlg_units(HWND h)
 {
     struct { int tmHeight, a, b, c, d, tmAveCharWidth; BYTE rest[20]; } tm;
@@ -146,7 +153,7 @@ HWND API CreateDialogIndirectParam(WORD hinst, LPVOID tmpl, HWND owner, WNDPROC 
     {
         HWND first = 0, c;
         for (c = WP(h)->child; c; c = WP(c)->next) if (WP(c)->style & WS_TABSTOP) first = c;   /* lista od konca */
-        if (send_msg(h, WM_INITDIALOG, first, param) && first) SetFocus(first);
+        if (send_msg(h, WM_INITDIALOG, first, param) && first) dlg_focus(first);
     }
     if (WP(h) && (style & WS_VISIBLE)) ShowWindow(h, 5);
     return h;
@@ -255,7 +262,7 @@ LRESULT API DefDlgProc(HWND h, WORD m, WORD wp, LONG lp)
         return 1;
     case WM_NEXTDLGCTL: {
         HWND n = lp ? (HWND)wp : GetNextDlgTabItem(h, GetFocus(), wp != 0);
-        if (n) SetFocus(n);
+        if (n) dlg_focus(n);
         return 0;
     }
     case WM_SETFOCUS: {
@@ -298,7 +305,7 @@ BOOL API IsDialogMessage(HWND dlg, LPMSG m)
         case 0x09:                                           /* TAB */
             if (!(code & 0x0002)) {                          /* DLGC_WANTTAB */
                 HWND n = GetNextDlgTabItem(dlg, m->hwnd, (GetKeyState(0x10) & 0x8000) != 0);
-                if (n) SetFocus(n);
+                if (n) dlg_focus(n);
                 return TRUE;
             }
             break;
@@ -316,7 +323,7 @@ BOOL API IsDialogMessage(HWND dlg, LPMSG m)
         case 0x25: case 0x26: case 0x27: case 0x28:         /* strzalki w grupie */
             if (!(code & 0x0001)) {                          /* DLGC_WANTARROWS */
                 HWND n = GetNextDlgTabItem(dlg, m->hwnd, m->wParam == 0x25 || m->wParam == 0x26);
-                if (n) SetFocus(n);
+                if (n) dlg_focus(n);
                 return TRUE;
             }
             break;

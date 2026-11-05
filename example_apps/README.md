@@ -20,6 +20,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `irqregs`  | IRQTEST.EXE  | Regresja: przerwania myszy/klawiatury (IRQ12/IRQ1) nie zmieniają rejestrów przerwanego kodu (dawniej AL=20h po EOI → losowe #GP przy ruchu myszą) |
 | `gdiperf`  | GDIPERF.EXE  | Poprawność szybkich ścieżek GDI (ROP-y, granice 64 KB, nakładanie, mono, clip, kursor, tekst, wzory) i regresja wydajności: progi czasu względem pętli kalibracyjnej, niezależne od hosta (`docs/wydajnosc_gdi.md`). Kończy się sama |
 | `dosirq`   | DOSIRQ.EXE   | Regresja: mysz i klawiatura działają w trakcie wywołań DOS (dawniej bajt czekający w 8042 po powrocie do PM zatrzymywał kursor na zawsze) |
+| `dlgkeys`  | DLGKEYS.EXE | Kody WM_GETDLGCODE kontrolek (VCL po nich decyduje, czy Enter idzie do przycisku domyślnego), Enter i Esc w IsDialogMessage, zaznaczanie całego tekstu przy Tab, WM_NEXTDLGCTL, pierwszym fokusie combo i CB_SETCURSEL. |
 | `firstsize`| FIRSTSIZ.EXE | Pierwszy WM_SIZE/WM_MOVE okna ukrytego, także przy pokazaniu przez SetWindowPos(SWP_SHOWWINDOW), tak jak VCL Delphi pokazuje kontrolki; dokładnie raz. |
 | `menuhover`| MENUHOV.EXE  | Regresja: przejazd myszą bez klikania z otwartego podmenu na pozycje rodzica, także z drugiego poziomu (`WM_MENUSELECT`) |
 | `dosprompt`| DOSPROMP.EXE | Regresja: przy jednej stacji dysk B: nie istnieje (`GetDriveType` = 0, ścieżka zwraca błąd), a brak dyskietki nie wiesza systemu (DOS prosił o klawisz przy zamaskowanej klawiaturze) |

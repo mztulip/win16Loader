@@ -165,6 +165,8 @@ Pogrubiony MS Sans Serif to prawdziwy font `fonts/sserifb.fon` (generator `tools
   ShowWindow i SetWindowPos(SWP_SHOWWINDOW): tak VCL pokazuje kontrolki, a strona TNotebook bez WM_SIZE
   rodzica zostaje 0x0 (pusty Task Manager Calmiry).
 - **SetWindowPos(WPF_SETMINPOSITION)** musi przesuwac tez okno, ktore juz jest ikona (pulpit Calmiry, Line up icons).
+- **WM_GETDLGCODE**: VCL oddaje Enter i Esc formularzowi tylko, gdy kontrolka nie ma DLGC_WANTALLKEYS (0x0004). Maja go tylko EDIT
+  wielowierszowy i combo z rozwinieta lista; DLGC_HASSETSEL to 0x0008, a 0x0080 to DLGC_WANTCHARS.
 - **CREATESTRUCT**: lpszName @22, lpszClass @26 (CS_NAME_OFF).
 
 ## Multitasking model

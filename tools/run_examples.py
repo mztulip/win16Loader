@@ -24,6 +24,7 @@ APPS = {
     'shell':    ('example_apps/shell', 'SHELLTST.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
     'sysdll':   ('example_apps/sysdll', 'SYSDLL.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
     'fonts':    ('example_apps/fonts', 'FONTTEST.EXE', ['w4', 'pshot', 'kalt-f4', 'w1']),
+    'dlgkeys':  ('example_apps/dlgkeys', 'DLGKEYS.EXE', ['d30', 'w1', 'pshot']),
     'firstsize': ('example_apps/firstsize', 'FIRSTSIZ.EXE', ['d30', 'w1', 'pshot']),
     # ruch mysza i klawisze w trakcie petli sprawdzajacej rejestry (IRQ12/IRQ1)
     'irqregs':  ('example_apps/irqregs', 'IRQTEST.EXE',
