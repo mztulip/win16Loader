@@ -205,6 +205,7 @@ void  cls_free_inst(WORD hinst, WORD next);
 #define WM_COMMNOTIFY     0x0044
 #define WM_WINDOWPOSCHANGING 0x0046
 #define WM_WINDOWPOSCHANGED  0x0047
+typedef struct { HWND hwnd, after; int x, y, cx, cy; WORD flags; } WINDOWPOS;
 #define WM_NCCREATE       0x0081
 #define WM_NCDESTROY      0x0082
 #define WM_NCCALCSIZE     0x0083

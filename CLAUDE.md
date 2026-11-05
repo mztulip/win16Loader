@@ -167,6 +167,10 @@ Pogrubiony MS Sans Serif to prawdziwy font `fonts/sserifb.fon` (generator `tools
 - **SetWindowPos(WPF_SETMINPOSITION)** musi przesuwac tez okno, ktore juz jest ikona (pulpit Calmiry, Line up icons).
 - **WM_GETDLGCODE**: VCL oddaje Enter i Esc formularzowi tylko, gdy kontrolka nie ma DLGC_WANTALLKEYS (0x0004). Maja go tylko EDIT
   wielowierszowy i combo z rozwinieta lista; DLGC_HASSETSEL to 0x0008, a 0x0080 to DLGC_WANTCHARS.
+- **COMBOBOX a VCL**: CBN_DROPDOWN idzie PRZED otwarciem listy (VCL w nim odpowiada CB_SHOWDROPDOWN(0) i zmienia wysokosc
+  okna combo na wysokosc z lista), a po puszczeniu przycisku VCL wysyla WM_CANCELMODE i znowu CB_SHOWDROPDOWN(0). Wysokosc
+  okna combo zostaje 22 (WM_WINDOWPOSCHANGING), lista jest osobnym oknem; pierwsze zamkniecie po otwarciu myszka pomijamy.
+- **Ostatnie zadanie**: task_exit zeruje KCB_INT_CB przed `int 21h`, bo przez dyspozytor 4Ch wracalo do task_exit w nieskonczonosc.
 - **CREATESTRUCT**: lpszName @22, lpszClass @26 (CS_NAME_OFF).
 
 ## Multitasking model

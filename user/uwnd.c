@@ -546,7 +546,6 @@ BOOL API DestroyWindow(HWND h)
 /* ============================================================
  * Pozycja i widocznosc
  * ============================================================ */
-typedef struct { HWND hwnd, after; int x, y, cx, cy; WORD flags; } WINDOWPOS;
 
 #define SWP_NOSIZE       0x0001
 #define SWP_NOMOVE       0x0002

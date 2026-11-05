@@ -1151,28 +1151,38 @@ static LRESULT __far __pascal ListBoxProc(HWND h, WORD m, WORD wp, LONG lp)
 
 /* ============================================================
  * COMBOBOX (extra: 0 font, 2 lista (popup LISTBOX), 4 edycja, 6 rozwinieta,
- *           8 wysokosc listy, 10 byl juz fokus)
+ *           8 wysokosc listy, 10 byl juz fokus, 12 lista otwarta myszka: ignoruj pierwsze zamkniecie)
  * ============================================================ */
 #define C_LB    2
 #define C_ED    4
 #define C_DROP  6
 #define C_LH    8
 #define C_SEL   10
+#define C_GRACE 12
 
 static void cb_show(HWND h, BOOL show)
 {
     HWND lb = XW(h, C_LB);
     if (!lb || (BOOL)XW(h, C_DROP) == show) return;
-    XW(h, C_DROP) = show;
     if (show) {
         WND __far *w = WP(h);
-        int n = (int)SendMessage(lb, WM_USER + 12, 0, 0), ih = (int)SendMessage(lb, WM_USER + 34, 0, 0);
-        int hh = (n < 8 ? (n ? n : 1) : 8) * ih + 2, y = w->wr.top + 22;
-        send_msg(w->parent, WM_COMMAND, w->id, MAKELONG(h, 7));   /* CBN_DROPDOWN */
+        int n, ih, hh, y;
+        /* CBN_DROPDOWN idzie przed otwarciem listy, jak w Windows: VCL odpowiada w nim CB_SHOWDROPDOWN(FALSE)
+         * i zmienia wysokosc okna, a lista nie moze jeszcze byc "rozwinieta", zeby to jej nie zamknelo */
+        send_msg(w->parent, WM_COMMAND, w->id, MAKELONG(h, 7));
+        if (XW(h, C_DROP) || !WP(h)) return;
+        w = WP(h);
+        n = (int)SendMessage(lb, WM_USER + 12, 0, 0);
+        ih = (int)SendMessage(lb, WM_USER + 34, 0, 0);
+        hh = (n < 8 ? (n ? n : 1) : 8) * ih + 2;
+        y = w->wr.top + 22;
+        XW(h, C_DROP) = TRUE;
         if (y + hh > SCR_H) y = w->wr.top - hh;
         SetWindowPos(lb, 0xFFFF, w->wr.left, y, w->wr.right - w->wr.left, hh, 0x0040 | 0x0010);
         SetCapture(lb);
     } else {
+        XW(h, C_DROP) = FALSE;
+        XW(h, C_GRACE) = 0;
         ShowWindow(lb, 0);
         if (GetCapture() == lb) ReleaseCapture();
         send_msg(WP(h)->parent, WM_COMMAND, WP(h)->id, MAKELONG(h, 8));   /* CBN_CLOSEUP */
@@ -1251,7 +1261,13 @@ static LRESULT __far __pascal ComboProc(HWND h, WORD m, WORD wp, LONG lp)
         case 0: return XW(h, C_ED) ? SendMessage(XW(h, C_ED), WM_USER, 0, 0) : 0;   /* CB_GETEDITSEL */
         case 1: if (XW(h, C_ED)) SendMessage(XW(h, C_ED), WM_USER + 21, wp, 0); return 1;
         case 2: if (XW(h, C_ED)) SendMessage(XW(h, C_ED), WM_USER + 1, 0, lp); return 1;
-        case 15: cb_show(h, wp != 0); return 1;                       /* CB_SHOWDROPDOWN */
+        case 15:                                                      /* CB_SHOWDROPDOWN */
+            /* VCL po puszczeniu przycisku wysyla WM_CANCELMODE do combo i odpowiada na to CB_SHOWDROPDOWN(0).
+             * Prawdziwe combo nie zamyka wtedy listy otwartej tym samym klikniec, wiec pierwsze takie zamkniecie
+             * po otwarciu myszka pomijamy. */
+            if (wp == 0 && XW(h, C_GRACE)) { XW(h, C_GRACE) = 0; return 1; }
+            cb_show(h, wp != 0);
+            return 1;                       /* CB_SHOWDROPDOWN */
         case 18: { WND __far *w = WP(h); *(LPRECT)lp = w->wr; ((LPRECT)lp)->bottom += XW(h, C_LH); return 1; }
         case 23: return XW(h, C_DROP);                                /* CB_GETDROPPEDSTATE */
         case 21: case 22: return 0;
@@ -1291,6 +1307,11 @@ static LRESULT __far __pascal ComboProc(HWND h, WORD m, WORD wp, LONG lp)
         return 0;
     case WM_PAINT: { PS ps; HDC dc = BeginPaint(h, (LPVOID)&ps); cb_paint(h, dc); EndPaint(h, (LPVOID)&ps); return 0; }
     case WM_ERASEBKGND: return 1;
+    case WM_WINDOWPOSCHANGING: {                         /* wysokosc okna Windows = z lista; u nas lista jest osobnym oknem */
+        WINDOWPOS __far *wp = (WINDOWPOS __far *)lp;     /* (VCL zmienia ja przy CBN_DROPDOWN) */
+        if (wp->cy > 22) { XW(h, C_LH) = wp->cy - 22; wp->cy = 22; }
+        return 0;
+    }
     case WM_GETDLGCODE:                                  /* ARROWS | CHARS; Enter i Esc do listy tylko gdy rozwinieta */
         return 0x0001 | 0x0080 | (XW(h, C_DROP) ? 0x0004 : 0);
     case WM_SETFOCUS:
@@ -1310,7 +1331,9 @@ static LRESULT __far __pascal ComboProc(HWND h, WORD m, WORD wp, LONG lp)
         return 0;
     case WM_LBUTTONDOWN:
         if (GetFocus() != h && !XW(h, C_ED)) SetFocus(h);
+        XW(h, C_GRACE) = 0;
         cb_show(h, !XW(h, C_DROP));
+        if (XW(h, C_DROP)) XW(h, C_GRACE) = 1;
         return 0;
     case WM_KEYDOWN:
         if (wp == 0x73 || ((GetKeyState(0x12) & 0x8000) && wp == 0x28)) { cb_show(h, !XW(h, C_DROP)); return 0; }
@@ -1535,7 +1558,7 @@ void ctl_register_classes(void)
     register_system_class("STATIC", 0, (WNDPROC)StaticProc, 8, arrow, 0);
     register_system_class("EDIT", 0x0008, (WNDPROC)EditProc, 24, ibeam, 0);
     register_system_class("LISTBOX", 0x0008, (WNDPROC)ComboListProc, 24, arrow, 0);
-    register_system_class("COMBOBOX", 0x0008, (WNDPROC)ComboProc, 12, arrow, 0);
+    register_system_class("COMBOBOX", 0x0008, (WNDPROC)ComboProc, 14, arrow, 0);
     register_system_class("SCROLLBAR", 0x0008, (WNDPROC)ScrollBarProc, 8, arrow, 0);
     menu_register();
     dlg_register();

@@ -9,13 +9,21 @@
 
 #define WANTED (DLGC_WANTARROWS | DLGC_WANTCHARS)
 
-static int g_ok, g_cancel;
+static int g_ok, g_cancel, g_dropdown;
 
 BOOL FAR PASCAL _export DlgProc(HWND h, UINT m, WPARAM wp, LPARAM lp)
 {
     (void)h; (void)lp;
     if (m == WM_INITDIALOG) return TRUE;
     if (m == WM_COMMAND) {
+        if (wp == 104 && HIWORD(lp) == CBN_DROPDOWN) {      /* jak VCL (AdjustDropDown): zamyka i powieksza okno */
+            RECT r;
+            HWND dd = (HWND)LOWORD(lp);
+            g_dropdown++;
+            SendMessage(dd, CB_SHOWDROPDOWN, FALSE, 0);
+            GetWindowRect(dd, &r);
+            SetWindowPos(dd, 0, 0, 0, r.right - r.left, 120, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
         if (wp == IDOK) g_ok++;
         if (wp == IDCANCEL) g_cancel++;
         return TRUE;
@@ -105,6 +113,50 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cl, int sh)
     for (i = 0; i < 10 && GetFocus() != edit; i++) key(d, GetFocus(), VK_TAB);
     CHECK(GetFocus() == edit, "Tab dochodzi do pola edycji");
     CHECK_INT(SendMessage(edit, EM_GETSEL, 0, 0), MAKELONG(0, 4), "Tab zaznacza tekst");
+
+    /* CBS_DROPDOWNLIST jak w Delphi: VCL zmienia wysokosc okna combo (wysokosc z lista) przy
+     * CBN_DROPDOWN; okno zostaje wysokosci pola, a lista jest osobnym oknem pod nim */
+    {
+        HWND dd = GetDlgItem(d, 104), lb = 0;
+        RECT r0, r1, rl;
+        int k;
+        for (k = 0; k < 6; k++) {
+            char nm[16];
+            wsprintf(nm, "pozycja %d", k);
+            SendMessage(dd, CB_SETITEMDATA, (WPARAM)SendMessage(dd, CB_ADDSTRING, 0, (LPARAM)(LPSTR)nm), 1000L + k);
+        }
+        CHECK_INT(SendMessage(dd, CB_GETCOUNT, 0, 0), 6, "DROPDOWNLIST: 6 pozycji");
+        CHECK_INT(SendMessage(dd, CB_GETITEMDATA, 3, 0), 1003, "DROPDOWNLIST: CB_GETITEMDATA");
+        GetWindowRect(dd, &r0);
+        SetWindowPos(dd, 0, 0, 0, r0.right - r0.left, 120, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        GetWindowRect(dd, &r1);
+        CHECK_INT(r1.bottom - r1.top, r0.bottom - r0.top, "SetWindowPos z wysokoscia listy nie powieksza combo");
+        SendMessage(dd, CB_SHOWDROPDOWN, TRUE, 0);
+        CHECK(SendMessage(dd, CB_GETDROPPEDSTATE, 0, 0) != 0, "CB_SHOWDROPDOWN rozwija");
+        lb = (HWND)GetWindowWord(dd, 2);                 /* dodatkowe bajty COMBOBOX: okno listy (wnetrze USER.EXE) */
+        CHECK(lb != 0, "okno listy istnieje");
+        if (lb) {
+            GetWindowRect(lb, &rl);
+            CHECK(IsWindowVisible(lb), "lista jest widoczna");
+            CHECK_INT(rl.top, r0.bottom, "lista zaczyna sie tuz pod combo");
+            CHECK(rl.bottom - rl.top >= 6 * 8, "lista ma wysokosc na pozycje");
+        }
+        SendMessage(dd, CB_SHOWDROPDOWN, FALSE, 0);
+
+        /* klik myszka: VCL odpowiada na CBN_DROPDOWN zamknieciem i zmiana wysokosci, a po puszczeniu
+         * przycisku wysyla CB_SHOWDROPDOWN(0) (WM_CANCELMODE): lista otwarta tym kliknieciem zostaje */
+        g_dropdown = 0;
+        SendMessage(dd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELONG(10, 5));
+        CHECK_INT(g_dropdown, 1, "klik w combo: jedno CBN_DROPDOWN");
+        CHECK(SendMessage(dd, CB_GETDROPPEDSTATE, 0, 0) != 0, "klik w combo: lista otwarta mimo zamkniecia w CBN_DROPDOWN");
+        GetWindowRect(dd, &r1);
+        CHECK_INT(r1.bottom - r1.top, r0.bottom - r0.top, "klik w combo: okno zostaje wysokosci pola");
+        CHECK(IsWindowVisible((HWND)GetWindowWord(dd, 2)), "klik w combo: lista widoczna");
+        SendMessage(dd, CB_SHOWDROPDOWN, FALSE, 0);
+        CHECK(SendMessage(dd, CB_GETDROPPEDSTATE, 0, 0) != 0, "pierwsze CB_SHOWDROPDOWN(0) po kliknieciu pomijane");
+        SendMessage(dd, CB_SHOWDROPDOWN, FALSE, 0);
+        CHECK(SendMessage(dd, CB_GETDROPPEDSTATE, 0, 0) == 0, "kolejne CB_SHOWDROPDOWN(0) zamyka liste");
+    }
 
     DestroyWindow(d);
     t_done();
