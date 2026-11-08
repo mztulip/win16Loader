@@ -1615,3 +1615,38 @@ Lepiej niz w oryginale (o ile nie lamie zgodnosci):
 
 Testy: kazdy etap w example_apps; pierwszy cel: program uruchamia drugi przez WinExec
 i wymienia z nim komunikaty, dopiero potem Calmira + SKI.EXE.
+
+
+================================================================================
+ETAP 22: WUIL i Calmira II 3.3 (kompilacja FPC i8086-win16)
+================================================================================
+- [x] Kompilacja i linkowanie CALMIRA.DPR bez modyfikacji calmira_src/
+- [x] Model -WmHUGE i poprawka link.pas w FPC (wlib page_size)
+- [x] Dołączanie zasobów (.RES, .DFM) przez Open Watcom wrc (wuil/bindres)
+- [x] Rozwiązanie błędu GP fault przy resourcestring w n8086ld.pas (FPC)
+- [x] Poprawka sygnatury _FPC_ParamStrA w win16/system.pp (Integer = SmallInt)
+- [ ] Awaria przy starcie Calmiry:
+      CS:IP=0648:6202 (REFERENC.PAS: TReference.SetStringProp called from
+      TReference.LoadFromIni -> TShort.LoadFromIni -> TDesktop.Load).
+      Występuje podczas odczytu konfiguracji pulpitu z pliku INI (%calmira%\explorer.exe).
+
+- [x] Narzędzie NOTEPAD (przeglądarka tekstowa Win16 w Pascalu dla Calmiry):
+      * Zaimplementowano lekki NOTEPAD.EXE (notepad/NOTEPAD.PAS) w czystym Win16 API
+        (kontrola EDIT z suwakami poziomym i pionowym WS_VSCROLL | WS_HSCROLL | ES_MULTILINE,
+        menu 'Plik' z szybkimi skrótami do README.TXT, LICENSE.TXT, CALMIRA.INI, WIN.INI).
+      * Rozmiar binarki: 127 KB (zamiast ~1 MB przy pełnym WUIL/TApplication).
+      * Uniknięto przepełnienia sterty/stosu (GP fault 000D w TryBlockGetMem / SysGlobalGetMem),
+        które występowało przy ciężkim frameworku obiektowym w małym zadaniu WinExec.
+      * Obraz calmira.img zaktualizowany o C:\CALMIRA\NOTEPAD.EXE.
+      * Ustalono zachowanie RTL FPC Win16 przy braku argumentów linii poleceń:
+        loader przekazuje psp[0x81]=0x0D, co bez walidacji w aplikacji mogło być
+        interpretowane przez FPC jako śmieciowy argument z niezerowym bajtem; dodano
+        funkcję IsValidFileParam filtrującą znaki kontrolne i domyślny fallback
+        na otwieranie C:\CALMIRA\README.TXT.
+      * Dodano zasoby ikony (RT_GROUP_ICON / RT_ICON) do NOTEPAD.EXE za pomocą Open Watcom wrc.
+      * Naprawiono uruchamianie i wyświetlanie ikony z menu Start Calmiry (Programs -> Accessories -> Notepad):
+        - START.INI odwołuje się do "notepad.exe" bez ścieżki;
+        - zaktualizowano mod_exec_rm w module.c o wyszukiwanie w KCB_WINDIR, KCB_SYSDIR oraz g_appdir,
+          gdy plik nie znajduje się w bieżącym roboczym katalogu DOS;
+        - zaktualizowano ExtractIcon w dlls/shell.c o przeszukiwanie katalogu Windows i Calmiry;
+        - umieszczono NOTEPAD.EXE zarówno w C:\CALMIRA\, jak i C:\WINDOWS\ na calmira.img.

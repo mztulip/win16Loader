@@ -1083,7 +1083,33 @@ void mod_exec_rm(void)
     g_nthunks = kcb[KCB_THUNK_NEXT_OFF / 2] / THUNK_SIZE;
     g_ndllinit = 0;
     if (g_next_sel + (MAX_SEGS + 4u) * 8u > g_sel_limit) { res[0] = 0; res[1] = 8; return; }
-    if (access(path, 0)) { res[0] = 0; res[1] = 2; return; }
+    if (access(path, 0)) {
+        static char cand[96];
+        int found = 0;
+        char __far *wdir = (char __far *)kcb + KCB_WINDIR;
+        char __far *sdir = (char __far *)kcb + KCB_SYSDIR;
+        if (wdir[0]) {
+            _fstrncpy((char __far *)cand, wdir, 64);
+            cand[64] = 0;
+            if (cand[strlen(cand) - 1] != '\\') strcat(cand, "\\");
+            strcat(cand, path);
+            if (!access(cand, 0)) { strcpy(path, cand); found = 1; }
+        }
+        if (!found && sdir[0]) {
+            _fstrncpy((char __far *)cand, sdir, 64);
+            cand[64] = 0;
+            if (cand[strlen(cand) - 1] != '\\') strcat(cand, "\\");
+            strcat(cand, path);
+            if (!access(cand, 0)) { strcpy(path, cand); found = 1; }
+        }
+        if (!found && g_appdir[0]) {
+            strcpy(cand, g_appdir);
+            if (cand[strlen(cand) - 1] != '\\') strcat(cand, "\\");
+            strcat(cand, path);
+            if (!access(cand, 0)) { strcpy(path, cand); found = 1; }
+        }
+        if (!found) { res[0] = 0; res[1] = 2; return; }
+    }
     if (mode == 0) {
         dir_of(path, g_appdir);
         {   /* zakonczony program z tego samego pliku: te same adresy */

@@ -536,20 +536,21 @@ run-test-rc: boot_test_rc.img
 CALMIRA_DIR = ../win31_apps/english_calmira/calmii33
 HDD_MB      = 64
 
-calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI
+calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI ../notepad/NOTEPAD.exe
 	rm -f $@
 	truncate -s $(HDD_MB)M $@
 	echo 'start=2048, type=6, bootable' | sfdisk -q $@
 	mkfs.fat -F 16 -n CALMIRA --offset 2048 $@ $$(( ($(HDD_MB)*1024*1024 - 2048*512) / 1024 )) >/dev/null
 	mmd   -i $@@@1M ::CALMIRA
 	mcopy -s -i $@@@1M $(CALMIRA_DIR)/* ::CALMIRA/
+	mcopy -o -i $@@@1M ../notepad/NOTEPAD.exe ::CALMIRA/NOTEPAD.EXE
 	mmd   -i $@@@1M ::WINDOWS
 	mcopy -i $@@@1M windir/WIN.INI windir/SYSTEM.INI ::WINDOWS/
 	@echo "[OK] calmira.img gotowy"
 
 boot_calmira.img: boot.img
 	cp boot.img $@
-	printf '@echo off\r\nSET PATH=A:\\;A:\\FREEDOS\\BIN\r\nC:\r\ncd \\CALMIRA\r\nWIN CALMIRA.EXE\r\n' | mcopy -o -i $@ - ::fdauto.bat
+	printf '@echo off\r\nSET PATH=A:\\;A:\\FREEDOS\\BIN;C:\\WINDOWS;C:\\CALMIRA\r\nC:\r\ncd \\CALMIRA\r\nWIN CALMIRA.EXE\r\n' | mcopy -o -i $@ - ::fdauto.bat
 	@echo "[OK] boot_calmira.img gotowy"
 
 run-calmira: boot_calmira.img calmira.img

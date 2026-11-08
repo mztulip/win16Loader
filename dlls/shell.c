@@ -398,6 +398,21 @@ HICON API ExtractIcon(HINSTANCE hi, LPCSTR file, int idx)
     (void)hi;
     if (!file || !HIWORD(file)) return 0;
     f = _lopen(file, 0);
+    if (f < 0) {
+        char cand[128];
+        int n;
+        GetWindowsDirectory((LPSTR)(char __far *)cand, 100);
+        n = w_strlen((LPCSTR)(char __far *)cand);
+        if (n && cand[n - 1] != '\\') { cand[n++] = '\\'; cand[n] = 0; }
+        w_strcpy((LPSTR)(char __far *)cand + n, file);
+        f = _lopen((LPCSTR)(char __far *)cand, 0);
+    }
+    if (f < 0) {
+        char cand[128];
+        w_strcpy((LPSTR)(char __far *)cand, "C:\\CALMIRA\\");
+        w_strcpy((LPSTR)(char __far *)cand + 11, file);
+        f = _lopen((LPCSTR)(char __far *)cand, 0);
+    }
     if (f < 0) return 0;
     if (_lread(f, mz, 64) == 64) {
         if (mz[0] == 'M' && mz[1] == 'Z') {
