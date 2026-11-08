@@ -536,7 +536,9 @@ run-test-rc: boot_test_rc.img
 CALMIRA_DIR = ../win31_apps/english_calmira/calmii33
 HDD_MB      = 64
 
-calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI ../notepad/NOTEPAD.exe
+NOTEPAD_EXE = $(firstword $(wildcard example_apps/notepad/NOTEPAD.exe win16_example_app/NOTEPAD.exe win16_example_app/notepad/NOTEPAD.exe ../notepad/NOTEPAD.exe))
+
+calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE)
 	rm -f $@
 	truncate -s $(HDD_MB)M $@
 	echo 'start=2048, type=6, bootable' | sfdisk -q $@
@@ -544,7 +546,7 @@ calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI ../
 	mmd   -i $@@@1M ::CALMIRA
 	mcopy -s -i $@@@1M $(CALMIRA_DIR)/* ::CALMIRA/
 	mmd   -i $@@@1M ::WINDOWS
-	mcopy -o -i $@@@1M ../notepad/NOTEPAD.exe ::WINDOWS/NOTEPAD.EXE
+	mcopy -o -i $@@@1M $(NOTEPAD_EXE) ::WINDOWS/NOTEPAD.EXE
 	mcopy -i $@@@1M windir/WIN.INI windir/SYSTEM.INI ::WINDOWS/
 	@echo "[OK] calmira.img gotowy"
 

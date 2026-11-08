@@ -1,0 +1,10 @@
+BITS 16
+CPU 486
+
+SECTION NOTEPAD_DATA use16 class=FAR_DATA align=1
+	ALIGN 2,DB 0
+	GLOBAL __fpc_ident
+__fpc_ident		DB	"FPC 3.3.1 [2026/11/06] for i8086 - Win16"
+
+SECTION NOTEPAD_DATA
+

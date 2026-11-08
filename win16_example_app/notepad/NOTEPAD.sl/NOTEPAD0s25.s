@@ -1,0 +1,10 @@
+BITS 16
+CPU 486
+
+SECTION NOTEPAD_DATA use16 class=FAR_DATA align=2
+	ALIGN 2,DB 0
+	GLOBAL __fpc_valgrind
+__fpc_valgrind	DB	0
+
+SECTION NOTEPAD_DATA
+
