@@ -369,6 +369,56 @@ static int e_textx(HWND h, HDC dc, int st, int pos)
     return pos > st ? LOWORD(GetTextExtent(dc, t + st, pos - st)) : 0;
 }
 
+static int e_line_count(HWND h)
+{
+    LPSTR t = etext(h);
+    int i, n = XW(h, E_LEN), c = 1;
+    for (i = 0; i < n; i++) if (t[i] == '\n') c++;
+    return c;
+}
+
+static int e_vis_lines(HWND h)
+{
+    RECT r;
+    int lh = e_lineh(h);
+    GetClientRect(h, (LPRECT)&r);
+    return (lh > 0 && r.bottom / lh > 0) ? r.bottom / lh : 1;
+}
+
+static void e_sb(HWND h)
+{
+    WND __far *w = WP(h);
+    if (!w || !(STYLE(h) & ES_MULTILINE)) return;
+    if (w->style & WS_VSCROLL) {
+        int n = e_line_count(h);
+        int vis = e_vis_lines(h);
+        int max = n > vis ? n - vis : 0;
+        int top = XW(h, E_TOP);
+        if (top > max) top = max;
+        if (top < 0) top = 0;
+        XW(h, E_TOP) = top;
+        w->sbmin[1] = 0;
+        w->sbmax[1] = max;
+        w->sbpos[1] = top;
+        if (wnd_visible(h)) nc_paint(h);
+    }
+}
+
+static void e_ensure_caret_visible(HWND h)
+{
+    int ln, vis, top;
+    if (!(STYLE(h) & ES_MULTILINE)) return;
+    vis = e_vis_lines(h);
+    e_line_start(h, XW(h, E_CAR), (int __far *)&ln);
+    top = XW(h, E_TOP);
+    if (ln < top) top = ln;
+    if (ln >= top + vis) top = ln - vis + 1;
+    if (top != (int)XW(h, E_TOP)) {
+        XW(h, E_TOP) = top;
+        e_sb(h);
+    }
+}
+
 static void e_caret(HWND h)
 {
     HDC dc;
@@ -388,15 +438,7 @@ static void e_caret(HWND h)
         if (xo != (int)XW(h, E_XOFF)) { XW(h, E_XOFF) = xo; InvalidateRect(h, 0, TRUE); }
         x -= xo;
     } else {
-        RECT r;
-        int top = XW(h, E_TOP), vis;
-        GetClientRect(h, (LPRECT)&r);
-        vis = r.bottom / lh;
-        if (vis < 1) vis = 1;
-        if (ln < top) top = ln;
-        if (ln >= top + vis) top = ln - vis + 1;
-        if (top != (int)XW(h, E_TOP)) { XW(h, E_TOP) = top; InvalidateRect(h, 0, TRUE); }
-        ln -= top;
+        ln -= (int)XW(h, E_TOP);
     }
     SetCaretPos(x + 2, (STYLE(h) & ES_MULTILINE) ? ln * lh + 1 : 2);
 }
@@ -470,6 +512,8 @@ static void e_replace(HWND h, LPCSTR s, int sn)
     XW(h, E_LEN) = n;
     XW(h, E_CAR) = XW(h, E_SS) = XW(h, E_SE) = a + sn;
     XW(h, E_MOD) = 1;
+    e_ensure_caret_visible(h);
+    e_sb(h);
     e_redraw(h);
     NOTIFY(h, 0x0400);                                    /* EN_UPDATE */
     NOTIFY(h, 0x0300);                                    /* EN_CHANGE */
@@ -482,6 +526,7 @@ static void e_move(HWND h, int pos, BOOL extend)
     XW(h, E_CAR) = pos;
     XW(h, E_SE) = pos;
     if (!extend) XW(h, E_SS) = pos;
+    e_ensure_caret_visible(h);
     e_redraw(h);
 }
 
@@ -545,8 +590,13 @@ static LRESULT __far __pascal EditProc(HWND h, WORD m, WORD wp, LONG lp)
         XW(h, E_LIM) = (STYLE(h) & ES_MULTILINE) ? 30000 : 30000;
         if (STYLE(h) & ES_PASSWORD) XW(h, E_PWD) = '*';
         if (s && HIWORD(s)) { ustrncpy(etext(h), s, EBUF); XW(h, E_LEN) = ustrlen(etext(h)); }
+        e_sb(h);
         return 0;
     }
+    case WM_SIZE:
+        DefWindowProc(h, m, wp, lp);
+        e_sb(h);
+        return 0;
     case WM_NCDESTROY:
         if (XW(h, E_BUF)) GlobalFree(XW(h, E_BUF));
         XW(h, E_BUF) = 0;
@@ -568,6 +618,7 @@ static LRESULT __far __pascal EditProc(HWND h, WORD m, WORD wp, LONG lp)
         XW(h, E_CAR) = XW(h, E_SS) = XW(h, E_SE) = 0;
         XW(h, E_XOFF) = XW(h, E_TOP) = 0;
         XW(h, E_MOD) = 0;
+        e_sb(h);
         InvalidateRect(h, 0, TRUE);
         NOTIFY(h, 0x0300);
         return 1;
@@ -676,27 +727,48 @@ static LRESULT __far __pascal EditProc(HWND h, WORD m, WORD wp, LONG lp)
             CloseClipboard();
         }
         return 0;
+    case WM_VSCROLL: {
+        if (STYLE(h) & ES_MULTILINE) {
+            int t = XW(h, E_TOP), n = e_line_count(h), vis = e_vis_lines(h);
+            int max = n > vis ? n - vis : 0;
+            switch (wp) {
+            case 0: t--; break;                         /* SB_LINEUP */
+            case 1: t++; break;                         /* SB_LINEDOWN */
+            case 2: t -= vis > 1 ? vis - 1 : 1; break;  /* SB_PAGEUP */
+            case 3: t += vis > 1 ? vis - 1 : 1; break;  /* SB_PAGEDOWN */
+            case 4: case 5: t = (int)LOWORD(lp); break; /* SB_THUMBPOSITION, SB_THUMBTRACK */
+            case 8: return 0;                           /* SB_ENDSCROLL */
+            default: return 0;
+            }
+            if (t > max) t = max;
+            if (t < 0) t = 0;
+            if (t != (int)XW(h, E_TOP)) {
+                XW(h, E_TOP) = t;
+                e_sb(h);
+                e_redraw(h);
+            }
+        }
+        return 0;
+    }
     case WM_USER + 0:  return MAKELONG(XW(h, E_SS) < XW(h, E_SE) ? XW(h, E_SS) : XW(h, E_SE), XW(h, E_SS) < XW(h, E_SE) ? XW(h, E_SE) : XW(h, E_SS));   /* EM_GETSEL */
     case WM_USER + 1: {                                    /* EM_SETSEL(0, MAKELONG(start, end)) */
         int a = (int)LOWORD(lp), b = (int)HIWORD(lp), n = XW(h, E_LEN);
         if (a < 0 || a > n) a = n;
         if (b < 0 || b > n) b = n;
         XW(h, E_SS) = a; XW(h, E_SE) = b; XW(h, E_CAR) = b;
+        e_ensure_caret_visible(h);
         e_redraw(h);
         return 1;
     }
     case WM_USER + 2:  GetClientRect(h, (LPRECT)lp); return 0;          /* EM_GETRECT */
     case WM_USER + 6:                                      /* EM_LINESCROLL */
         if ((int)XW(h, E_TOP) + (int)HIWORD(lp) >= 0) XW(h, E_TOP) += (int)HIWORD(lp);
+        e_sb(h);
         InvalidateRect(h, 0, TRUE);
         return 1;
     case WM_USER + 8:  return XW(h, E_MOD);               /* EM_GETMODIFY */
     case WM_USER + 9:  XW(h, E_MOD) = wp; return 0;        /* EM_SETMODIFY */
-    case WM_USER + 10: {                                   /* EM_GETLINECOUNT */
-        int i, n = XW(h, E_LEN), c = 1;
-        for (i = 0; i < n; i++) if (etext(h)[i] == '\n') c++;
-        return c;
-    }
+    case WM_USER + 10: return e_line_count(h);             /* EM_GETLINECOUNT */
     case WM_USER + 11: return e_line_index(h, (int)wp);   /* EM_LINEINDEX */
     case WM_USER + 17: {                                   /* EM_LINELENGTH */
         int st = (int)wp < 0 ? e_line_start(h, XW(h, E_CAR), 0) : e_line_start(h, (int)wp, 0);
