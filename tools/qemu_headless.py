@@ -124,8 +124,24 @@ def main():
             elif k == 'c':
                 mon(sock, 'mouse_button 1'); time.sleep(0.1); mon(sock, 'mouse_button 0')
             elif k == 'u':
+                key_map = {
+                    ':': 'shift-semicolon',
+                    '\\': 'backslash',
+                    '/': 'slash',
+                    '.': 'dot',
+                    '-': 'minus',
+                    '_': 'shift-minus',
+                    ' ': 'spc'
+                }
                 for ch in v:
-                    mon(sock, f'sendkey {ch.lower() if ch.isalnum() else "spc"}')
+                    if ch in key_map:
+                        mon(sock, f'sendkey {key_map[ch]}')
+                    elif ch.isupper():
+                        mon(sock, f'sendkey shift-{ch.lower()}')
+                    elif ch.isalnum():
+                        mon(sock, f'sendkey {ch.lower()}')
+                    else:
+                        mon(sock, 'sendkey spc')
         mon(sock, 'quit')
     finally:
         try:
