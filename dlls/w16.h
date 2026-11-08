@@ -10,6 +10,7 @@
 
 typedef unsigned char  BYTE;
 typedef unsigned short WORD;
+typedef unsigned int   UINT;
 typedef unsigned long  DWORD;
 typedef int            BOOL;
 typedef long           LONG;
@@ -18,16 +19,171 @@ typedef WORD           HWND;
 typedef WORD           HICON;
 typedef WORD           HINSTANCE;
 typedef DWORD          HKEY;
+typedef WORD           HMENU;
+typedef WORD           HBRUSH;
+typedef WORD           HCURSOR;
+typedef WORD           HDC;
+typedef DWORD          COLORREF;
+typedef LONG           LRESULT;
+typedef WORD           WPARAM;
+typedef LONG           LPARAM;
 typedef char __far    *LPSTR;
 typedef const char __far *LPCSTR;
 typedef void __far    *LPVOID;
 typedef DWORD __far   *LPDWORD;
 typedef LONG __far    *LPLONG;
+typedef void (__far __pascal *FARPROC)();
 
 #define API     __far __pascal
 #define NULL    0
 #define TRUE    1
 #define FALSE   0
+
+typedef struct {
+    int left, top, right, bottom;
+} RECT;
+typedef RECT __far *LPRECT;
+
+typedef struct {
+    int x, y;
+} POINT;
+
+typedef struct {
+    HWND    hwnd;
+    WORD    message;
+    WORD    wParam;
+    LONG    lParam;
+    DWORD   time;
+    POINT   pt;
+} MSG;
+typedef MSG __far *LPMSG;
+
+typedef LRESULT (API *WNDPROC)(HWND, WORD, WORD, LONG);
+
+typedef struct {
+    WORD        style;
+    WNDPROC     lpfnWndProc;
+    int         cbClsExtra;
+    int         cbWndExtra;
+    HINSTANCE   hInstance;
+    HICON       hIcon;
+    HCURSOR     hCursor;
+    HBRUSH      hbrBackground;
+    LPCSTR      lpszMenuName;
+    LPCSTR      lpszClassName;
+} WNDCLASS;
+
+typedef struct tagOFN {
+    DWORD        lStructSize;
+    HWND         hwndOwner;
+    HINSTANCE    hInstance;
+    LPCSTR       lpstrFilter;
+    LPSTR        lpstrCustomFilter;
+    DWORD        nMaxCustFilter;
+    DWORD        nFilterIndex;
+    LPSTR        lpstrFile;
+    DWORD        nMaxFile;
+    LPSTR        lpstrFileTitle;
+    DWORD        nMaxFileTitle;
+    LPCSTR       lpstrInitialDir;
+    LPCSTR       lpstrTitle;
+    DWORD        Flags;
+    WORD         nFileOffset;
+    WORD         nFileExtension;
+    LPCSTR       lpstrDefExt;
+    LPARAM       lCustData;
+    FARPROC      lpfnHook;
+    LPCSTR       lpTemplateName;
+} OPENFILENAME;
+typedef OPENFILENAME __far *LPOPENFILENAME;
+
+#define OFN_READONLY                    0x00000001L
+#define OFN_OVERWRITEPROMPT             0x00000002L
+#define OFN_HIDEREADONLY                0x00000004L
+#define OFN_NOCHANGEDIR                 0x00000008L
+#define OFN_SHOWHELP                    0x00000010L
+#define OFN_ENABLEHOOK                  0x00000020L
+#define OFN_ENABLETEMPLATE              0x00000040L
+#define OFN_ENABLETEMPLATEHANDLE        0x00000080L
+#define OFN_NOVALIDATE                  0x00000100L
+#define OFN_ALLOWMULTISELECT            0x00000200L
+#define OFN_EXTENSIONDIFFERENT          0x00000400L
+#define OFN_PATHMUSTEXIST               0x00000800L
+#define OFN_FILEMUSTEXIST               0x00001000L
+#define OFN_CREATEPROMPT                0x00002000L
+
+#define WM_CREATE                       0x0001
+#define WM_DESTROY                      0x0002
+#define WM_MOVE                         0x0003
+#define WM_SIZE                         0x0005
+#define WM_SETFOCUS                     0x0007
+#define WM_KILLFOCUS                    0x0008
+#define WM_SETTEXT                      0x000C
+#define WM_GETTEXT                      0x000D
+#define WM_GETTEXTLENGTH                0x000E
+#define WM_CLOSE                        0x0010
+#define WM_COMMAND                      0x0111
+#define WM_SETFONT                      0x0030
+#define WM_USER                         0x0400
+
+#define EM_SETSEL                       (WM_USER + 1)
+#define LB_ADDSTRING                    (WM_USER + 1)
+#define LB_RESETCONTENT                 (WM_USER + 5)
+#define LB_SETCURSEL                    (WM_USER + 7)
+#define LB_GETCURSEL                    (WM_USER + 9)
+#define LB_GETTEXT                      (WM_USER + 10)
+#define LB_GETCOUNT                     (WM_USER + 12)
+
+#define CB_ADDSTRING                    (WM_USER + 3)
+#define CB_GETLBTEXT                    (WM_USER + 8)
+#define CB_RESETCONTENT                 (WM_USER + 11)
+#define CB_GETCURSEL                    (WM_USER + 12)
+#define CB_SETCURSEL                    (WM_USER + 14)
+
+#define LBN_SELCHANGE                   1
+#define LBN_DBLCLK                      2
+#define CBN_SELCHANGE                   1
+
+#define WS_OVERLAPPED                   0x00000000L
+#define WS_POPUP                        0x80000000L
+#define WS_CHILD                        0x40000000L
+#define WS_VISIBLE                      0x10000000L
+#define WS_CAPTION                      0x00C00000L
+#define WS_BORDER                       0x00800000L
+#define WS_SYSMENU                      0x00080000L
+#define WS_VSCROLL                      0x00200000L
+#define WS_TABSTOP                      0x00010000L
+
+#define ES_AUTOHSCROLL                  0x0080
+#define LBS_NOTIFY                      0x0001
+#define LBS_SORT                        0x0002
+#define CBS_DROPDOWNLIST                0x0003
+#define BS_PUSHBUTTON                   0x0000
+#define BS_DEFPUSHBUTTON                0x0001
+
+#define IDOK                            1
+#define IDCANCEL                        2
+#define IDYES                           6
+#define IDNO                            7
+
+#define MB_OK                           0x0000
+#define MB_YESNO                        0x0004
+#define MB_ICONEXCLAMATION              0x0030
+
+#define COLOR_BTNFACE                   15
+#define IDC_ARROW                       ((LPCSTR)32512)
+#define SYSTEM_FONT                     13
+
+#define stc1                            0x0440
+#define stc2                            0x0441
+#define stc3                            0x0442
+#define stc4                            0x0443
+#define stc5                            0x0444
+#define lst1                            0x0460
+#define lst2                            0x0461
+#define cmb1                            0x0470
+#define cmb2                            0x0471
+#define edt1                            0x0480
 
 /* Uwaga (bledy Watcoma): (DWORD)(seg)<<16 | (WORD)off rzutowane na far ptr przy seg=0
  * daje DS:off (jak konwersja near->far), a wersja z '+' generuje 'lea' + 'adc' z
@@ -57,6 +213,38 @@ WORD   API GetWindowsDirectory(LPSTR, WORD);
 WORD   API GetDriveType(int);
 int    API GetModuleFileName(WORD, LPSTR, int);
 DWORD  API GetTickCount(void);
+
+/* ---- USER ---- */
+HWND    API CreateWindow(LPCSTR, LPCSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
+BOOL    API DestroyWindow(HWND);
+BOOL    API ShowWindow(HWND, int);
+BOOL    API EnableWindow(HWND, BOOL);
+HWND    API SetActiveWindow(HWND);
+HWND    API SetFocus(HWND);
+BOOL    API IsWindow(HWND);
+BOOL    API RegisterClass(const WNDCLASS __far *);
+LRESULT API DefWindowProc(HWND, WORD, WORD, LONG);
+LRESULT API SendMessage(HWND, WORD, WORD, LONG);
+BOOL    API PostMessage(HWND, WORD, WORD, LONG);
+BOOL    API GetMessage(LPMSG, HWND, WORD, WORD);
+BOOL    API TranslateMessage(const MSG __far *);
+LRESULT API DispatchMessage(const MSG __far *);
+BOOL    API IsDialogMessage(HWND, LPMSG);
+void    API GetWindowRect(HWND, LPRECT);
+void    API GetClientRect(HWND, LPRECT);
+BOOL    API SetWindowPos(HWND, HWND, int, int, int, int, WORD);
+void    API SetWindowText(HWND, LPCSTR);
+int     API GetWindowText(HWND, LPSTR, int);
+int     API GetWindowTextLength(HWND);
+HWND    API GetDlgItem(HWND, int);
+void    API SetDlgItemText(HWND, int, LPCSTR);
+int     API GetDlgItemText(HWND, int, LPSTR, int);
+LRESULT API SendDlgItemMessage(HWND, int, WORD, WORD, LONG);
+int     API MessageBox(HWND, LPCSTR, LPCSTR, WORD);
+HCURSOR API LoadCursor(HINSTANCE, LPCSTR);
+
+/* ---- GDI ---- */
+HANDLE  API GetStockObject(int);
 
 /* ---- USER (prywatne) ---- */
 HICON  API UserIconFromDIB(BYTE __far *bi, DWORD size);

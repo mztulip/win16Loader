@@ -14,9 +14,32 @@ const
   IDM_SAVEAS    = 1004;
   IDM_EXIT      = 1005;
 
-  ID_DLG_EDIT   = 201;
-  ID_DLG_OK     = 1;
-  ID_DLG_CANCEL = 2;
+type
+  TOpenFileName = record
+    lStructSize: Longint;
+    hwndOwner: HWnd;
+    hInstance: THandle;
+    lpstrFilter: PChar;
+    lpstrCustomFilter: PChar;
+    nMaxCustFilter: Longint;
+    nFilterIndex: Longint;
+    lpstrFile: PChar;
+    nMaxFile: Longint;
+    lpstrFileTitle: PChar;
+    nMaxFileTitle: Longint;
+    lpstrInitialDir: PChar;
+    lpstrTitle: PChar;
+    Flags: Longint;
+    nFileOffset: Word;
+    nFileExtension: Word;
+    lpstrDefExt: PChar;
+    lCustData: Longint;
+    lpfnHook: Pointer;
+    lpTemplateName: PChar;
+  end;
+
+function GetOpenFileName(var OpenFile: TOpenFileName): Bool; far; external 'COMMDLG' index 1;
+function GetSaveFileName(var OpenFile: TOpenFileName): Bool; far; external 'COMMDLG' index 2;
 
 var
   G_Instance: THandle;
@@ -26,154 +49,9 @@ var
   G_TitleBuf: array[0..160] of Char;
   G_CurFile: array[0..128] of Char;
 
-  G_DlgWnd: HWND;
-  G_DlgEdit: HWND;
-  G_DlgPath: array[0..128] of Char;
-  G_DlgResult: Boolean;
-  G_DlgClassRegistered: Boolean;
-
 { Deklaracje wyprzedzajace }
 procedure DoFileSave; forward;
 procedure DoFileSaveAs; forward;
-
-function FileDlgProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; export;
-var
-  HBtnOk, HBtnCancel, HLbl: HWND;
-begin
-  case Msg of
-    WM_CREATE:
-    begin
-      HLbl := CreateWindow(
-        'STATIC',
-        'Podaj sciezke lub nazwe pliku:',
-        WS_CHILD or WS_VISIBLE,
-        14, 12, 320, 16,
-        Wnd, 0, G_Instance, nil
-      );
-
-      G_DlgEdit := CreateWindow(
-        'EDIT',
-        G_DlgPath,
-        WS_CHILD or WS_VISIBLE or WS_BORDER or ES_AUTOHSCROLL or WS_TABSTOP,
-        14, 32, 320, 22,
-        Wnd, ID_DLG_EDIT, G_Instance, nil
-      );
-
-      HBtnOk := CreateWindow(
-        'BUTTON',
-        'OK',
-        WS_CHILD or WS_VISIBLE or BS_DEFPUSHBUTTON or WS_TABSTOP,
-        140, 64, 85, 24,
-        Wnd, ID_DLG_OK, G_Instance, nil
-      );
-
-      HBtnCancel := CreateWindow(
-        'BUTTON',
-        'Anuluj',
-        WS_CHILD or WS_VISIBLE or BS_PUSHBUTTON or WS_TABSTOP,
-        235, 64, 85, 24,
-        Wnd, ID_DLG_CANCEL, G_Instance, nil
-      );
-
-      SetFocus(G_DlgEdit);
-      SendMessage(G_DlgEdit, EM_SETSEL, 0, MAKELONG(0, $FFFF));
-      Result := 0;
-    end;
-
-    WM_COMMAND:
-    begin
-      case WParam of
-        ID_DLG_OK:
-        begin
-          GetWindowText(G_DlgEdit, G_DlgPath, SizeOf(G_DlgPath));
-          G_DlgResult := True;
-          DestroyWindow(Wnd);
-        end;
-
-        ID_DLG_CANCEL:
-        begin
-          G_DlgResult := False;
-          DestroyWindow(Wnd);
-        end;
-      end;
-      Result := 0;
-    end;
-
-    WM_CLOSE:
-    begin
-      G_DlgResult := False;
-      DestroyWindow(Wnd);
-      Result := 0;
-    end;
-
-    else
-      Result := DefWindowProc(Wnd, Msg, WParam, LParam);
-  end;
-end;
-
-procedure EnsureDlgClass;
-var
-  DlgClass: TWndClass;
-begin
-  if G_DlgClassRegistered then Exit;
-  FillChar(DlgClass, SizeOf(DlgClass), 0);
-  DlgClass.style := CS_HREDRAW or CS_VREDRAW;
-  DlgClass.lpfnWndProc := @FileDlgProc;
-  DlgClass.hInstance := G_Instance;
-  DlgClass.hCursor := LoadCursor(0, IDC_ARROW);
-  DlgClass.hbrBackground := COLOR_BTNFACE + 1;
-  DlgClass.lpszClassName := 'W16PromptDlg';
-  if RegisterClass(DlgClass) then
-    G_DlgClassRegistered := True;
-end;
-
-function PromptFileName(const ATitle, ADefault: PChar): Boolean;
-var
-  Rc: TRect;
-  X, Y: Integer;
-  M: TMsg;
-begin
-  EnsureDlgClass;
-  G_DlgResult := False;
-  StrCopy(G_DlgPath, ADefault);
-
-  GetWindowRect(G_MainWnd, Rc);
-  X := Rc.left + (Rc.right - Rc.left - 360) div 2;
-  Y := Rc.top + (Rc.bottom - Rc.top - 130) div 2;
-  if X < 10 then X := 10;
-  if Y < 10 then Y := 10;
-
-  G_DlgWnd := CreateWindow(
-    'W16PromptDlg',
-    ATitle,
-    WS_POPUP or WS_CAPTION or WS_SYSMENU or WS_VISIBLE or WS_BORDER,
-    X, Y, 360, 130,
-    G_MainWnd, 0, G_Instance, nil
-  );
-
-  if G_DlgWnd = 0 then
-  begin
-    Result := False;
-    Exit;
-  end;
-
-  EnableWindow(G_MainWnd, False);
-
-  while IsWindow(G_DlgWnd) and GetMessage(M, 0, 0, 0) do
-  begin
-    if not IsDialogMessage(G_DlgWnd, M) then
-    begin
-      TranslateMessage(M);
-      DispatchMessage(M);
-    end;
-  end;
-
-  EnableWindow(G_MainWnd, True);
-  SetActiveWindow(G_MainWnd);
-  SetFocus(G_EditWnd);
-
-  Result := G_DlgResult;
-end;
 
 function TryOpenFile(APath: PChar): HFILE;
 var
@@ -269,20 +147,56 @@ begin
 end;
 
 procedure DoFileOpen;
+var
+  OFN: TOpenFileName;
+  FileBuf: array[0..128] of Char;
+  FilterBuf: array[0..128] of Char;
 begin
-  if PromptFileName('Otworz plik', G_CurFile) then
+  FillChar(OFN, SizeOf(OFN), 0);
+  FileBuf[0] := #0;
+
+  FilterBuf := 'Pliki tekstowe (*.txt)'#0'*.txt'#0'Wszystkie pliki (*.*)'#0'*.*'#0#0;
+
+  OFN.lStructSize := SizeOf(TOpenFileName);
+  OFN.hwndOwner := G_MainWnd;
+  OFN.lpstrFilter := @FilterBuf[0];
+  OFN.nFilterIndex := 1;
+  OFN.lpstrFile := @FileBuf[0];
+  OFN.nMaxFile := SizeOf(FileBuf);
+  OFN.lpstrDefExt := 'txt';
+  OFN.Flags := $00001000 or $00000800 or $00000004; { OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY }
+
+  if GetOpenFileName(OFN) then
   begin
-    if StrLen(G_DlgPath) > 0 then
-      LoadFileToEdit(G_DlgPath);
+    if StrLen(FileBuf) > 0 then
+      LoadFileToEdit(FileBuf);
   end;
 end;
 
 procedure DoFileSaveAs;
+var
+  OFN: TOpenFileName;
+  FileBuf: array[0..128] of Char;
+  FilterBuf: array[0..128] of Char;
 begin
-  if PromptFileName('Zapisz plik jako', G_CurFile) then
+  FillChar(OFN, SizeOf(OFN), 0);
+  StrCopy(FileBuf, G_CurFile);
+
+  FilterBuf := 'Pliki tekstowe (*.txt)'#0'*.txt'#0'Wszystkie pliki (*.*)'#0'*.*'#0#0;
+
+  OFN.lStructSize := SizeOf(TOpenFileName);
+  OFN.hwndOwner := G_MainWnd;
+  OFN.lpstrFilter := @FilterBuf[0];
+  OFN.nFilterIndex := 1;
+  OFN.lpstrFile := @FileBuf[0];
+  OFN.nMaxFile := SizeOf(FileBuf);
+  OFN.lpstrDefExt := 'txt';
+  OFN.Flags := $00000002 or $00000800 or $00000004; { OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY }
+
+  if GetSaveFileName(OFN) then
   begin
-    if StrLen(G_DlgPath) > 0 then
-      SaveEditToFile(G_DlgPath);
+    if StrLen(FileBuf) > 0 then
+      SaveEditToFile(FileBuf);
   end;
 end;
 
@@ -329,12 +243,19 @@ begin
         '',
         WS_CHILD or WS_VISIBLE or WS_VSCROLL or WS_HSCROLL or
         ES_MULTILINE or ES_AUTOVSCROLL or ES_AUTOHSCROLL,
-        0, 0, Rc.right, Rc.bottom,
-        Wnd,
-        IDC_EDIT,
-        G_Instance,
-        nil
+        0, 0,
+        Rc.right, Rc.bottom,
+        Wnd, IDC_EDIT, G_Instance, nil
       );
+
+      if G_EditWnd = 0 then
+      begin
+        Result := -1;
+        Exit;
+      end;
+
+      SendMessage(G_EditWnd, WM_SETFONT, GetStockObject(SYSTEM_FONT), 0);
+      SetFocus(G_EditWnd);
       Result := 0;
     end;
 
@@ -407,26 +328,6 @@ begin
   SetMenu(Wnd, HMenu);
 end;
 
-function IsValidFileParam(const S: ShortString): Boolean;
-var
-  i: Integer;
-begin
-  if Length(S) = 0 then
-  begin
-    Result := False;
-    Exit;
-  end;
-  for i := 1 to Length(S) do
-  begin
-    if (S[i] < ' ') or (Ord(S[i]) >= 127) then
-    begin
-      Result := False;
-      Exit;
-    end;
-  end;
-  Result := True;
-end;
-
 var
   WndClass: TWndClass;
   Msg: TMsg;
@@ -435,7 +336,6 @@ var
 begin
   G_Instance := HInstance;
   G_CurFile[0] := #0;
-  G_DlgClassRegistered := False;
 
   FillChar(WndClass, SizeOf(WndClass), 0);
   WndClass.style := CS_HREDRAW or CS_VREDRAW;
@@ -467,16 +367,7 @@ begin
   ShowWindow(G_MainWnd, SW_SHOW);
   UpdateWindow(G_MainWnd);
 
-  if ParamCount >= 1 then
-    ParamS := ParamStr(1)
-  else
-    ParamS := '';
-
-  if IsValidFileParam(ParamS) and (ParamS <> 'NOTEPAD.EXE') and (ParamS <> 'C:\CALMIRA\NOTEPAD.EXE') then
-  begin
-    StrPCopy(CmdParam, ParamS);
-    LoadFileToEdit(CmdParam);
-  end;
+  { Startujemy z pustym dokumentem (Bez tytulu) }
 
   while GetMessage(Msg, 0, 0, 0) do
   begin
