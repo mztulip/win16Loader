@@ -399,6 +399,16 @@ void init_mouse_ps2(void)
 {
     unsigned char resp;
 
+    /* Oproznij bufor wyjsciowy 8042 (np. resztki po nacisnieciu Enter w DOS) */
+    while (inp(0x64) & 0x01) inp(0x60);
+
+    /* Wlacz port myszy PS/2 w kontrolerze (0xA8) */
+    ps2_wait_write();
+    outp(0x64, 0xA8);
+
+    /* Oproznij ewentualne smieci */
+    while (inp(0x64) & 0x01) inp(0x60);
+
     /* Wyslij reset do myszy przez kontroler (0xD4 = nastepny bajt idzie do myszy) */
     ps2_wait_write();
     outp(0x64, 0xD4);
@@ -559,7 +569,7 @@ static void shrink_dos_memory(void)
     __asm {
         mov ss_val, ss
     }
-    needed = (ss_val - psp_val) + 0x1000;
+    needed = (ss_val - psp_val) + 0x800;
     err = _dos_setblock(needed, psp_val, &maxsize);
     kprintf("DOS mem shrink: psp=%04X ss=%04X needed=%u para err=%u max=%u\n",
             psp_val, ss_val, needed, err, maxsize);
@@ -637,13 +647,17 @@ int main(int argc, char *argv[])
         g_kcb_phys = (unsigned long)kcb_seg << 4;
         kprintf("KCB: seg=0x%04X phys=0x%05lX\n", kcb_seg, g_kcb_phys);
 
-        /* Bufor bitmap: 56KB = 3584 paragrafow; musi byc alokowany PRZED file I/O */
-        if (_dos_allocmem(BMP_BUF_PARA, &bmp_seg) != 0) {
-            kprintf("ERROR: alloc bitmap buffer (%u para)\n", BMP_BUF_PARA); return 1;
+        /* Bufor bitmap: 56KB alokowany tylko dla standalone SKI.EXE (niepotrzebny w Calmira) */
+        if (strstr(app_name, "SKI") != NULL || strstr(app_name, "ski") != NULL) {
+            if (_dos_allocmem(BMP_BUF_PARA, &bmp_seg) != 0) {
+                kprintf("ERROR: alloc bitmap buffer (%u para)\n", BMP_BUF_PARA); return 1;
+            }
+            g_bitmaps_phys = (unsigned long)bmp_seg << 4;
+            kprintf("BmpBuf: seg=0x%04X phys=0x%05lX size=%uB\n",
+                    bmp_seg, g_bitmaps_phys, (unsigned)BMP_BUF_PARA * 16u);
+        } else {
+            g_bitmaps_phys = 0;
         }
-        g_bitmaps_phys = (unsigned long)bmp_seg << 4;
-        kprintf("BmpBuf: seg=0x%04X phys=0x%05lX size=%uB\n",
-                bmp_seg, g_bitmaps_phys, (unsigned)BMP_BUF_PARA * 16u);
 
         /* 14b/14c: GlobalHeap z pamieci rozszerzonej (XMS >1MB) jezeli dostepna.
          * Fallback do konwencjonalnej pamieci DOS gdy ext_mem_kb < 64. */

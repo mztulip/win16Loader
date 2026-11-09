@@ -916,6 +916,35 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
 /* ============================================================
  * API
  * ============================================================ */
+static unsigned dos_get_strategy(void)
+{
+    union REGS r;
+    r.x.ax = 0x5800;
+    int86(0x21, &r, &r);
+    return r.x.ax;
+}
+
+static void dos_set_strategy(unsigned strat)
+{
+    union REGS r;
+    r.x.ax = 0x5801;
+    r.x.bx = strat;
+    int86(0x21, &r, &r);
+}
+
+static int alloc_top_buffers(void)
+{
+    unsigned old_strat = dos_get_strategy();
+    int err = 0;
+    dos_set_strategy(2); /* Last fit: przydziel z samej gory pamieci konwencjonalnej DOS */
+    if (_dos_allocmem(0x1000, &g_tmp_seg) != 0 ||
+        _dos_allocmem(CHUNK / 16, &g_chunk_seg) != 0) {
+        err = -1;
+    }
+    dos_set_strategy(old_strat);
+    return err;
+}
+
 int mod_init(const char *argv0, unsigned long thunk_phys, unsigned thunk_seg,
              unsigned thunk_size)
 {
@@ -924,8 +953,7 @@ int mod_init(const char *argv0, unsigned long thunk_phys, unsigned thunk_seg,
     g_thunk_max = thunk_size / THUNK_SIZE;
     g_thunk_phys = thunk_phys;
     if (_dos_allocmem((MAX_MODS * MT_SIZE + 15) / 16, &g_modtab_seg) ||
-        _dos_allocmem(0x1000, &g_tmp_seg) ||
-        _dos_allocmem(CHUNK / 16, &g_chunk_seg)) {
+        alloc_top_buffers() != 0) {
         mlog("ERROR: mod_init - brak pamieci DOS\n");
         return -1;
     }
@@ -934,7 +962,8 @@ int mod_init(const char *argv0, unsigned long thunk_phys, unsigned thunk_seg,
     g_hash_val = (unsigned short __far *)_fmalloc(HASH_SIZE * 2UL);
     g_stubs = (void __far *)_fmalloc(MAX_STUBS * sizeof(*g_stubs));
     if (!g_hash_key || !g_hash_val || !g_stubs) { mlog("ERROR: mod_init - brak pamieci\n"); return -1; }
-    mlog("mod_init: sysdir='%s' MODTAB seg=%04X\n", g_sysdir, g_modtab_seg);
+    mlog("mod_init: sysdir='%s' MODTAB seg=%04X tmp=%04X chunk=%04X\n",
+         g_sysdir, g_modtab_seg, g_tmp_seg, g_chunk_seg);
     return 0;
 }
 
@@ -1305,10 +1334,11 @@ void mod_exec_rm(void)
                 err = dos_exec(cmd, pargs);
                 outp(0x21, old_pic_mask);
                 mlog("DOS EXEC ret=%d\n", err);
-                _dos_allocmem(0x1000, &g_tmp_seg);
-                _dos_allocmem(CHUNK / 16, &g_chunk_seg);
+                alloc_top_buffers();
                 g_rmbuf_seg = g_tmp_seg;
+                kcb[KCB_RMBUF_SEG / 2] = g_rmbuf_seg;
                 gdt_add(SEL_RMBUF, (unsigned long)g_tmp_seg << 4, 0xFFFF, 0x92, 0);
+                gdt_apply();
             }
             vesa_set_lfb();
             init_mouse_ps2();

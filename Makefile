@@ -78,7 +78,7 @@ module.obj: module.c module.h ne.h serial.h
 	$(WCC) -ml -q $< -fo=$@
 
 loader.exe: loader.c module.h ne.h pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj
-	$(WCL) -ml -l=dos -k32768 -fm=loader.map -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
+	$(WCL) -ml -l=dos -k8192 -fm=loader.map -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
 
 # Baza sygnatur API Win16 (z .spec Wine) dla stubow niezaimplementowanych funkcji
 WIN16API.DB: tools/gen_apidb.py tools/imports.py
