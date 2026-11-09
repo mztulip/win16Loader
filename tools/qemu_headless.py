@@ -57,7 +57,8 @@ def main():
             f.write(b'@echo off\r\n' + b''.join(l.strip().encode() + b'\r\n'
                                                 for l in a.run.split(';')))
         subprocess.run(['mcopy', '-o', '-i', fd, bat, '::fdauto.bat'], check=True)
-    cmd = ['qemu-system-i386', '-drive', f'file={fd},if=floppy,format=raw']
+    cmd = ['qemu-system-i386', '-vga', 'std,retrace=precise',
+           '-drive', f'file={fd},if=floppy,format=raw']
     if a.fdb:
         fdb = os.path.join(tmp, 'fdb.img')
         shutil.copy(a.fdb, fdb)
