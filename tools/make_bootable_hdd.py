@@ -244,7 +244,7 @@ def main():
         f.flush()
         run(["mcopy", "-oi", mpart, f.name, "::SKIFREE/README.TXT"])
 
-    # 10. Root documentation and links: C:\README_OS.TXT, C:\README.TXT and C:\LINKI.TXT
+    # 10. Root documentation and links: C:\README.TXT and C:\LINKI.TXT
     root_readme = (
         "======================================================================\r\n"
         "     SYSTEM CALMIRA II NA FREEDOS - DOKUMENTACJA I WOLNY SOFT\r\n"
@@ -289,7 +289,6 @@ def main():
     with tempfile.NamedTemporaryFile("w") as f:
         f.write(root_readme)
         f.flush()
-        run(["mcopy", "-oi", mpart, f.name, "::README_OS.TXT"])
         run(["mcopy", "-oi", mpart, f.name, "::README.TXT"])
 
     root_linki = (
