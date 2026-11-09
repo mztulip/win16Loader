@@ -246,20 +246,103 @@ void dos_getdir(char *b);
 void dos_chdir(char *p);
 #pragma aux dos_chdir = "mov ah, 3Bh" "int 21h" parm [dx] modify [ax];
 
+static const char __far *get_ext(LPCSTR path)
+{
+    int i, last_dot = -1;
+    if (!path || !HIWORD(path)) return NULL;
+    for (i = 0; path[i]; i++) {
+        if (path[i] == '\\' || path[i] == '/' || path[i] == ':') last_dot = -1;
+        else if (path[i] == '.') last_dot = i;
+    }
+    if (last_dot >= 0) return path + last_dot + 1;
+    return NULL;
+}
+
+static BOOL is_executable_ext(LPCSTR ext)
+{
+    if (!ext) return FALSE;
+    if (!lstrcmpi(ext, "exe") || !lstrcmpi(ext, "com") ||
+        !lstrcmpi(ext, "bat") || !lstrcmpi(ext, "pif")) return TRUE;
+    return FALSE;
+}
+
+static BOOL find_assoc(LPCSTR file, LPSTR app_out, int app_max, LPSTR cmd_out, int cmd_max)
+{
+    const char __far *ext = get_ext(file);
+    static char tpl[128];
+    int len, i, j, hat;
+
+    if (!ext || !ext[0]) return FALSE;
+
+    /* Sprawdz sekcje [extensions] w WIN.INI */
+    len = GetProfileString("extensions", ext, "", tpl, sizeof(tpl));
+    if (len <= 0) return FALSE;
+
+    /* Wyciagnij sciezke/nazwe programu do app_out */
+    if (app_out && app_max > 0) {
+        for (i = 0; tpl[i] && tpl[i] != ' ' && tpl[i] != '^' && i < app_max - 1; i++) {
+            app_out[i] = tpl[i];
+        }
+        app_out[i] = 0;
+    }
+
+    if (cmd_out && cmd_max > 0) {
+        /* Szukaj znaku '^' w szablonie (np. "notepad.exe ^.txt") */
+        hat = -1;
+        for (i = 0; tpl[i]; i++) {
+            if (tpl[i] == '^') { hat = i; break; }
+        }
+
+        if (hat >= 0) {
+            /* Kopiuj czesc przed '^' */
+            for (i = 0; i < hat && i < cmd_max - 1; i++) cmd_out[i] = tpl[i];
+            j = i;
+            /* Wstaw pelna sciezke pliku dokumentu */
+            for (i = 0; file[i] && j < cmd_max - 1; i++) cmd_out[j++] = file[i];
+            /* Pomin rozszerzenie szablonu po '^' (np. "^.txt") i skopiuj reszte */
+            i = hat + 1;
+            while (tpl[i] && tpl[i] != ' ') i++;
+            while (tpl[i] && j < cmd_max - 1) cmd_out[j++] = tpl[i++];
+            cmd_out[j] = 0;
+        } else {
+            /* Brak '^': po prostu program + " " + file */
+            for (i = 0; tpl[i] && i < cmd_max - 1; i++) cmd_out[i] = tpl[i];
+            j = i;
+            if (j < cmd_max - 1) cmd_out[j++] = ' ';
+            for (i = 0; file[i] && j < cmd_max - 1; i++) cmd_out[j++] = file[i];
+            cmd_out[j] = 0;
+        }
+    }
+    return TRUE;
+}
+
 HINSTANCE API ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR par, LPCSTR dir, int show)
 {
-    static char cmd[200];
+    static char cmd[260];
     int n = 0, i;
     WORD r;
+    const char __far *ext;
     (void)h;
     if (op && HIWORD(op) && lstrcmpi(op, "open")) return 31;   /* SE_ERR_NOASSOC: inne operacje */
     if (!file || !HIWORD(file)) return 2;
-    for (i = 0; file[i] && n < 190; i++) cmd[n++] = file[i];
-    if (par && HIWORD(par) && par[0]) {
-        cmd[n++] = ' ';
-        for (i = 0; par[i] && n < 198; i++) cmd[n++] = par[i];
+
+    ext = get_ext(file);
+    if (is_executable_ext(ext)) {
+        for (i = 0; file[i] && n < 240; i++) cmd[n++] = file[i];
+        cmd[n] = 0;
+    } else {
+        if (!find_assoc(file, NULL, 0, cmd, sizeof(cmd))) {
+            return 31; /* SE_ERR_NOASSOC */
+        }
+        n = lstrlen(cmd);
     }
-    cmd[n] = 0;
+
+    if (par && HIWORD(par) && par[0]) {
+        if (n < 255) cmd[n++] = ' ';
+        for (i = 0; par[i] && n < 258; i++) cmd[n++] = par[i];
+        cmd[n] = 0;
+    }
+
     /* Katalog startowy: nowe zadanie dziedziczy biezacy, wiec na czas startu ustaw go u siebie */
     if (dir && HIWORD(dir) && dir[0]) {
         static char old[70], nd[70];
@@ -281,7 +364,17 @@ HINSTANCE API ShellExecute(HWND h, LPCSTR op, LPCSTR file, LPCSTR par, LPCSTR di
 
 HINSTANCE API FindExecutable(LPCSTR file, LPCSTR dir, LPSTR res)
 {
-    (void)file; (void)dir;
+    const char __far *ext;
+    (void)dir;
+    if (!file || !HIWORD(file)) return 2;
+    ext = get_ext(file);
+    if (is_executable_ext(ext)) {
+        if (res) lstrcpy(res, file);
+        return 33;
+    }
+    if (res && find_assoc(file, res, 128, NULL, 0)) {
+        return 33;
+    }
     if (res) res[0] = 0;
     return 31;
 }

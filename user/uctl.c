@@ -258,14 +258,24 @@ static LRESULT __far __pascal StaticProc(HWND h, WORD m, WORD wp, LONG lp)
     switch (m) {
     case WM_CREATE: {
         WORD type = (WORD)(STYLE(h) & 0x0F);
+        LPCSTR n = *(LPCSTR __far *)((BYTE __far *)lp + CS_NAME_OFF);
         if (type == 3) {                                  /* SS_ICON: tekst = nazwa ikony */
             extern HICON API LoadIcon(WORD, LPCSTR);
-            LPCSTR n = *(LPCSTR __far *)((BYTE __far *)lp + CS_NAME_OFF);
             if (n) XW(h, 2) = LoadIcon(WP(h)->hinst, n);
             SetWindowPos(h, 0, 0, 0, 32, 32, 0x0002 | 0x0004 | 0x0010);
+        } else if (n && HIWORD(n) && ustrlen(n) >= MAX_TITLE) {
+            int len = ustrlen(n);
+            WORD hmem = (WORD)GlobalAlloc(0x40, (DWORD)len + 1);
+            if (hmem) {
+                umemcpy(MK_FP(hmem, 0), n, len + 1);
+                XW(h, 4) = hmem;
+            }
         }
         return 0;
     }
+    case WM_DESTROY:
+        if (XW(h, 4)) { GlobalFree(XW(h, 4)); XW(h, 4) = 0; }
+        break;
     case WM_PAINT: {
         PS ps;
         HDC dc = BeginPaint(h, (LPVOID)&ps);
@@ -285,14 +295,20 @@ static LRESULT __far __pascal StaticProc(HWND h, WORD m, WORD wp, LONG lp)
         }
         default: {
             char t[MAX_TITLE];
+            LPCSTR text;
             WORD fmt = (type == 1) ? 1 : (type == 2) ? 2 : 0;
             if (type == 0xB || type == 0xC) fmt = 0x0020; else fmt |= 0x0010;
             if (STYLE(h) & 0x80) fmt |= 0x0800;
             FillRect(dc, (LPRECT)&r, br);
-            GetWindowText(h, (LPSTR)(char __far *)t, sizeof(t));
+            if (XW(h, 4)) {
+                text = (LPCSTR)MK_FP(XW(h, 4), 0);
+            } else {
+                GetWindowText(h, (LPSTR)(char __far *)t, sizeof(t));
+                text = (LPCSTR)(char __far *)t;
+            }
             if (STYLE(h) & WS_DISABLED) SetTextColor(dc, syscolor(COLOR_GRAYTEXT));
             SetBkMode(dc, 1);
-            DrawText(dc, (LPCSTR)(char __far *)t, -1, (LPRECT)&r, fmt);
+            DrawText(dc, text, -1, (LPRECT)&r, fmt);
         }
         }
         EndPaint(h, (LPVOID)&ps);
@@ -301,7 +317,38 @@ static LRESULT __far __pascal StaticProc(HWND h, WORD m, WORD wp, LONG lp)
     case WM_ERASEBKGND: return 1;
     case WM_NCHITTEST:  return HTTRANSPARENT;
     case WM_GETDLGCODE: return 0x0100;
-    case WM_SETTEXT:    DefWindowProc(h, m, wp, lp); InvalidateRect(h, 0, TRUE); return 1;
+    case WM_SETTEXT: {
+        LPCSTR s = (LPCSTR)lp;
+        if (XW(h, 4)) { GlobalFree(XW(h, 4)); XW(h, 4) = 0; }
+        if (s && HIWORD(s) && ustrlen(s) >= MAX_TITLE) {
+            int len = ustrlen(s);
+            WORD hmem = (WORD)GlobalAlloc(0x40, (DWORD)len + 1);
+            if (hmem) {
+                umemcpy(MK_FP(hmem, 0), s, len + 1);
+                XW(h, 4) = hmem;
+            }
+        }
+        DefWindowProc(h, m, wp, lp);
+        InvalidateRect(h, 0, TRUE);
+        return 1;
+    }
+    case WM_GETTEXT:
+        if (XW(h, 4)) {
+            LPCSTR src = (LPCSTR)MK_FP(XW(h, 4), 0);
+            int len = ustrlen(src);
+            if (wp > 0 && lp) {
+                int c = (int)wp - 1;
+                if (c > len) c = len;
+                umemcpy((LPVOID)lp, src, c);
+                ((char __far *)lp)[c] = 0;
+                return c;
+            }
+            return 0;
+        }
+        return DefWindowProc(h, m, wp, lp);
+    case WM_GETTEXTLENGTH:
+        if (XW(h, 4)) return ustrlen((LPCSTR)MK_FP(XW(h, 4), 0));
+        return DefWindowProc(h, m, wp, lp);
     case WM_USER:       { WORD o = XW(h, 2); XW(h, 2) = wp; InvalidateRect(h, 0, TRUE); return o; }   /* STM_SETICON */
     case WM_USER + 1:   return XW(h, 2);                                                            /* STM_GETICON */
     }

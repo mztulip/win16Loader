@@ -139,12 +139,18 @@ void inittask_c(void)
     psp = (BYTE __far *)MK_FP(GetCurrentPDB(), 0);
     if (task_is_first()) {
         /* Linia polecen w PSP: [0x80]=dlugosc, [0x81..]=tekst, 0x0D (kolejne zadania: WinExec) */
-        if (n > 125) n = 125;
-        psp[0x80] = (BYTE)(n ? n + 1 : 0);
-        psp[0x81] = ' ';
-        kmemcpy(psp + (n ? 0x82 : 0x81), cmd, n);
-        psp[(n ? 0x82 : 0x81) + n] = 0x0D;
-        psp[(n ? 0x83 : 0x82) + n] = 0;
+        if (n > 124) n = 124;
+        if (n > 0) {
+            psp[0x80] = (BYTE)(n + 1);
+            psp[0x81] = ' ';
+            kmemcpy(psp + 0x82, cmd, n);
+            psp[0x82 + n] = 0x0D;
+            psp[0x83 + n] = 0;
+        } else {
+            psp[0x80] = 0;
+            psp[0x81] = 0x0D;
+            psp[0x82] = 0;
+        }
     } else {
         n = psp[0x80] ? psp[0x80] - 1 : 0;
     }
@@ -163,6 +169,9 @@ void inittask_c(void)
     g_it_si = task_prev();      /* hPrevInstance */
     g_it_di = hinst;
     g_it_es = GetCurrentPDB();
+    dbg_puts("KERNEL: inittask_c ES="); dbg_hex(g_it_es, 4);
+    dbg_puts(" BX="); dbg_hex(g_it_bx, 4);
+    dbg_str(" Cmd: ", (LPCSTR)MK_FP(g_it_es, g_it_bx));
     dbg_puts("KERNEL: InitTask hInst="); dbg_hex(hinst, 4);
     dbg_puts(" SP="); dbg_hex(sp, 4);
     dbg_puts(" stack="); dbg_hex(stk, 4);

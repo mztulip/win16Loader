@@ -13,6 +13,7 @@ const
   IDM_SAVE      = 1003;
   IDM_SAVEAS    = 1004;
   IDM_EXIT      = 1005;
+  IDM_ABOUT     = 1010;
 
 type
   TOpenFileName = record
@@ -53,11 +54,18 @@ var
 procedure DoFileSave; forward;
 procedure DoFileSaveAs; forward;
 
+procedure Dbg(S: PChar);
+begin
+  OutputDebugString(S);
+end;
+
 function TryOpenFile(APath: PChar): HFILE;
 var
   FH: HFILE;
   Ofs: OFSTRUCT;
 begin
+  Dbg('NOTEPAD: TryOpenFile: ');
+  Dbg(APath);
   FH := _lopen(APath, 0);
   if FH = HFILE_ERROR then
     FH := OpenFile(APath, @Ofs, OF_READ);
@@ -288,6 +296,21 @@ begin
           DoFileSaveAs;
         IDM_EXIT:
           SendMessage(Wnd, WM_CLOSE, 0, 0);
+        IDM_ABOUT:
+          MessageBox(
+            Wnd,
+            'Notepad dla Win16 / FreeDOS / Calmira'#13#10 +
+            'Autor: mztulip'#13#10#13#10 +
+            'Skompilowano za pomoca Free Pascal (FPC dla i8086-win16).'#13#10#13#10 +
+            'Linki do darmowego oprogramowania:'#13#10 +
+            '- Free Pascal: https://www.freepascal.org/'#13#10 +
+            '- Calmira II:  http://www.calmira.org/'#13#10 +
+            '- FreeDOS:     https://www.freedos.org/'#13#10 +
+            '- SkiFree:     https://ski.ihoc.net/'#13#10 +
+            '- Open Watcom: https://openwatcom.org/',
+            'O programie Notepad - mztulip',
+            MB_OK or $0040 { MB_ICONINFORMATION }
+          );
       end;
       Result := 0;
     end;
@@ -312,7 +335,7 @@ end;
 
 procedure CreateMainMenu(Wnd: HWND);
 var
-  HMenu, HSubMenu: WinTypes.HMENU;
+  HMenu, HSubMenu, HHelpMenu: WinTypes.HMENU;
 begin
   HMenu := CreateMenu;
   HSubMenu := CreatePopupMenu;
@@ -323,9 +346,58 @@ begin
   AppendMenu(HSubMenu, MF_STRING, IDM_SAVEAS, 'Zapisz &jako...');
   AppendMenu(HSubMenu, MF_SEPARATOR, 0, nil);
   AppendMenu(HSubMenu, MF_STRING, IDM_EXIT,   '&Zakoncz');
-
   AppendMenu(HMenu, MF_POPUP, HSubMenu, '&Plik');
+
+  HHelpMenu := CreatePopupMenu;
+  AppendMenu(HHelpMenu, MF_STRING, IDM_ABOUT, '&O programie...');
+  AppendMenu(HMenu, MF_POPUP, HHelpMenu, 'P&omoc');
+
   SetMenu(Wnd, HMenu);
+end;
+
+function GetCmdFile: ShortString;
+var
+  P: PChar;
+  S: ShortString;
+  PDB: Word;
+  Len: Byte;
+  I: Integer;
+begin
+  S := '';
+  P := CmdLine;
+  if P <> nil then
+  begin
+    Dbg('NOTEPAD: CmdLine: ');
+    Dbg(P);
+    while (P^ <> #0) and (P^ <> #13) and (P^ <> #10) and (Length(S) < 120) do
+    begin
+      S := S + P^;
+      Inc(P);
+    end;
+  end;
+  if Length(S) = 0 then
+  begin
+    Dbg('NOTEPAD: checking PSP fallback');
+    PDB := GetCurrentPDB;
+    if PDB <> 0 then
+    begin
+      Len := PByte(Ptr(PDB, $80))^;
+      if Len > 0 then
+      begin
+        for I := 1 to Len do
+        begin
+          if (PChar(Ptr(PDB, $80 + I))^ = #13) or (PChar(Ptr(PDB, $80 + I))^ = #10) then
+            Break;
+          S := S + PChar(Ptr(PDB, $80 + I))^;
+        end;
+      end;
+    end;
+  end;
+  while (Length(S) > 0) and (S[1] <= ' ') do Delete(S, 1, 1);
+  while (Length(S) > 0) and (S[Length(S)] <= ' ') do Delete(S, Length(S), 1);
+  if (Length(S) >= 2) and (S[1] = '"') and (S[Length(S)] = '"') then
+    S := Copy(S, 2, Length(S) - 2);
+  Result := S;
 end;
 
 var
@@ -367,7 +439,13 @@ begin
   ShowWindow(G_MainWnd, SW_SHOW);
   UpdateWindow(G_MainWnd);
 
-  { Startujemy z pustym dokumentem (Bez tytulu) }
+  { Jesli podano plik w parametrze (np. klikniecie pliku w Calmira lub WinExec), otworz go }
+  ParamS := GetCmdFile;
+  if Length(ParamS) > 0 then
+  begin
+    StrPCopy(CmdParam, ParamS);
+    LoadFileToEdit(CmdParam);
+  end;
 
   while GetMessage(Msg, 0, 0, 0) do
   begin

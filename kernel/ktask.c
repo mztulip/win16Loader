@@ -32,7 +32,7 @@ static int  g_dos_owner = -1;        /* zadanie, ktorego katalog jest teraz usta
 extern void fault_entry(void);
 
 /* Dla task_boot (kasm.asm): pierwsze uruchomienie zadania */
-WORD g_boot_cs, g_boot_ip, g_boot_ds, g_boot_psp, g_boot_prev;
+WORD g_boot_cs, g_boot_ip, g_boot_ds, g_boot_psp, g_boot_prev, g_boot_show;
 
 extern void task_switch(WORD *save_ss, WORD *save_sp, WORD new_ss, WORD new_sp);
 #pragma aux task_switch parm [ax] [dx] [bx] [cx];
@@ -174,6 +174,7 @@ static void switch_to(int i)
     KCBW(KCB_APP_HEAPSTART) = n->heapstart;
     g_boot_cs = n->entry_cs; g_boot_ip = n->entry_ip;
     g_boot_ds = n->hinst; g_boot_psp = n->psp; g_boot_prev = n->prev;
+    g_boot_show = n->show;
     g_cur = i;
     KCBW(KCB_NTASKS) = n->dying ? 0 : g_n;                /* wyjatek przy sprzataniu = panika */
     task_switch(&o->ss, &o->sp, n->ss, n->sp);
@@ -469,6 +470,7 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     BYTE __far *psp;
     WORD __far *f;
     task_init();
+    dbg_str("KERNEL: WinExec cmd: ", cmd);
     args = split_cmd(cmd, (LPSTR)prog, sizeof(prog) - 4);
     if (!prog[0]) return 2;
     if (!has_ext((LPCSTR)prog)) kstrcpy((LPSTR)prog + kstrlen((LPCSTR)prog), ".EXE");
@@ -516,11 +518,18 @@ WORD API WinExec(LPCSTR cmd, WORD show)
     psp = (BYTE __far *)MK_FP(t->psp, 0);
     kmemcpy(psp, MK_FP(SEL_PSP, 0), 0x80);
     n = kstrlen(args);
-    if (n > 125) n = 125;
-    psp[0x80] = (BYTE)(n ? n + 1 : 0);
-    psp[0x81] = ' ';
-    kmemcpy(psp + (n ? 0x82 : 0x81), args, n);
-    psp[(n ? 0x82 : 0x81) + n] = 0x0D;
+    if (n > 124) n = 124;
+    if (n > 0) {
+        psp[0x80] = (BYTE)(n + 1);
+        psp[0x81] = ' ';
+        kmemcpy(psp + 0x82, args, n);
+        psp[0x82 + n] = 0x0D;
+        psp[0x83 + n] = 0;
+    } else {
+        psp[0x80] = 0;
+        psp[0x81] = 0x0D;
+        psp[0x82] = 0;
+    }
     /* Ramka jak po task_switch: GS FS ES DS DI SI BP FLAGS, adres powrotu = task_boot */
     t->ss = t->hinst;
     t->sp = t->initsp - 18;

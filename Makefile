@@ -528,10 +528,10 @@ run-test-rc: boot_test_rc.img
 	    -d cpu_reset,guest_errors -D qemu.log 2>/dev/null
 
 # -------------------------------------------------------
-# Calmira: dysk twardy C: (64MB FAT16) z C:\CALMIRA, start z dyskietki boot.img
+# Calmira: boot z dysku twardego C: (64MB FAT16) z FreeDOS, Windows i Calmira II.
+# Na dyskietce A: (floppy.img) dostepne pliki tekstowe do testow.
 # Calmira II 3.3 (GPL-2.0+): http://www.calmira.org/downloads/ -> ../win31_apps/english_calmira/calmii33
 # zrodla: http://web.archive.org/web/20101101214316/http://www.vv-soft.de/calmira/cal3101q.zip
-# Loader szuka systemowych DLL (KERNEL/USER/GDI) w swoim katalogu (A:\).
 # -------------------------------------------------------
 CALMIRA_DIR = ../win31_apps/english_calmira/calmii33
 HDD_MB      = 64
@@ -544,28 +544,19 @@ windir/FREEDOS.ICO: tools/make_freedos_ico.py
 windir/DOSPRMPT.PIF: tools/make_pif.py
 	python3 tools/make_pif.py
 
-calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) windir/DOSPRMPT.PIF windir/FREEDOS.ICO
-	rm -f $@
-	truncate -s $(HDD_MB)M $@
-	echo 'start=2048, type=6, bootable' | sfdisk -q $@
-	mkfs.fat -F 16 -n CALMIRA --offset 2048 $@ $$(( ($(HDD_MB)*1024*1024 - 2048*512) / 1024 )) >/dev/null
-	mmd   -i $@@@1M ::CALMIRA
-	mcopy -s -i $@@@1M $(CALMIRA_DIR)/* ::CALMIRA/
-	mmd   -i $@@@1M ::WINDOWS
-	mcopy -o -i $@@@1M $(NOTEPAD_EXE) ::WINDOWS/NOTEPAD.EXE
-	mcopy -i $@@@1M windir/WIN.INI windir/SYSTEM.INI ::WINDOWS/
-	mcopy -o -i $@@@1M windir/DOSPRMPT.PIF windir/FREEDOS.ICO ::WINDOWS/
-	mcopy -o -i $@@@1M windir/DOSPRMPT.PIF windir/FREEDOS.ICO ::CALMIRA/
-	@echo "[OK] calmira.img gotowy"
+floppy.img: tools/make_floppy.py
+	python3 tools/make_floppy.py $@
 
-boot_calmira.img: boot.img
-	cp boot.img $@
-	printf '@echo off\r\nSET PATH=A:\\;A:\\FREEDOS\\BIN;C:\\WINDOWS;C:\\CALMIRA\r\nC:\r\ncd \\CALMIRA\r\nWIN CALMIRA.EXE\r\n' | mcopy -o -i $@ - ::fdauto.bat
-	@echo "[OK] boot_calmira.img gotowy"
+calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
+             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) \
+             windir/DOSPRMPT.PIF windir/FREEDOS.ICO $(FDBOOT)
+	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
+	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
+	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE)
 
-run-calmira: boot_calmira.img calmira.img
-	qemu-system-i386 -drive file=boot_calmira.img,if=floppy,format=raw \
-	    -drive file=calmira.img,if=ide,format=raw -boot a -m 16 \
+run-calmira: calmira.img floppy.img
+	qemu-system-i386 -drive file=floppy.img,if=floppy,format=raw \
+	    -drive file=calmira.img,if=ide,format=raw -boot c -m 16 \
 	    -no-reboot -no-shutdown \
 	    -serial stdio \
 	    -d cpu_reset,guest_errors -D qemu.log
@@ -578,5 +569,5 @@ clean:
 	rm -f libstubs.obj pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj mouse_msg.obj rc_loader.obj
 	rm -f test_rc.exe test_rc.obj TESTRES.NE
 	rm -f panic.bin
-	rm -f boot.img boot_test_rc.img boot_win16test.img bochs.log qemu.log
+	rm -f boot.img boot_test_rc.img boot_win16test.img calmira.img floppy.img bochs.log qemu.log
 	$(MAKE) -C win16test clean

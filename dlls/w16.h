@@ -199,6 +199,7 @@ WORD   API GlobalFree(WORD);
 LPVOID API GlobalLock(WORD);
 BOOL   API GlobalUnlock(WORD);
 void   API OutputDebugString(LPCSTR);
+int    API GetProfileString(LPCSTR, LPCSTR, LPCSTR, LPSTR, int);
 int    API _lopen(LPCSTR, int);
 int    API _lcreat(LPCSTR, int);
 int    API _lclose(int);

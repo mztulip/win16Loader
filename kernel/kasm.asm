@@ -38,8 +38,11 @@ extern _g_d3
 global INITTASK
 INITTASK:
     push bp
+    mov  bp, sp
+    push ds
+    mov  ax, seg _g_it_ax
+    mov  ds, ax
     call inittask_c_
-    pop  bp
     mov  ax, [_g_it_es]
     mov  es, ax
     mov  ax, [_g_it_ax]
@@ -48,6 +51,8 @@ INITTASK:
     mov  dx, [_g_it_dx]
     mov  si, [_g_it_si]
     mov  di, [_g_it_di]
+    pop  ds
+    pop  bp
     retf
 
 ; ---------------------------------------------------------------------
@@ -93,7 +98,7 @@ task_switch_:
 
 ; Pierwsze wejscie zadania (adres powrotu w ramce z WinExec). Rejestry jak z loadera:
 ; DS=DGROUP, DI=hInstance, SI=hPrevInstance, ES=PSP, BP=0. Powrot z wejscia = koniec zadania.
-extern _g_boot_cs, _g_boot_ip, _g_boot_ds, _g_boot_psp, _g_boot_prev
+extern _g_boot_cs, _g_boot_ip, _g_boot_ds, _g_boot_psp, _g_boot_prev, _g_boot_show
 global task_boot_
 task_boot_:
     mov  ax, [_g_boot_cs]
@@ -107,6 +112,9 @@ task_boot_:
     push ax
     push bx
     mov  ds, di
+    mov  bx, 0x0081         ; ES:BX = command line w PSP
+    mov  dx, [_g_boot_show] ; DX = nCmdShow
+    mov  cx, 0x1000         ; CX = stack limit
     sti
     retf
 task_returned:

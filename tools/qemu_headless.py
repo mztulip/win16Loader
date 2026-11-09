@@ -42,6 +42,7 @@ def main():
     ap.add_argument('--out', default='qemu_out')
     ap.add_argument('--port', type=int, default=4460)
     ap.add_argument('--boot-wait', type=float, default=25)
+    ap.add_argument('--boot', default='a', choices=['a', 'c'])
     ap.add_argument('--mem', type=int, default=16)
     ap.add_argument('steps', nargs='*')
     a = ap.parse_args()
@@ -66,7 +67,7 @@ def main():
         shutil.copy(a.hd, hd)
         cmd += ['-drive', f'file={hd},if=ide,format=raw']
     serial = os.path.join(a.out, 'serial.log')
-    cmd += ['-boot', 'a', '-m', str(a.mem), '-display', 'none',
+    cmd += ['-boot', a.boot, '-m', str(a.mem), '-display', 'none',
             '-serial', f'file:{serial}', '-no-reboot',
             '-monitor', f'tcp:127.0.0.1:{a.port},server,nowait']
     q = subprocess.Popen(cmd)
