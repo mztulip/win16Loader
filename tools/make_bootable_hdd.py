@@ -182,12 +182,18 @@ def main():
         f.flush()
         run(["mcopy", "-oi", mpart, f.name, "::WINDOWS/WIN.BAT"])
 
-    # 8. Copy Calmira files
+    # 8. Copy Calmira files and subdirectories (e.g. TRAY with quicklaunch icons)
     print("Copying Calmira files to ::CALMIRA...")
     run(["mmd", "-i", mpart, "::CALMIRA"], check=False)
     for cfile in glob.glob(f"{args.calmira_dir}/*"):
         if os.path.isfile(cfile):
             run(["mcopy", "-oi", mpart, cfile, "::CALMIRA/"])
+        elif os.path.isdir(cfile):
+            subname = os.path.basename(cfile).upper()
+            run(["mmd", "-i", mpart, f"::CALMIRA/{subname}"], check=False)
+            for subfile in glob.glob(f"{cfile}/*"):
+                if os.path.isfile(subfile):
+                    run(["mcopy", "-oi", mpart, subfile, f"::CALMIRA/{subname}/"])
 
     run(["mcopy", "-oi", mpart, "windir/DOSPRMPT.PIF", "::CALMIRA/DOSPRMPT.PIF"])
     run(["mcopy", "-oi", mpart, "windir/FREEDOS.ICO", "::CALMIRA/FREEDOS.ICO"])
@@ -244,7 +250,6 @@ def main():
         "     SYSTEM CALMIRA II NA FREEDOS - DOKUMENTACJA I WOLNY SOFT\r\n"
         "======================================================================\r\n\r\n"
         "Autor modyfikacji i integracji: mztulip\r\n"
-        "GitHub autora: https://github.com/mztulip\r\n"
         "Projekt Win16Loader: https://github.com/mztulip/win16Loader\r\n\r\n"
         "System bazowy: FreeDOS (https://www.freedos.org/)\r\n"
         "Powloka graficzna: Calmira II 3.3 (http://www.calmira.org/)\r\n"
@@ -260,9 +265,8 @@ def main():
         "A:\\               - Stacja dyskietek z plikami testowymi i dokumentacja\r\n\r\n"
         "LINKI DO PROJEKTOW I DARMOWEGO OPROGRAMOWANIA:\r\n"
         "----------------------------------------------\r\n"
-        "1. Profil autora na GitHubie:\r\n"
-        "   https://github.com/mztulip\r\n"
-        "   Repozytorium projektu: https://github.com/mztulip/win16Loader\r\n\r\n"
+        "1. Projekt Win16Loader (kod zrodlowy, dokumentacja, loader):\r\n"
+        "   https://github.com/mztulip/win16Loader\r\n\r\n"
         "2. Calmira II Shell:\r\n"
         "   http://www.calmira.org/\r\n"
         "   Otwarta powloka graficzna w stylu Windows 95 dla Win16 (GNU GPL).\r\n\r\n"
