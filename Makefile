@@ -78,7 +78,7 @@ module.obj: module.c module.h ne.h serial.h
 	$(WCC) -ml -q $< -fo=$@
 
 loader.exe: loader.c module.h ne.h pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj
-	$(WCL) -ml -l=dos -k32768 -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
+	$(WCL) -ml -l=dos -k32768 -fm=loader.map -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
 
 # Baza sygnatur API Win16 (z .spec Wine) dla stubow niezaimplementowanych funkcji
 WIN16API.DB: tools/gen_apidb.py tools/imports.py
@@ -538,7 +538,13 @@ HDD_MB      = 64
 
 NOTEPAD_EXE = $(firstword $(wildcard example_apps/notepad/NOTEPAD.exe win16_example_app/NOTEPAD.exe win16_example_app/notepad/NOTEPAD.exe ../notepad/NOTEPAD.exe))
 
-calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE)
+windir/FREEDOS.ICO: tools/make_freedos_ico.py
+	python3 tools/make_freedos_ico.py
+
+windir/DOSPRMPT.PIF: tools/make_pif.py
+	python3 tools/make_pif.py
+
+calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) windir/DOSPRMPT.PIF windir/FREEDOS.ICO
 	rm -f $@
 	truncate -s $(HDD_MB)M $@
 	echo 'start=2048, type=6, bootable' | sfdisk -q $@
@@ -548,6 +554,8 @@ calmira.img: $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(N
 	mmd   -i $@@@1M ::WINDOWS
 	mcopy -o -i $@@@1M $(NOTEPAD_EXE) ::WINDOWS/NOTEPAD.EXE
 	mcopy -i $@@@1M windir/WIN.INI windir/SYSTEM.INI ::WINDOWS/
+	mcopy -o -i $@@@1M windir/DOSPRMPT.PIF windir/FREEDOS.ICO ::WINDOWS/
+	mcopy -o -i $@@@1M windir/DOSPRMPT.PIF windir/FREEDOS.ICO ::CALMIRA/
 	@echo "[OK] calmira.img gotowy"
 
 boot_calmira.img: boot.img

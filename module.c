@@ -23,6 +23,7 @@
 #include <i86.h>
 #include <malloc.h>
 #include <io.h>
+#include <conio.h>
 #include "serial.h"
 #include "ne.h"
 #include "module.h"
@@ -1071,6 +1072,98 @@ static void base_name(const char *path, char *out)
     upcase(out);
 }
 
+static int is_ext(const char *path, const char *ext)
+{
+    int lp = strlen(path), le = strlen(ext);
+    if (lp < le) return 0;
+    return !stricmp(path + lp - le, ext);
+}
+
+static void trim_str(char *s)
+{
+    char *p = s;
+    int len;
+    while (*p == ' ' || *p == '\t') p++;
+    if (p != s) memmove(s, p, strlen(p) + 1);
+    len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' || s[len - 1] == '\n')) {
+        s[--len] = 0;
+    }
+}
+
+static int pif_read(const char *pif_path, char *prog, char *dir, char *args)
+{
+    FILE *f;
+    unsigned char buf[370];
+    size_t nr;
+    prog[0] = dir[0] = args[0] = 0;
+    f = fopen(pif_path, "rb");
+    if (!f) return -1;
+    nr = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    if (nr < 170) return -1;
+    memcpy(prog, buf + 0x24, 64);
+    prog[64] = 0;
+    trim_str(prog);
+    memcpy(dir, buf + 0x66, 64);
+    dir[64] = 0;
+    trim_str(dir);
+    memcpy(args, buf + 0xA6, 64);
+    args[64] = 0;
+    trim_str(args);
+    if (!prog[0]) strcpy(prog, "COMMAND.COM");
+    return 0;
+}
+
+static void dos_chdir(const char *dir)
+{
+    union REGS r;
+    struct SREGS s;
+    r.h.ah = 0x3B;
+    s.ds = FP_SEG((void __far *)dir);
+    r.x.dx = FP_OFF((void __far *)dir);
+    int86x(0x21, &r, &r, &s);
+}
+
+static int dos_exec(const char *prog, const char *args)
+{
+    static unsigned char tail[128];
+    static struct {
+        unsigned short env;
+        void __far    *cmdline;
+        void __far    *fcb1;
+        void __far    *fcb2;
+    } pb;
+    union REGS r;
+    struct SREGS s;
+    int len = 0;
+
+    if (args && args[0]) {
+        len = strlen(args);
+        if (len > 124) len = 124;
+        tail[0] = (unsigned char)(len + 1);
+        tail[1] = ' ';
+        memcpy(tail + 2, args, len);
+        tail[2 + len] = 0x0D;
+    } else {
+        tail[0] = 0;
+        tail[1] = 0x0D;
+    }
+
+    pb.env = 0;
+    pb.cmdline = (void __far *)tail;
+    pb.fcb1 = 0;
+    pb.fcb2 = 0;
+
+    r.x.ax = 0x4B00;
+    s.ds = FP_SEG((void __far *)prog);
+    r.x.dx = FP_OFF((void __far *)prog);
+    s.es = FP_SEG((void __far *)&pb);
+    r.x.bx = FP_OFF((void __far *)&pb);
+    int86x(0x21, &r, &r, &s);
+    return r.x.cflag ? r.x.ax : 0;
+}
+
 void mod_exec_rm(void)
 {
     static char path[96], base[10];
@@ -1108,9 +1201,108 @@ void mod_exec_rm(void)
             strcat(cand, path);
             if (!access(cand, 0)) { strcpy(path, cand); found = 1; }
         }
+        if (!found) {
+            static const char *dos_exts[] = { ".PIF", ".COM", ".BAT", 0 };
+            int e;
+            char noext[96], cand2[96];
+            char *dot;
+            strcpy(noext, path);
+            dot = strrchr(noext, '.');
+            if (dot) *dot = 0;
+            for (e = 0; dos_exts[e] && !found; e++) {
+                sprintf(cand2, "%s%s", noext, dos_exts[e]);
+                if (!access(cand2, 0)) { strcpy(path, cand2); found = 1; break; }
+                if (wdir[0]) {
+                    sprintf(cand, "%s\\%s", wdir, cand2);
+                    if (!access(cand, 0)) { strcpy(path, cand); found = 1; break; }
+                }
+                if (sdir[0]) {
+                    sprintf(cand, "%s\\%s", sdir, cand2);
+                    if (!access(cand, 0)) { strcpy(path, cand); found = 1; break; }
+                }
+                if (g_appdir[0]) {
+                    sprintf(cand, "%s\\%s", g_appdir, cand2);
+                    if (!access(cand, 0)) { strcpy(path, cand); found = 1; break; }
+                }
+            }
+        }
         if (!found) { res[0] = 0; res[1] = 2; return; }
     }
     if (mode == 0) {
+        int is_pif = is_ext(path, ".PIF");
+        int is_dos = is_pif || is_ext(path, ".COM") || is_ext(path, ".BAT");
+        if (!is_dos) {
+            FILE *fc = fopen(path, "rb");
+            if (fc) {
+                MZ_HEADER mz;
+                if (fread(&mz, sizeof(mz), 1, fc) == 1 && mz.e_magic == 0x5A4D) {
+                    NE_HEADER ne;
+                    if (fseek(fc, mz.e_lfanew, SEEK_SET) != 0 ||
+                        fread(&ne, sizeof(ne), 1, fc) != 1 ||
+                        ne.ne_magic != 0x454E) {
+                        is_dos = 1;
+                    }
+                }
+                fclose(fc);
+            }
+        }
+        if (is_dos) {
+            static char cmd[96], pdir[96], pargs[96];
+            strcpy(cmd, path);
+            pdir[0] = pargs[0] = 0;
+            if (is_pif) {
+                pif_read(path, cmd, pdir, pargs);
+            }
+            if (pdir[0]) {
+                int dlen = strlen(pdir);
+                if (dlen > 3 && (pdir[dlen - 1] == '\\' || pdir[dlen - 1] == '/')) {
+                    pdir[dlen - 1] = 0;
+                }
+                if (pdir[1] == ':') {
+                    unsigned total;
+                    int drv = (pdir[0] >= 'a' && pdir[0] <= 'z') ? pdir[0] - 'a' + 1 : pdir[0] - 'A' + 1;
+                    _dos_setdrive(drv, &total);
+                }
+                dos_chdir(pdir);
+            }
+            if (!stricmp(cmd, "COMMAND.COM") && access("COMMAND.COM", 0) != 0) {
+                if (access("C:\\FREEDOS\\BIN\\COMMAND.COM", 0) == 0)
+                    strcpy(cmd, "C:\\FREEDOS\\BIN\\COMMAND.COM");
+                else if (access("A:\\FREEDOS\\BIN\\COMMAND.COM", 0) == 0)
+                    strcpy(cmd, "A:\\FREEDOS\\BIN\\COMMAND.COM");
+            }
+            mlog("DOS EXEC (fullscreen): %s\n", cmd);
+            shutdown_mouse_ps2();
+            set_text_mode();
+            printf("\r\n");
+            printf("==================================================\r\n");
+            printf("  FreeDOS Prompt (Win16 Standard Mode)\r\n");
+            printf("  Wpisz EXIT aby powrocic do Calmiry.\r\n");
+            printf("==================================================\r\n\r\n");
+            {
+                unsigned maxpara = 0;
+                unsigned char old_pic_mask;
+                int err;
+                _dos_freemem(g_tmp_seg);
+                _dos_freemem(g_chunk_seg);
+                _dos_allocmem(0xFFFF, &maxpara);
+                mlog("DOS free mem: %u para (%lu KB)\n", maxpara, (unsigned long)maxpara * 16 / 1024);
+                old_pic_mask = (unsigned char)inp(0x21);
+                outp(0x21, old_pic_mask & ~0x02);
+                err = dos_exec(cmd, pargs);
+                outp(0x21, old_pic_mask);
+                mlog("DOS EXEC ret=%d\n", err);
+                _dos_allocmem(0x1000, &g_tmp_seg);
+                _dos_allocmem(CHUNK / 16, &g_chunk_seg);
+                g_rmbuf_seg = g_tmp_seg;
+                gdt_add(SEL_RMBUF, (unsigned long)g_tmp_seg << 4, 0xFFFF, 0x92, 0);
+            }
+            vesa_set_lfb();
+            init_mouse_ps2();
+            res[0] = 2;
+            res[1] = 0x21;
+            return;
+        }
         dir_of(path, g_appdir);
         {   /* zakonczony program z tego samego pliku: te same adresy */
             static char full[96];

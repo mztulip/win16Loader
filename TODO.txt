@@ -1650,3 +1650,41 @@ ETAP 22: WUIL i Calmira II 3.3 (kompilacja FPC i8086-win16)
           gdy plik nie znajduje się w bieżącym roboczym katalogu DOS;
         - zaktualizowano ExtractIcon w dlls/shell.c o przeszukiwanie katalogu Windows i Calmiry;
         - umieszczono NOTEPAD.EXE zarówno w C:\CALMIRA\, jak i C:\WINDOWS\ na calmira.img.
+      * Dodano pełną bibliotekę COMMDLG.DLL z dialogami GetOpenFileName i GetSaveFileName:
+        - Styl i układ kontrolek zgodny z Windows 3.1 (stc1..stc5, lst1, lst2, cmb1, cmb2, edt1).
+        - Obsługa przeglądania katalogów ([..], podkatalogi), filtrów (*.txt, *.*) i dysków ([-c-]).
+        - Zintegrowano GetOpenFileName i GetSaveFileName z Notepadem (zapisywanie i otwieranie plików).
+
+
+================================================================================
+ETAP 23: MS-DOS Prompt (implementacja obu trybów: pełnoekranowy i okienkowy)
+================================================================================
+- [x] Tryb 1: Pełnoekranowy MS-DOS Prompt (w stylu Windows 3.1 Standard Mode / 286):
+      * Parser i interpreter plików .PIF (Program Information File) zgodny ze standardem Windows 3.1:
+        - odczyt nazwy pliku wykonywalnego, domyślnego katalogu roboczego i argumentów.
+      * Ikona pulpitu FreeDOS (maskotka Blinky the fish):
+        - generator 16-kolorowych ikon Win16 DIB (tools/make_freedos_ico.py -> FREEDOS.ICO),
+        - skrót na pulpicie i w menu Start Calmiry (dosprmpt.pif + freedos.ico).
+      * Prawidłowe zarządzanie pamięcią DOS konwencjonalną:
+        - kurczenie początkowego bloku loadera (_dos_setblock na starcie) do ~137 KB,
+        - zwalnianie buforów tymczasowych (g_tmp_seg 64KB, g_chunk_seg 32KB) przed dos_exec.
+      * Przełączenie procesora z Protected Mode (PM) do Real Mode (RM):
+        - zmiana trybu wideo na standardowy VGA 80x25 (INT 10h AX=0003h),
+        - odmaskowanie IRQ1 w PIC (usunięcie blokady klawiatury w trybie rzeczywistym),
+        - uruchomienie interpretera FreeDOS COMMAND.COM za pomocą DOS EXEC (INT 21h AH=4B00h).
+      * Obsługa polecenia 'exit' i czysty powrót do Calmiry:
+        - ponowna alokacja buforów transferowych i odtworzenie deskryptora SEL_RMBUF w GDT,
+        - przywrócenie trybu graficznego VESA LFB i inicjalizacja myszy PS/2,
+        - odświeżenie całego pulpitu i okien Calmiry za pomocą InvalidateRect(0, NULL, TRUE).
+
+- [ ] Tryb 2: Okienkowy MS-DOS Prompt (w stylu Windows 3.1 386 Enhanced Mode):
+      * Wykorzystanie sprzętowego trybu Virtual-8086 (V86) procesora 80386+:
+        - konfiguracja zadania TSS z flagą VM w EFLAGS,
+        - obsługa IOPB (I/O Permission Bitmap) i przechwytywanie operacji wejścia/wyjścia.
+      * Wirtualizacja przerwań sprzętowych i programowych (INT 10h wideo, INT 16h klawiatura, INT 21h DOS).
+      * Wirtualizacja pamięci tekstowej VGA (0xB8000) per zadanie DOS VM.
+      * Renderer okna konsoli Win16:
+        - mapowanie znaków i atrybutów bufora 80x25 do okna Windows za pomocą bitmapy i czcionki rastrowej VGA (DOSAPP.FON).
+      * Skrót klawiszowy Alt+Enter:
+        - dynamiczne przełączanie sesji DOS między oknem na pulpicie a pełnym ekranem VGA.
+      * Wielozadaniowość z wywłaszczaniem (preemptive) dla sesji DOS działających w tle.

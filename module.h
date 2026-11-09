@@ -101,4 +101,10 @@ unsigned short mod_thunk_next(void);
 /* Katalog systemowy (z argv[0]) */
 const char    *mod_sysdir(void);
 
+/* Sterowanie trybem graficznym i mysza dla zadan DOS (fullscreen) */
+void vesa_set_lfb(void);
+void set_text_mode(void);
+void init_mouse_ps2(void);
+void shutdown_mouse_ps2(void);
+
 #endif /* MODULE_H */

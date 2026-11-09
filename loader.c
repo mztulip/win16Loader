@@ -150,7 +150,7 @@ static void vesa_init(void)
 }
 
 /* Przelacz VESA na LFB mode (bit14) — wywolac przed wejsciem w PM */
-static void vesa_set_lfb(void)
+void vesa_set_lfb(void)
 {
     union REGS r;
     r.x.ax = 0x4F02;
@@ -395,7 +395,7 @@ static unsigned char ps2_read_byte(void)
     return 0xFF;   /* timeout */
 }
 
-static void init_mouse_ps2(void)
+void init_mouse_ps2(void)
 {
     unsigned char resp;
 
@@ -430,7 +430,7 @@ static void init_mouse_ps2(void)
 /* Po powrocie z PM: wylacz IRQ12 w kontrolerze i streaming myszy, zeby BIOS
  * (INT 74h) nie dostawal pakietow i nie zjadal odpowiedzi przy kolejnym
  * init_mouse_ps2(). pm16_call_app i tak ustawia CCB=0x47 przy wejsciu w PM. */
-static void shutdown_mouse_ps2(void)
+void shutdown_mouse_ps2(void)
 {
     while (inp(0x64) & 0x01) inp(0x60);   /* oproznij bufor wyjsciowy */
     ps2_wait_write();
@@ -500,7 +500,7 @@ static void kcb_set_ext(unsigned kcb_rm, int argc, char *argv[])
             w[KCB_THUNK_LIMIT / 2], w[KCB_ENV_SEG / 2], c + KCB_WINDIR);
 }
 
-static void set_text_mode(void)
+void set_text_mode(void)
 {
     union REGS r;
     r.x.ax = 0x0003;
@@ -550,10 +550,26 @@ static void phantom_b_restore(void)
     g_cds_b = 0;
 }
 
+static void shrink_dos_memory(void)
+{
+    unsigned ss_val;
+    unsigned needed, maxsize;
+    unsigned psp_val = _psp;
+    unsigned err;
+    __asm {
+        mov ss_val, ss
+    }
+    needed = (ss_val - psp_val) + 0x1000;
+    err = _dos_setblock(needed, psp_val, &maxsize);
+    kprintf("DOS mem shrink: psp=%04X ss=%04X needed=%u para err=%u max=%u\n",
+            psp_val, ss_val, needed, err, maxsize);
+}
+
 int main(int argc, char *argv[])
 {
     const char *app_name;
     serial_init();
+    shrink_dos_memory();
     kprintf("=== NE Loader STEP20 - shell / menu bar ===\n");
 
     /* 0. Wykryj dostepna pamiec RAM (przed PM - INT 15h dostepny tylko w real mode) */

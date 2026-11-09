@@ -479,6 +479,18 @@ WORD API WinExec(LPCSTR cmd, WORD show)
         dbg_str("KERNEL: WinExec nie udany ", (LPCSTR)prog);
         return res->hinst ? res->hinst : 2;              /* hinst = kod bledu */
     }
+    if (res->ok == 2) {
+        /* Program DOS zakonczyl dzialanie w trybie pelnoekranowym (Standard Mode) */
+        HMODULE u = GetModuleHandle("USER");
+        if (u) {
+            typedef void (API *INVALRECT)(WORD, LPVOID, BOOL);
+            INVALRECT inv = (INVALRECT)GetProcAddress(u, (LPCSTR)MK_FP(0, 125));
+            if (inv) inv(0, (LPVOID)0, TRUE);
+        }
+        task_dos_sync();
+        dbg_str("KERNEL: WinExec DOS zakonczony pomyslnie ", (LPCSTR)prog);
+        return res->hinst ? res->hinst : 33;
+    }
     t = &g_t[slot];
     kmemset((LPVOID)t, 0, sizeof(TASK));
     t->hinst = res->hinst;
