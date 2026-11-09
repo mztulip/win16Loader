@@ -536,7 +536,10 @@ run-test-rc: boot_test_rc.img
 CALMIRA_DIR = ../win31_apps/english_calmira/calmii33
 HDD_MB      = 64
 
-NOTEPAD_EXE = $(firstword $(wildcard example_apps/notepad/NOTEPAD.exe win16_example_app/NOTEPAD.exe win16_example_app/notepad/NOTEPAD.exe ../notepad/NOTEPAD.exe))
+NOTEPAD_EXE = example_apps/notepad/NOTEPAD.exe
+
+$(NOTEPAD_EXE): example_apps/notepad/NOTEPAD.PAS
+	$(MAKE) -C example_apps/notepad
 
 windir/FREEDOS.ICO: tools/make_freedos_ico.py
 	python3 tools/make_freedos_ico.py

@@ -238,12 +238,14 @@ def main():
         f.flush()
         run(["mcopy", "-oi", mpart, f.name, "::SKIFREE/README.TXT"])
 
-    # 10. Root documentation and links: C:\README.TXT and C:\LINKI.TXT
+    # 10. Root documentation and links: C:\README_OS.TXT, C:\README.TXT and C:\LINKI.TXT
     root_readme = (
         "======================================================================\r\n"
         "     SYSTEM CALMIRA II NA FREEDOS - DOKUMENTACJA I WOLNY SOFT\r\n"
         "======================================================================\r\n\r\n"
         "Autor modyfikacji i integracji: mztulip\r\n"
+        "GitHub autora: https://github.com/mztulip\r\n"
+        "Projekt Win16Loader: https://github.com/mztulip/win16Loader\r\n\r\n"
         "System bazowy: FreeDOS (https://www.freedos.org/)\r\n"
         "Powloka graficzna: Calmira II 3.3 (http://www.calmira.org/)\r\n"
         "Edytor tekstu: Notepad (skompilowany w Free Pascalu dla i8086-win16)\r\n"
@@ -256,30 +258,34 @@ def main():
         "C:\\FREEDOS\\BIN\\   - Narzedzia i powloka systemu FreeDOS\r\n"
         "C:\\SKIFREE\\       - Kultowa gra narciarska SkiFree (Chris Pirih)\r\n"
         "A:\\               - Stacja dyskietek z plikami testowymi i dokumentacja\r\n\r\n"
-        "LINKI DO STRON PROJEKTOW I DARMOWEGO OPROGRAMOWANIA:\r\n"
-        "----------------------------------------------------\r\n"
-        "1. Calmira II Shell:\r\n"
+        "LINKI DO PROJEKTOW I DARMOWEGO OPROGRAMOWANIA:\r\n"
+        "----------------------------------------------\r\n"
+        "1. Profil autora na GitHubie:\r\n"
+        "   https://github.com/mztulip\r\n"
+        "   Repozytorium projektu: https://github.com/mztulip/win16Loader\r\n\r\n"
+        "2. Calmira II Shell:\r\n"
         "   http://www.calmira.org/\r\n"
         "   Otwarta powloka graficzna w stylu Windows 95 dla Win16 (GNU GPL).\r\n\r\n"
-        "2. FreeDOS Project:\r\n"
+        "3. FreeDOS Project:\r\n"
         "   https://www.freedos.org/\r\n"
         "   Calkowicie wolny system operacyjny DOS.\r\n\r\n"
-        "3. Free Pascal Compiler:\r\n"
+        "4. Free Pascal Compiler (FPC):\r\n"
         "   https://www.freepascal.org/\r\n"
         "   Wieloplatformowy kompilator Object Pascal ze wsparciem dla Win16.\r\n\r\n"
-        "4. SkiFree (Chris Pirih):\r\n"
+        "5. SkiFree (Chris Pirih):\r\n"
         "   https://ski.ihoc.net/\r\n"
         "   Oficjalna strona autora legendarnej gry narciarskiej.\r\n\r\n"
-        "5. Open Watcom:\r\n"
+        "6. Open Watcom:\r\n"
         "   https://openwatcom.org/\r\n"
         "   Otwarty kompilator C/C++ uzyty do zbudowania modulu loadera i KERNEL.\r\n\r\n"
-        "6. Wine Project:\r\n"
+        "7. Wine Project:\r\n"
         "   https://www.winehq.org/\r\n"
         "   Zrodlo fontow rastrowych oraz specyfikacji Win16 API.\r\n"
     )
     with tempfile.NamedTemporaryFile("w") as f:
         f.write(root_readme)
         f.flush()
+        run(["mcopy", "-oi", mpart, f.name, "::README_OS.TXT"])
         run(["mcopy", "-oi", mpart, f.name, "::README.TXT"])
 
     root_linki = (

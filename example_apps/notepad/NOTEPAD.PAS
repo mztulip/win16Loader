@@ -299,15 +299,12 @@ begin
         IDM_ABOUT:
           MessageBox(
             Wnd,
-            'Notepad dla Win16 / FreeDOS / Calmira'#13#10 +
-            'Autor: mztulip'#13#10#13#10 +
+            'Notepad dla Win16 / FreeDOS'#13#10 +
+            'Autor: mztulip'#13#10 +
+            'Data kompilacji: ' + {$I %DATE%} + ' ' + {$I %TIME%} + #13#10#13#10 +
             'Skompilowano za pomoca Free Pascal (FPC dla i8086-win16).'#13#10#13#10 +
-            'Linki do darmowego oprogramowania:'#13#10 +
-            '- Free Pascal: https://www.freepascal.org/'#13#10 +
-            '- Calmira II:  http://www.calmira.org/'#13#10 +
-            '- FreeDOS:     https://www.freedos.org/'#13#10 +
-            '- SkiFree:     https://ski.ihoc.net/'#13#10 +
-            '- Open Watcom: https://openwatcom.org/',
+            'Strona projektu Free Pascal:'#13#10 +
+            'https://www.freepascal.org/',
             'O programie Notepad - mztulip',
             MB_OK or $0040 { MB_ICONINFORMATION }
           );
