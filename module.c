@@ -1253,6 +1253,17 @@ void mod_exec_rm(void)
             if (is_pif) {
                 pif_read(path, cmd, pdir, pargs);
             }
+            if (!pdir[0]) {
+                char *slash = strrchr(cmd, '\\');
+                if (!slash) slash = strrchr(cmd, '/');
+                if (slash) {
+                    int dlen = (int)(slash - cmd);
+                    if (dlen > 0) {
+                        strncpy(pdir, cmd, dlen);
+                        pdir[dlen] = 0;
+                    }
+                }
+            }
             if (pdir[0]) {
                 int dlen = strlen(pdir);
                 if (dlen > 3 && (pdir[dlen - 1] == '\\' || pdir[dlen - 1] == '/')) {
@@ -1274,11 +1285,13 @@ void mod_exec_rm(void)
             mlog("DOS EXEC (fullscreen): %s\n", cmd);
             shutdown_mouse_ps2();
             set_text_mode();
-            printf("\r\n");
-            printf("==================================================\r\n");
-            printf("  FreeDOS Prompt (Win16 Standard Mode)\r\n");
-            printf("  Wpisz EXIT aby powrocic do Calmiry.\r\n");
-            printf("==================================================\r\n\r\n");
+            if (strstr(cmd, "COMMAND.COM")) {
+                printf("\r\n");
+                printf("==================================================\r\n");
+                printf("  FreeDOS Prompt (Win16 Standard Mode)\r\n");
+                printf("  Wpisz EXIT aby powrocic do Calmiry.\r\n");
+                printf("==================================================\r\n\r\n");
+            }
             {
                 unsigned maxpara = 0;
                 unsigned char old_pic_mask;

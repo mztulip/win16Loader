@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--user-bin", default="user/USER.EXE", help="USER.EXE path")
     parser.add_argument("--gdi-bin", default="gdi/GDI.EXE", help="GDI.EXE path")
     parser.add_argument("--notepad-exe", default="example_apps/notepad/NOTEPAD.exe", help="NOTEPAD.EXE path")
+    parser.add_argument("--mario-dir", default="../games/mario", help="Mario game directory")
     args = parser.parse_args()
 
     out_img = args.out
@@ -244,7 +245,55 @@ def main():
         f.flush()
         run(["mcopy", "-oi", mpart, f.name, "::SKIFREE/README.TXT"])
 
-    # 10. Root documentation and links: C:\README.TXT and C:\LINKI.TXT
+    # 10. Create C:\MARIO with MARIO.EXE, MARIO.CFG and README.TXT
+    print("Setting up C:\\MARIO and documentation...")
+    run(["mmd", "-i", mpart, "::MARIO"], check=False)
+    mario_dir = args.mario_dir
+    if not os.path.isdir(mario_dir):
+        mario_dir = "/home/tulip/Dokumenty/Projekty_moje/osproject/games/mario"
+
+    if os.path.exists(f"{mario_dir}/MARIO.EXE"):
+        run(["mcopy", "-oi", mpart, f"{mario_dir}/MARIO.EXE", "::MARIO/MARIO.EXE"])
+    if os.path.exists(f"{mario_dir}/MARIO.CFG"):
+        run(["mcopy", "-oi", mpart, f"{mario_dir}/MARIO.CFG", "::MARIO/MARIO.CFG"])
+
+    mario_readme = (
+        "======================================================================\r\n"
+        "               MARIO (MARIO & LUIGI) DLA DOS / CALMIRA\r\n"
+        "======================================================================\r\n\r\n"
+        "Autor: Mike Wiering (Wiering Software)\r\n"
+        "Oficjalna strona projektu: https://wieringsoftware.nl/mario/index.html\r\n\r\n"
+        "O GRZE MARIO (1994):\r\n"
+        "--------------------\r\n"
+        "Klasyczny klon gry Super Mario Bros. stworzony w 1994 roku przez\r\n"
+        "holenderskiego programiste Mike'a Wieringa na komputery PC z DOS-em.\r\n\r\n"
+        "Gra powstala jako cwiczenie z programowania grafiki VGA w jezyku\r\n"
+        "Borland Turbo Pascal, w celu osiagniecia plynnego przewijania ekranu\r\n"
+        "(parallax scrolling) na procesorze 486 25 MHz w trybie 320x200 (page flipping).\r\n\r\n"
+        "HISTORIA I KOD ZRODLOWY:\r\n"
+        "------------------------\r\n"
+        "Wczesna, niedokonczona wersja demonstracyjna gry (z 4 poziomami) wyciekla\r\n"
+        "w latach 90. i stala sie hitem na gieldach komputerowych i plytach CD\r\n"
+        "ze shareware. Wielu graczy pamietalo ja jako gre, ktorej nie dalo sie\r\n"
+        "ukonczyc z powodu braku kolejnych etapow w wersji testowej.\r\n\r\n"
+        "Po latach autor udostepnil oficjalna, pelna wersje (6 poziomow, wybor\r\n"
+        "postaci Mario lub Luigi) wraz z pelnym kodem zrodlowym w Turbo Pascalu\r\n"
+        "na swojej stronie: https://wieringsoftware.nl/mario/index.html\r\n\r\n"
+        "Silnik ten posluzyl autorowi pozniej do stworzenia kultowej gry\r\n"
+        "'Charlie the Duck'.\r\n\r\n"
+        "STEROWANIE:\r\n"
+        "-----------\r\n"
+        "- Strzalki w lewo / w prawo:  Poruszanie sie\r\n"
+        "- Strzalka w dol:             Kucanie / wchodzenie do rur\r\n"
+        "- Strzalka w gore / Spacja / Alt / Ctrl / Shift: Skok\r\n"
+        "- Po zakonczeniu gry powrot do Calmiry nastepuje automatycznie!\r\n"
+    )
+    with tempfile.NamedTemporaryFile("w") as f:
+        f.write(mario_readme)
+        f.flush()
+        run(["mcopy", "-oi", mpart, f.name, "::MARIO/README.TXT"])
+
+    # 11. Root documentation and links: C:\README.TXT and C:\LINKI.TXT
     root_readme = (
         "======================================================================\r\n"
         "     SYSTEM CALMIRA II NA FREEDOS - DOKUMENTACJA I WOLNY SOFT\r\n"
@@ -262,6 +311,7 @@ def main():
         "C:\\CALMIRA\\       - Powloka graficzna Calmira II\r\n"
         "C:\\FREEDOS\\BIN\\   - Narzedzia i powloka systemu FreeDOS\r\n"
         "C:\\SKIFREE\\       - Kultowa gra narciarska SkiFree (Chris Pirih)\r\n"
+        "C:\\MARIO\\         - Klasyczna gra Mario (Mike Wiering, 1994, Turbo Pascal)\r\n"
         "A:\\               - Stacja dyskietek z plikami testowymi i dokumentacja\r\n\r\n"
         "LINKI DO PROJEKTOW I DARMOWEGO OPROGRAMOWANIA:\r\n"
         "----------------------------------------------\r\n"
@@ -279,10 +329,13 @@ def main():
         "5. SkiFree (Chris Pirih):\r\n"
         "   https://ski.ihoc.net/\r\n"
         "   Oficjalna strona autora legendarnej gry narciarskiej.\r\n\r\n"
-        "6. Open Watcom:\r\n"
+        "6. Mario & Luigi (Mike Wiering / Wiering Software):\r\n"
+        "   https://wieringsoftware.nl/mario/index.html\r\n"
+        "   Kultowy klon Super Mario Bros. z 1994 roku z pelnym kodem w Turbo Pascalu.\r\n\r\n"
+        "7. Open Watcom:\r\n"
         "   https://openwatcom.org/\r\n"
         "   Otwarty kompilator C/C++ uzyty do zbudowania modulu loadera i KERNEL.\r\n\r\n"
-        "7. Wine Project:\r\n"
+        "8. Wine Project:\r\n"
         "   https://www.winehq.org/\r\n"
         "   Zrodlo fontow rastrowych oraz specyfikacji Win16 API.\r\n"
     )
@@ -311,10 +364,13 @@ def main():
         "4. SKIFREE - CHRIS PIRIH\r\n"
         "   Strona autora: https://ski.ihoc.net/\r\n"
         "   Kultowa gra narciarska z 1991 roku z potworem snieznym Yeti.\r\n\r\n"
-        "5. OPEN WATCOM\r\n"
+        "5. MARIO & LUIGI - MIKE WIERING\r\n"
+        "   Strona autora: https://wieringsoftware.nl/mario/index.html\r\n"
+        "   Klasyczny klon Super Mario Bros. z 1994 roku z kodem zrodlowym.\r\n\r\n"
+        "6. OPEN WATCOM\r\n"
         "   Strona: https://openwatcom.org/\r\n"
         "   Otwarty kompilator C/C++ dla DOS, Win16, OS/2 i Win32.\r\n\r\n"
-        "6. WINE\r\n"
+        "7. WINE\r\n"
         "   Strona: https://www.winehq.org/\r\n"
         "   Warstwa kompatybilnosci Windows dla systemow UNIX/Linux.\r\n"
     )
