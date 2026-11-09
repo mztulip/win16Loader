@@ -49,6 +49,7 @@ typedef struct {
     unsigned short ne_cbnrestab;
     unsigned short ne_segtab;
     unsigned short ne_rsrctab;  /* offset od poczatku NE header do tablicy zasobow */
+    unsigned short ne_restab;   /* offset do resident name table */
 } RC_NE;
 #pragma pack(pop)
 
@@ -145,6 +146,12 @@ void rc_init(const char *filename)
     if (ne.ne_magic != 0x454Eu) {
         printf("RC: %s nie jest NE\n", filename);
         goto fail;
+    }
+    if (ne.ne_rsrctab == 0 || ne.ne_rsrctab == ne.ne_restab) {
+        /* Brak zasobow w pliku NE */
+        fclose(s_f);
+        s_f = NULL;
+        return;
     }
     s_rsctab_pos = s_ne_off + (long)ne.ne_rsrctab;
     fseek(s_f, s_rsctab_pos, SEEK_SET);
