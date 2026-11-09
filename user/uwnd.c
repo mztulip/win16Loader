@@ -76,9 +76,16 @@ typedef struct {
 
 static ATOM register_class(WNDCLASS __far *wc, BOOL system)
 {
-    int i = cls_find(wc->name, wc->hinst);
+    WORD hinst = wc->hinst;
+    int i;
     CLASS *c;
-    if (i >= 0 && !g_cls[i].system && same_program(g_cls[i].hinst, wc->hinst)) return 0;   /* juz jest */
+    if (!hinst && !system) {
+        WORD task = GetCurrentTask();
+        if (task) hinst = *(WORD __far *)MK_FP(task, 0x1C);
+        if (!hinst) hinst = *(WORD __far *)MK_FP(SEL_KCB, 0);
+    }
+    i = cls_find(wc->name, hinst);
+    if (i >= 0 && !g_cls[i].system && same_program(g_cls[i].hinst, hinst)) return 0;   /* juz jest */
     for (i = 0; i < MAX_CLASS; i++) if (!g_cls[i].used) break;
     if (i == MAX_CLASS) return 0;
     c = &g_cls[i];
@@ -90,7 +97,7 @@ static ATOM register_class(WNDCLASS __far *wc, BOOL system)
     c->proc = wc->proc;
     c->clsextra = wc->clsextra > 32 ? 32 : wc->clsextra;
     c->wndextra = wc->wndextra > MAX_EXTRA ? MAX_EXTRA : wc->wndextra;
-    c->hinst = wc->hinst;
+    c->hinst = hinst;
     c->icon = wc->icon;
     c->cursor = wc->cursor;
     c->brush = wc->brush;
@@ -122,7 +129,8 @@ void cls_free_inst(WORD hinst, WORD next)
     int i;
     for (i = 0; i < MAX_CLASS; i++) {
         CLASS *c = &g_cls[i];
-        if (!c->used || c->system || c->hinst != hinst) continue;
+        if (!c->used || c->system) continue;
+        if (c->hinst != hinst && c->hinst != 0 && !same_program(c->hinst, hinst)) continue;
         if (!next) { c->used = 0; continue; }
         c->proc = (WNDPROC)addr_in_copy((DWORD)c->proc, hinst, next);
         if (HIWORD(c->menu)) c->menu = (LPCSTR)addr_in_copy((DWORD)c->menu, hinst, next);

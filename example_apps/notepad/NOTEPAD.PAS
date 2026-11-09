@@ -398,12 +398,19 @@ begin
 end;
 
 var
-  WndClass: TWndClass;
+  WndClass, DummyClass: TWndClass;
   Msg: TMsg;
   ParamS: ShortString;
   CmdParam: array[0..128] of Char;
+  CurTask: Word;
 begin
   G_Instance := HInstance;
+  if G_Instance = 0 then
+  begin
+    CurTask := GetCurrentTask;
+    if CurTask <> 0 then
+      G_Instance := PWord(Ptr(CurTask, $1C))^;
+  end;
   G_CurFile[0] := #0;
 
   FillChar(WndClass, SizeOf(WndClass), 0);
@@ -418,7 +425,15 @@ begin
   WndClass.lpszClassName := 'W16NotepadClass';
 
   if not RegisterClass(WndClass) then
-    Halt(1);
+  begin
+    FillChar(DummyClass, SizeOf(DummyClass), 0);
+    if not GetClassInfo(G_Instance, 'W16NotepadClass', DummyClass) and
+       not GetClassInfo(0, 'W16NotepadClass', DummyClass) then
+    begin
+      Dbg('NOTEPAD: RegisterClass FAILED!');
+      Halt(1);
+    end;
+  end;
 
   G_MainWnd := CreateWindow(
     'W16NotepadClass',
@@ -430,7 +445,11 @@ begin
   );
 
   if G_MainWnd = 0 then
+  begin
+    Dbg('NOTEPAD: CreateWindow FAILED!');
     Halt(1);
+  end;
+  Dbg('NOTEPAD: CreateWindow OK');
 
   CreateMainMenu(G_MainWnd);
   ShowWindow(G_MainWnd, SW_SHOW);

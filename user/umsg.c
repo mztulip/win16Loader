@@ -865,9 +865,9 @@ void API UserTaskExit(WORD task, WORD hinst, BOOL fault, WORD succ)
     HWND c, next;
     WORD i;
     int k;
-    static WORD done;
-    if (done == task) return;                                /* po wyjatku wolane drugi raz z task_exit */
-    done = task;
+    static WORD fault_task;
+    if (fault) fault_task = task;
+    else if (fault_task == task) { fault_task = 0; return; }
     if (fault) {
         g_input_busy = FALSE;
         if (g_capture && WP(g_capture) && WP(g_capture)->task == task) g_capture = 0;
