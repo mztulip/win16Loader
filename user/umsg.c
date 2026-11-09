@@ -888,3 +888,12 @@ void API UserTaskExit(WORD task, WORD hinst, BOOL fault, WORD succ)
     cls_free_inst(hinst, succ);
     menus_free_task(task);
 }
+
+/* ordinal 953 (prywatny): reset kursora po powrocie z pelnoekranowego DOS */
+void API UserResetCursor(void)
+{
+    BYTE __far *k = (BYTE __far *)MK_FP(SEL_KCB, 0);
+    g_mx = *(int __far *)(k + 285);
+    g_my = *(int __far *)(k + 287);
+    GdiResetCursor();
+}

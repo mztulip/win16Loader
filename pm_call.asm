@@ -1216,6 +1216,26 @@ rmi_pm_entry:
     out  0x21, al
     mov  al, 0xEF
     out  0xA1, al
+
+.rmi_ccb_wait1:
+    in   al, 0x64
+    test al, 0x02
+    jnz  .rmi_ccb_wait1
+    mov  al, 0x60
+    out  0x64, al
+.rmi_ccb_wait2:
+    in   al, 0x64
+    test al, 0x02
+    jnz  .rmi_ccb_wait2
+    mov  al, 0x47       ; kbd_irq | aux_irq | translate
+    out  0x60, al
+
+    push es
+    mov  ax, SEL_KCB
+    mov  es, ax
+    mov  byte [es:282], 0    ; KCB_MOUSE_STATE = 0 (reset pakietu myszy)
+    pop  es
+
     mov  ss, [rmi_pm_ss]
     mov  sp, [rmi_pm_sp]
     call kbc_drain

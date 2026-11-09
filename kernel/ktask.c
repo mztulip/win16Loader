@@ -486,8 +486,11 @@ WORD API WinExec(LPCSTR cmd, WORD show)
         HMODULE u = GetModuleHandle("USER");
         if (u) {
             typedef void (API *INVALRECT)(WORD, LPVOID, BOOL);
+            typedef void (API *RSTCUR)(void);
             INVALRECT inv = (INVALRECT)GetProcAddress(u, (LPCSTR)MK_FP(0, 125));
+            RSTCUR urst = (RSTCUR)GetProcAddress(u, (LPCSTR)MK_FP(0, 953));
             if (inv) inv(0, (LPVOID)0, TRUE);
+            if (urst) urst();
         }
         task_dos_sync();
         dbg_str("KERNEL: WinExec DOS zakonczony pomyslnie ", (LPCSTR)prog);

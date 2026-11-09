@@ -367,6 +367,7 @@ void  API GdiMoveCursor(int, int);
 int   API GdiShowCursor(BOOL);
 void  API GdiSetCursor(BYTE __far *, BYTE __far *, int, int, int, int);
 void  API GdiCursorDefault(void);
+void  API GdiResetCursor(void);
 HDC   API GdiCreateWindowDC(int, int, LPRECT, int, WORD);
 void  API GdiSetDCVis(HDC, int, int, LPRECT, int);
 void  API GdiIntersectVis(HDC, LPRECT, int);

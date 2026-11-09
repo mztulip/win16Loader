@@ -468,3 +468,13 @@ void API GdiCursorDefault(void)
     cur_default();
     cur_draw();
 }
+
+/* ordinal 904: GdiResetCursor() - po powrocie z pelnoekranowego DOS (ekran zresetowany przez VESA) */
+void API GdiResetCursor(void)
+{
+    if (!g_chave) cur_default();
+    g_cdrawn = FALSE;
+    g_cdepth = 0;
+    g_cexcl = FALSE;
+    cur_draw();
+}
