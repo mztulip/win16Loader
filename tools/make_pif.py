@@ -10,7 +10,7 @@ def create_dosprmpt_pif(output_path):
     pif = bytearray(545)
 
     # Offset 0x02: Title (30 bytes)
-    title = b"MS-DOS Prompt\x00"
+    title = b"FreeDOS Prompt\x00"
     pif[0x02:0x02+len(title)] = title
 
     # Offset 0x20: Max memory in KB (640 = 0x0280)
