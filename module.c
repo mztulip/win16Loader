@@ -1334,6 +1334,12 @@ void mod_exec_rm(void)
                 err = dos_exec(cmd, pargs);
                 outp(0x21, old_pic_mask);
                 mlog("DOS EXEC ret=%d\n", err);
+                {
+                    union REGS r;
+                    r.h.ah = 0x4D;
+                    int86(0x21, &r, &r);
+                    mlog("DOS exit code: type=%02X code=%u\n", r.h.ah, r.h.al);
+                }
                 alloc_top_buffers();
                 g_rmbuf_seg = g_tmp_seg;
                 kcb[KCB_RMBUF_SEG / 2] = g_rmbuf_seg;

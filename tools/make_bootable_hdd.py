@@ -100,11 +100,10 @@ def main():
     # 6. Create FDCONFIG.SYS and FDAUTO.BAT
     print("Writing FDCONFIG.SYS and FDAUTO.BAT...")
     fdconfig = (
-        "!COUNTRY=001,858:C:\\FREEDOS\\BIN\\COUNTRY.SYS\r\n"
         "!LASTDRIVE=Z\r\n"
-        "!BUFFERS=20\r\n"
+        "!BUFFERS=10\r\n"
         "!FILES=40\r\n"
-        "SHELL=C:\\FREEDOS\\BIN\\COMMAND.COM C:\\FREEDOS\\BIN /E:2048 /P=C:\\FDAUTO.BAT\r\n"
+        "SHELL=C:\\FREEDOS\\BIN\\COMMAND.COM C:\\FREEDOS\\BIN /E:512 /P=C:\\FDAUTO.BAT\r\n"
     )
     fdauto = (
         "@echo off\r\n"
