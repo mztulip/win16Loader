@@ -741,14 +741,16 @@ rm_real:
     pop  ax
     mov  ax, cs
     mov  ds, ax
-    mov  bl, [local_exit_code]
     mov  ax, [saved_ss]
     mov  ss, ax
     mov  sp, [saved_sp]
     mov  ax, [saved_ds]
     mov  ds, ax
     mov  es, ax
-    mov  [_g_exit_code], bl
+    push ax
+    mov  al, [cs:local_exit_code]
+    mov  [_g_exit_code], al
+    pop  ax
     push ax
     push dx
 .dbg_retf:
