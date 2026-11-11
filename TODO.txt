@@ -1702,3 +1702,30 @@ ETAP 23: ExitWindows i programy DOS (stan 2026-11-11)
       plansza "szarpie" tyl-przod przy grze. Wystepuje tez pod samym FreeDOS i z -vga cirrus,retrace=precise
       => raczej emulacja QEMU (retrace/tempo), nie loader. NIE zbadane. Do sprawdzenia: -accel kvm,
       bez retrace=precise, -vga std/vmware, test na golym FreeDOS z floppy bez loadera, tempo PIT.
+
+--------------------------------------------------------------------------------
+ETAP 24: Uruchomienie na prawdziwym i486 (Nixdorf PCD-4ND) - analiza, NIE przetestowane
+--------------------------------------------------------------------------------
+Sprzet (podrecznik + zrzuty BIOS w ~/Dokumenty/Komputery/urzadzenia/Laptopy_stare/nixdorf_PCD-4ND):
+  i486 DX2/DX4, PhoenixBIOS A486 1.03 (1993-95), chipset ACC Micro 2066, KBC 8051SL, IDE,
+  trackball PS/2, grafika WD/Cirrus (podrecznik: do 1024x768 @ 256 kolorow = tylko 8 bpp),
+  LCD mono/DSTN/TFT, RAM 4 MB (rozszerzenie 8/12/20 MB).
+Zgodne (prawdopodobnie): CPU (kod -3), tryb chroniony i wlasny XMS, INT 15h E801 -> fallback AH=88h,
+  mysz PS/2 przez KBC, reset 8042 (reboot).
+Niezgodne z obecnym loaderem:
+  1. loader.c: VESA 0x0112 (640x480x24bpp) + LFB, GDI rysuje w 32 bpp. Brak 24/32 bpp i VBE 2.0/LFB
+     na tym kontrolerze. W zrzutach BIOS nie ma sygnatury VESA/VBE (slaby dowod: VGA BIOS moze byc
+     osobno; stare uklady WD czesto maja VBE dopiero po TSR).
+  2. RAM: 4 MB za malo; oryginalna Calmira potrzebowala 16 MB, nasza (WUIL) wiecej -> min. 12-20 MB.
+Brak (do zrobienia, jesli VBE 1.2 jest dostepne): backend 8 bpp z bankowaniem (VBE 0x101, 640x480x256,
+  okno 64 KB) + paleta w gdi/ zamiast BGRA; spodziewana niska wydajnosc na 486.
+Plan: NAJPIERW sprawdzic VBE na prawdziwym sprzecie (nie zgadywac):
+  - boot FreeDOS z dyskietki i uruchomic narzedzie VBE (ponizej), zanotowac wersje VBE, liste trybow,
+    czy jest 0x101 i 0x112, atrybuty LFB (4F01, bit 7), ilosc VRAM (pole TotalMemory w 4F00).
+  - alternatywa: dopisac do loadera tryb diagnostyczny (INT 10h 4F00/4F01, INT 15h) wypisujacy wyniki.
+Narzedzia VBE pod DOS (zrodla zweryfikowane tylko jako istniejace, bez gwarancji bezposredniego .exe):
+  - X-VESA (diagnostyka VBE na prawdziwym sprzecie) - szukac na VOGONS / stronach autora
+  - VESA Dumper (16-bit .COM): https://awesome.ecosyste.ms/projects/github.com%2Fcreatefly%2Fvesa_dumper
+  - VOGONS - przeglad narzedzi VESA (VBEPlus TSR dodaje tryby VBE, UniVBE/SciTech, VBE15bpp):
+    https://www.vogons.org/viewtopic.php?p=147961
+  - zrodlo vbeinfo.c (Linux, atitvout; nie binarka DOS): https://sources.debian.org/src/atitvout/0.4-12/vbeinfo.c
