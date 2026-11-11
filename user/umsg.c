@@ -810,7 +810,9 @@ LONG API DispatchMessage(LPMSG m)
 DWORD API GetMessagePos(void)        { return g_lastpos; }
 LONG  API GetMessageTime(void)       { return (LONG)g_lasttime; }
 LONG  API GetMessageExtraInfo(void)  { return 0; }
-BOOL  API InSendMessage(void)        { return FALSE; }
+/* TRUE podczas komunikatow wysylanych przez system (ExitWindows: QUERYENDSESSION/ENDSESSION) */
+BOOL g_sys_send = FALSE;
+BOOL  API InSendMessage(void)        { return g_sys_send; }
 void  API ReplyMessage(LONG r)       { (void)r; }
 BOOL  API SetMessageQueue(int n)     { (void)n; return TRUE; }
 static BOOL queue_has_mine(void)

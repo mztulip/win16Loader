@@ -541,6 +541,21 @@ static void dos3call_do(void)
         if (!(g_d3.flags & CF_FLAG))
             kstrncpy(pm_ptr(g_d3.es, g_d3.di), (LPCSTR)RBUF(RMBUF_DATA + 0x200), 128);
         break;
+    case 0x65: {                                 /* extended country info -> ES:DI (CX B) */
+        WORD n = g_d3.cx > 0x100 ? 0x100 : g_d3.cx;
+        WORD app_di = g_d3.di;
+        r = rm_from_d3();
+        r->cx = n;
+        r->di = RMBUF_DATA;
+        rm_int21();
+        d3_from_rm(r);
+        g_d3.di = app_di;
+        if (!(g_d3.flags & CF_FLAG)) {
+            if (g_d3.cx < n) n = g_d3.cx;        /* CX po powrocie = ilosc zapisanych bajtow */
+            kmemcpy(pm_ptr(g_d3.es, app_di), RBUF(RMBUF_DATA), n);
+        }
+        break;
+    }
     case 0x44:                                   /* IOCTL */
         switch (g_d3.ax & 0xFF) {
         case 0x02: case 0x03: case 0x04: case 0x05: case 0x0C: case 0x0D:
@@ -564,6 +579,7 @@ static void dos3call_do(void)
         break;
     case 0x4C:                                   /* koniec programu */
         dbg_puts("KERNEL: DOS3Call 4C - koniec zadania\n");
+        { extern void kmain_apply_exit_mode(WORD *); kmain_apply_exit_mode(&g_d3.ax); }
         task_exit(g_d3.ax);
         break;
     case 0x71:                                   /* LFN - brak */

@@ -347,6 +347,8 @@ BOOL API SystemParametersInfo(WORD act, WORD p, LPVOID pv, WORD win)
 static void reset_pc(void);
 #pragma aux reset_pc = "mov al,0FEh" "out 64h,al" "cli" "hlt" modify [ax];
 
+extern BOOL g_sys_send;
+
 BOOL API ExitWindows(DWORD r, WORD res)
 {
     HWND w, desk;
@@ -354,11 +356,15 @@ BOOL API ExitWindows(DWORD r, WORD res)
     (void)res;
     udbg("USER: ExitWindows\n");
     desk = HDESKTOP;
+    g_sys_send = TRUE;
     for (w = GetWindow(desk, 5 /*GW_CHILD*/); w; w = GetWindow(w, 2 /*GW_HWNDNEXT*/))
         if (SendMessage(w, 0x0011 /*WM_QUERYENDSESSION*/, 0, 0L) == 0) {
             udbg("USER: ExitWindows anulowane\n");
+            g_sys_send = FALSE;
             return FALSE;
         }
+    /* zapamietaj tryb w KERNEL: Calmira robi Halt juz na WM_ENDSESSION */
+    FatalAppExit(0x4000 | ((WORD)r & 0xFF), "");
     for (w = GetWindow(desk, 5); w; w = GetWindow(w, 2))
         SendMessage(w, 0x0016 /*WM_ENDSESSION*/, 1, 0L);
     if ((WORD)r == 0x43) {

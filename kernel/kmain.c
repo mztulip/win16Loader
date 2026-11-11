@@ -197,8 +197,18 @@ WORD  API SetErrorMode(WORD m)  { WORD o = g_errmode; g_errmode = m; return o; }
 /* ordinal 199 */
 WORD  API SetHandleCount(WORD n) { return n; }
 /* ordinal 137 */
+WORD g_exit_mode = 0;   /* 0x42/0x43 ustawiane przez ExitWindows; stosowane przy koncu procesu (4Ch) */
+static void reset_pc_k(void);
+#pragma aux reset_pc_k = "mov al,0FEh" "out 64h,al" "cli" "hlt" modify [ax];
+void kmain_apply_exit_mode(WORD *ax)
+{
+    if (g_exit_mode == 0x43) { dbg_puts("KERNEL: reboot\n"); reset_pc_k(); }
+    if (g_exit_mode == 0x42) *ax = 0x4C2A;   /* kod 42 = restart Windows (petla w WIN.BAT) */
+}
 void  API FatalAppExit(WORD action, LPCSTR msg)
 {
+    /* action 0x4000|tryb: tylko zapamietaj tryb konca sesji (ExitWindows), nie konczy */
+    if ((action & 0xC000) == 0x4000) { g_exit_mode = action & 0xFF; return; }
     /* action >= 0x8000: normalny koniec sesji z kodem wyjscia = mlodszy bajt (ExitWindows) */
     if (action >= 0x8000) {
         dbg_str("KERNEL: koniec sesji ", msg);
