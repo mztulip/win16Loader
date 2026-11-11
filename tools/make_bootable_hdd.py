@@ -175,7 +175,10 @@ def main():
     # C:\WINDOWS\WIN.BAT
     win_bat = (
         "@echo off\r\n"
+        ":again\r\n"
         "C:\\WINDOWS\\LOADER.EXE %1 %2 %3 %4 %5\r\n"
+        "rem kod 42 = ExitWindows(EW_RESTARTWINDOWS): uruchom od nowa\r\n"
+        "if errorlevel 42 goto again\r\n"
     )
     with tempfile.NamedTemporaryFile("w") as f:
         f.write(win_bat)

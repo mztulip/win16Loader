@@ -135,6 +135,7 @@ extern _g_ndllinit      ; liczba DLL do zainicjalizowania
 extern _g_dllinit       ; {cs, ip, ds, heap} x MAX_DLLINIT
 extern _g_cs_phys
 extern _g_orig_cs
+extern _g_exit_code     ; kod wyjscia apki (AL z INT 21h/4Ch), czytany przez main loadera
 extern _g_orig_ss
 extern _g_orig_sp
 extern _g_app_data_phys
@@ -740,12 +741,14 @@ rm_real:
     pop  ax
     mov  ax, cs
     mov  ds, ax
+    mov  bl, [local_exit_code]
     mov  ax, [saved_ss]
     mov  ss, ax
     mov  sp, [saved_sp]
     mov  ax, [saved_ds]
     mov  ds, ax
     mov  es, ax
+    mov  [_g_exit_code], bl
     push ax
     push dx
 .dbg_retf:
@@ -2088,6 +2091,7 @@ int21_handler:
     out  dx, al
     pop  dx
     pop  ax
+    mov  [cs:local_exit_code], al
     ; Odwin stos do stanu sprzed "call far [cs:call_ptr]" w pm16_call_app
     ; (IRET-frame INT 21h i ramki apki sa porzucane) i wroc do trybu rzeczywistego.
     cli
@@ -2106,6 +2110,7 @@ int21_handler:
 ; =====================================================================
 dbg_dll_letters db 'K', 'U', 'G'   ; indexed by dll_idx (0=KERNEL,1=USER,2=GDI)
 
+local_exit_code db 0
 saved_ss        dw 0
 saved_sp        dw 0
 saved_ds        dw 0

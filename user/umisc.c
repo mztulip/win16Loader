@@ -338,12 +338,35 @@ BOOL API SystemParametersInfo(WORD act, WORD p, LPVOID pv, WORD win)
     return TRUE;
 }
 
-/* ordinal 7: ExitWindows - koniec sesji = koniec apki */
+/* ordinal 7: ExitWindows (jak Win 3.1):
+ *  1. WM_QUERYENDSESSION do okien najwyzszego poziomu; jedno "0" = anulowanie (FALSE),
+ *  2. WM_ENDSESSION(TRUE),
+ *  3. r == 0x43 (EW_REBOOTSYSTEM) - reset komputera,
+ *     r == 0x42 (EW_RESTARTWINDOWS) - koniec z kodem 42 (WIN.BAT startuje loader od nowa),
+ *     inaczej - koniec do DOS (kod 0). */
+static void reset_pc(void);
+#pragma aux reset_pc = "mov al,0FEh" "out 64h,al" "cli" "hlt" modify [ax];
+
 BOOL API ExitWindows(DWORD r, WORD res)
 {
-    (void)r; (void)res;
+    HWND w, desk;
+    WORD code = 0;
+    (void)res;
     udbg("USER: ExitWindows\n");
-    FatalAppExit(0, "ExitWindows");
+    desk = HDESKTOP;
+    for (w = GetWindow(desk, 5 /*GW_CHILD*/); w; w = GetWindow(w, 2 /*GW_HWNDNEXT*/))
+        if (SendMessage(w, 0x0011 /*WM_QUERYENDSESSION*/, 0, 0L) == 0) {
+            udbg("USER: ExitWindows anulowane\n");
+            return FALSE;
+        }
+    for (w = GetWindow(desk, 5); w; w = GetWindow(w, 2))
+        SendMessage(w, 0x0016 /*WM_ENDSESSION*/, 1, 0L);
+    if ((WORD)r == 0x43) {
+        udbg("USER: reboot\n");
+        reset_pc();
+    }
+    if ((WORD)r == 0x42) code = 42;
+    FatalAppExit(0x8000 | code, "ExitWindows");
     return FALSE;
 }
 

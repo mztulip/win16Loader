@@ -367,6 +367,7 @@ unsigned long g_psp_phys      = 0;   /* fake PSP (256 B zeroed) – ES at app st
 unsigned long g_bitmaps_phys  = 0;   /* SEL_BITMAPS=0x128: bufor 86 sprite'ow 4bpp */
 
 extern void __far pm_call_app(void);
+unsigned char g_exit_code = 0;   /* kod wyjscia ostatniej apki (ExitWindows(EW_RESTARTWINDOWS) = 42) */
 extern unsigned short get_int3f_off(void);
 extern unsigned short get_i3f_stack_off(void), get_i3f_depth_off(void);
 extern unsigned short get_rmint_off(void);  /* offset rm_int_service w SEL_CODE16 */  /* zwraca offset int3f_handler w SEL_CODE16 */
@@ -761,7 +762,7 @@ int main(int argc, char *argv[])
         /* Tryb bezposredni: jeden przebieg, wroc do DOS w trybie tekstowym */
         if (argc > 1) {
             set_text_mode();
-            break;
+            return g_exit_code;
         }
 
         /* Tryb shell: przywroc tryb banked dla shella, wyczysc stan DLL,

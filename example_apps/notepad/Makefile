@@ -1,5 +1,5 @@
 ROOT_DIR ?= $(abspath ../../..)
-FPC16    ?= $(ROOT_DIR)/wuil/fpc16
+FPC16    ?= $(ROOT_DIR)/calmira_src/wuil/fpc16
 WATCOM_BIN ?= $(wildcard /tmp/watcom/binl64/wrc /opt/watcom/binl64/wrc)
 WRC      ?= $(firstword $(WATCOM_BIN))
 

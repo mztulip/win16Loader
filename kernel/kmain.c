@@ -199,7 +199,11 @@ WORD  API SetHandleCount(WORD n) { return n; }
 /* ordinal 137 */
 void  API FatalAppExit(WORD action, LPCSTR msg)
 {
-    (void)action;
+    /* action >= 0x8000: normalny koniec sesji z kodem wyjscia = mlodszy bajt (ExitWindows) */
+    if (action >= 0x8000) {
+        dbg_str("KERNEL: koniec sesji ", msg);
+        pm_int21(0x4C00 | (action & 0xFF));
+    }
     dbg_str("KERNEL: FatalAppExit ", msg);
     pm_int21(0x4C01);
 }
