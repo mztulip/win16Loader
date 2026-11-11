@@ -1688,3 +1688,17 @@ ETAP 23: MS-DOS Prompt (implementacja obu trybów: pełnoekranowy i okienkowy)
       * Skrót klawiszowy Alt+Enter:
         - dynamiczne przełączanie sesji DOS między oknem na pulpicie a pełnym ekranem VGA.
       * Wielozadaniowość z wywłaszczaniem (preemptive) dla sesji DOS działających w tle.
+
+--------------------------------------------------------------------------------
+ETAP 23: ExitWindows i programy DOS (stan 2026-11-11)
+--------------------------------------------------------------------------------
+- [x] ExitWindows: WM_QUERYENDSESSION/WM_ENDSESSION, InSendMessage()=TRUE w tym czasie
+      (Calmira: FormCloseQuery CanClose := InSendMessage). Tryb (0/0x42/0x43) zapamietany w
+      KERNEL (FatalAppExit(0x4000|tryb)) i stosowany przy 4Ch, bo Calmira robi Halt na WM_ENDSESSION.
+- [x] Restart Windows = kod wyjscia 42; loader zwraca g_exit_code, WIN.BAT: "if errorlevel 42 goto again".
+- [x] Reboot = reset 8042 (out 64h,0FEh). make run-calmira bez -no-reboot (QEMU_REBOOT= do diagnostyki).
+- [x] Regresja: kopiowanie kodu wyjscia w rm_real psulo BX -> nie startowaly programy DOS (Mario). Naprawione.
+- [ ] Mario (games/mario, DOS, Mode X, page flipping + czekanie na retrace 3DA, tempo z licznika 0000:046C):
+      plansza "szarpie" tyl-przod przy grze. Wystepuje tez pod samym FreeDOS i z -vga cirrus,retrace=precise
+      => raczej emulacja QEMU (retrace/tempo), nie loader. NIE zbadane. Do sprawdzenia: -accel kvm,
+      bez retrace=precise, -vga std/vmware, test na golym FreeDOS z floppy bez loadera, tempo PIT.
