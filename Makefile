@@ -557,11 +557,14 @@ calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE)
 
+# ExitWindows(EW_REBOOTSYSTEM) resetuje PC - domyslnie pozwalamy QEMU na reboot.
+# Diagnostyka crashy (zatrzymanie po triple fault): make run-calmira QEMU_REBOOT="-no-reboot -no-shutdown"
+QEMU_REBOOT ?=
 run-calmira: calmira.img floppy.img
 	qemu-system-i386 -vga std,retrace=precise \
 	    -drive file=floppy.img,if=floppy,format=raw \
 	    -drive file=calmira.img,if=ide,format=raw -boot c -m 16 \
-	    -no-reboot -no-shutdown \
+	    $(QEMU_REBOOT) \
 	    -serial stdio \
 	    -d cpu_reset,guest_errors -D qemu.log
 
