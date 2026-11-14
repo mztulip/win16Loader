@@ -1,5 +1,5 @@
 /*
- * CONTROL.EXE - Panel sterowania Windows 16-bit
+ * CONTROL.EXE - Panel sterowania Win16Loader (16-bit)
  * Obsluguje:
  *   control.exe main.cpl Desktop
  *   control.exe main.cpl Date/Time
