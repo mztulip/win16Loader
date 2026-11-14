@@ -675,9 +675,31 @@ BOOL API ExtFloodFill(HDC hdc, int x, int y, COLORREF c, WORD type)
         while (r + 1 < d->clip.box.right && in_clip(d, r + 1, yy) && INSIDE(px_get((SURF __far *)&d->s, r + 1, yy))) r++;
         span_rop2((SURF __far *)&d->s, yy, l, r + 1, fill, 13);
         if (fill == ref && type) continue;        /* zabezpieczenie przed petla */
-        for (cx = l; cx <= r && sp < FSTACK - 2; cx++) {
-            if (yy > 0) { g_fs[sp].x = cx; g_fs[sp].y = yy - 1; sp++; }
-            if (yy + 1 < d->s.h) { g_fs[sp].x = cx; g_fs[sp].y = yy + 1; sp++; }
+        if (yy > 0) {
+            int in_run = 0;
+            for (cx = l; cx <= r; cx++) {
+                if (in_clip(d, cx, yy - 1) && INSIDE(px_get((SURF __far *)&d->s, cx, yy - 1))) {
+                    if (!in_run) {
+                        if (sp < FSTACK - 1) { g_fs[sp].x = cx; g_fs[sp].y = yy - 1; sp++; }
+                        in_run = 1;
+                    }
+                } else {
+                    in_run = 0;
+                }
+            }
+        }
+        if (yy + 1 < d->s.h) {
+            int in_run = 0;
+            for (cx = l; cx <= r; cx++) {
+                if (in_clip(d, cx, yy + 1) && INSIDE(px_get((SURF __far *)&d->s, cx, yy + 1))) {
+                    if (!in_run) {
+                        if (sp < FSTACK - 1) { g_fs[sp].x = cx; g_fs[sp].y = yy + 1; sp++; }
+                        in_run = 1;
+                    }
+                } else {
+                    in_run = 0;
+                }
+            }
         }
     }
 #undef INSIDE

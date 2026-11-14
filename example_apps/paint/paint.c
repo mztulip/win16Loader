@@ -981,6 +981,8 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     HDC dc;
     int x, y, i, swatch_idx;
     char coord_buf[80];
+    COLORREF target_col;
+    HBRUSH fill_br, old_fill_br;
 
     switch (msg) {
     case WM_CREATE:
@@ -1147,12 +1149,19 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 break;
 
             case TOOL_FILL:
-                save_undo_state();
-                ExtFloodFill(g_hdc_canvas, x, y, GetPixel(g_hdc_canvas, x, y), 1 /* FLOODFILLSURFACE */);
-                dc = GetDC(hwnd);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-                ReleaseDC(hwnd, dc);
-                set_status("Surface filled.");
+                target_col = GetPixel(g_hdc_canvas, x, y);
+                if (target_col != g_col_primary) {
+                    save_undo_state();
+                    fill_br = CreateSolidBrush(g_col_primary);
+                    old_fill_br = (HBRUSH)SelectObject(g_hdc_canvas, fill_br);
+                    ExtFloodFill(g_hdc_canvas, x, y, target_col, 1 /* FLOODFILLSURFACE */);
+                    SelectObject(g_hdc_canvas, old_fill_br);
+                    DeleteObject(fill_br);
+                    dc = GetDC(hwnd);
+                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    ReleaseDC(hwnd, dc);
+                    set_status("Surface filled with primary color.");
+                }
                 break;
 
             case TOOL_EYEDROPPER:
@@ -1233,10 +1242,27 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
         if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
             y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
+            x -= CANVAS_X;
+            y -= CANVAS_Y;
             if (g_active_tool == TOOL_EYEDROPPER) {
-                g_col_secondary = GetPixel(g_hdc_canvas, x - CANVAS_X, y - CANVAS_Y);
+                g_col_secondary = GetPixel(g_hdc_canvas, x, y);
                 InvalidateRect(hwnd, NULL, FALSE);
                 set_status("Background color picked from canvas.");
+                return 0;
+            } else if (g_active_tool == TOOL_FILL) {
+                target_col = GetPixel(g_hdc_canvas, x, y);
+                if (target_col != g_col_secondary) {
+                    save_undo_state();
+                    fill_br = CreateSolidBrush(g_col_secondary);
+                    old_fill_br = (HBRUSH)SelectObject(g_hdc_canvas, fill_br);
+                    ExtFloodFill(g_hdc_canvas, x, y, target_col, 1 /* FLOODFILLSURFACE */);
+                    SelectObject(g_hdc_canvas, old_fill_br);
+                    DeleteObject(fill_br);
+                    dc = GetDC(hwnd);
+                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    ReleaseDC(hwnd, dc);
+                    set_status("Surface filled with background color (RMB).");
+                }
                 return 0;
             }
         }

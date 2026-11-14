@@ -1181,6 +1181,8 @@ var
   I, SwatchIdx: Integer;
   StatusCoord: array[0..80] of Char;
   CoordBuf: array[0..16] of Char;
+  TargetCol: TColorRef;
+  FillBr, OldFillBr: HBRUSH;
 begin
   case Msg of
     WM_CREATE:
@@ -1398,12 +1400,20 @@ begin
 
           TOOL_FILL:
           begin
-            SaveUndoState;
-            ExtFloodFill(G_hdcCanvas, X, Y, GetPixel(G_hdcCanvas, X, Y), FLOODFILLSURFACE);
-            DC := GetDC(Wnd);
-            BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-            ReleaseDC(Wnd, DC);
-            SetStatus('Surface filled.');
+            TargetCol := GetPixel(G_hdcCanvas, X, Y);
+            if TargetCol <> G_ColPrimary then
+            begin
+              SaveUndoState;
+              FillBr := CreateSolidBrush(G_ColPrimary);
+              OldFillBr := SelectObject(G_hdcCanvas, FillBr);
+              ExtFloodFill(G_hdcCanvas, X, Y, TargetCol, FLOODFILLSURFACE);
+              SelectObject(G_hdcCanvas, OldFillBr);
+              DeleteObject(FillBr);
+              DC := GetDC(Wnd);
+              BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
+              ReleaseDC(Wnd, DC);
+              SetStatus('Surface filled with primary color.');
+            end;
           end;
 
           TOOL_EYEDROPPER:
@@ -1496,11 +1506,32 @@ begin
       if (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
+        X := X - CANVAS_X;
+        Y := Y - CANVAS_Y;
         if G_ActiveTool = TOOL_EYEDROPPER then
         begin
-          G_ColSecondary := GetPixel(G_hdcCanvas, X - CANVAS_X, Y - CANVAS_Y);
+          G_ColSecondary := GetPixel(G_hdcCanvas, X, Y);
           InvalidateRect(Wnd, nil, False);
           SetStatus('Background color picked from canvas.');
+          Result := 0;
+          Exit;
+        end
+        else if G_ActiveTool = TOOL_FILL then
+        begin
+          TargetCol := GetPixel(G_hdcCanvas, X, Y);
+          if TargetCol <> G_ColSecondary then
+          begin
+            SaveUndoState;
+            FillBr := CreateSolidBrush(G_ColSecondary);
+            OldFillBr := SelectObject(G_hdcCanvas, FillBr);
+            ExtFloodFill(G_hdcCanvas, X, Y, TargetCol, FLOODFILLSURFACE);
+            SelectObject(G_hdcCanvas, OldFillBr);
+            DeleteObject(FillBr);
+            DC := GetDC(Wnd);
+            BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
+            ReleaseDC(Wnd, DC);
+            SetStatus('Surface filled with background color (RMB).');
+          end;
           Result := 0;
           Exit;
         end;
