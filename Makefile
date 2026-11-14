@@ -554,9 +554,12 @@ windir/DOSPRMPT.PIF: tools/make_pif.py
 floppy.img: tools/make_floppy.py
 	python3 tools/make_floppy.py $@
 
+control.exe: control.c
+	$(WCL) -ms -zW -bt=windows -zq -l=windows -I$(WATCOM)/h -I$(WATCOM)/h/win control.c -fe=$@
+
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
              $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) \
-             windir/DOSPRMPT.PIF windir/FREEDOS.ICO $(FDBOOT)
+             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE)
@@ -579,6 +582,7 @@ clean:
 	rm -f loader.exe loader.o
 	rm -f libstubs.obj pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj mouse_msg.obj rc_loader.obj
 	rm -f test_rc.exe test_rc.obj TESTRES.NE
+	rm -f control.exe control.obj
 	rm -f panic.bin
 	rm -f boot.img boot_test_rc.img boot_win16test.img calmira.img floppy.img bochs.log qemu.log
 	$(MAKE) -C win16test clean

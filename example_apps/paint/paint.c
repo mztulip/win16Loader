@@ -1,14 +1,16 @@
-/* paint.c - PaintCraft: Nowoczesne studio rysunku i zamiennik Windows 3.1 Paintbrush
+/* paint.c - PaintCraft Studio: Modern Pixel Art & Drawing Application
  *
- * Funkcje:
- * - Podwojnie buforowane plotno GDI (brak migotania)
- * - Podglad wektorowy w locie (Rubber-banding na hdcTemp)
- * - 14 narzedzi: olowek, pedzel, spray, gumka, gumka selektywna, wiadro,
- *   linia, prostokat, zaokraglony prostokat, elipsa, wielokat, pipeta, tekst, zaznaczenie
- * - Nowoczesna paleta 28 harmonijnych barw z podwojnym wskaznikiem (LPM: glowny, PPM: tlo)
- * - System wielopoziomowego / natychmiastowego Undo (Ctrl+Z)
- * - Filtry obrazu: negatyw, wyczyszczenie, odbicie w poziomie i pionie
- * - Bezposrednia obsluga plikow map bitowych BMP (24-bit)
+ * Features:
+ * - Double-buffered GDI canvas (zero flicker)
+ * - Real-time vector preview (Rubber-banding on hdcTemp)
+ * - 14 creative tools: Pencil, Brush, Airbrush, Eraser, Color Eraser,
+ *   Fill Bucket, Line, Rectangle, Rounded Rect, Ellipse, Polygon,
+ *   Eyedropper, Text, Selection
+ * - Contemporary 28-color palette with Dual-Color indicator (LMB: Primary, RMB: Background)
+ * - Undo support (Ctrl+Z)
+ * - Canvas transformations: Invert (Negative), Clear, Flip Horizontal, Flip Vertical
+ * - Direct 24-bit Windows Bitmap (BMP) loading and saving
+ * - Fully resizable window with maximize & minimize support
  */
 
 #include <windows.h>
@@ -91,7 +93,7 @@ static char      g_curfile[128];
 static char      g_titlebuf[160];
 static char      g_statustext[128];
 
-/* Buforowanie GDI */
+/* GDI Double Buffering */
 static int     g_canvas_w = CANVAS_DEF_W;
 static int     g_canvas_h = CANVAS_DEF_H;
 static HDC     g_hdc_canvas = NULL;
@@ -107,7 +109,7 @@ static HDC     g_hdc_temp = NULL;
 static HBITMAP g_hbmp_temp = NULL;
 static HBITMAP g_hbmp_old_temp = NULL;
 
-/* Stan narzedzi */
+/* Tool States */
 static int      g_active_tool = TOOL_PENCIL;
 static int      g_brush_size = 2;
 static int      g_shape_style = STYLE_OUTLINE;
@@ -120,11 +122,11 @@ static int  g_start_x, g_start_y;
 static int  g_last_x, g_last_y;
 static int  g_cur_x, g_cur_y;
 
-/* Wielokat */
+/* Polygon */
 static POINT g_poly_pts[32];
 static int   g_poly_count = 0;
 
-/* Interfejs */
+/* UI Elements */
 static TOOLBTN  g_tools[TOOL_COUNT + 1];
 static COLORREF g_palette[28];
 static unsigned g_rand_seed = 12345;
@@ -146,7 +148,7 @@ static void set_status(const char *text)
 
 static void init_palette(void)
 {
-    /* Rzad 1 - ciemniejsze i nasycone */
+    /* Row 1 - Deep and vibrant shades */
     g_palette[0]  = RGB(0, 0, 0);
     g_palette[1]  = RGB(96, 96, 96);
     g_palette[2]  = RGB(144, 0, 0);
@@ -162,7 +164,7 @@ static void init_palette(void)
     g_palette[12] = RGB(16, 32, 144);
     g_palette[13] = RGB(32, 96, 224);
 
-    /* Rzad 2 - jasne i pastelowe */
+    /* Row 2 - Light, pastel and accent colors */
     g_palette[14] = RGB(255, 255, 255);
     g_palette[15] = RGB(192, 192, 192);
     g_palette[16] = RGB(128, 64, 16);
@@ -182,8 +184,8 @@ static void init_palette(void)
 static void init_buttons(void)
 {
     static const char *names[] = {
-        "", "Olow", "Pedz", "Spry", "Gumk", "G.Kl", "Wiad",
-        "Lin.", "Pros", "Zaok", "Elip", "Wiel", "Pipe", "Teks", "Zazn"
+        "", "Penc", "Brsh", "Spry", "Eras", "C.Er", "Fill",
+        "Line", "Rect", "RndR", "Oval", "Poly", "Pick", "Text", "Sel."
     };
     int i, x, y, w, h;
     w = 38;
@@ -212,7 +214,7 @@ static void do_undo(void)
 {
     HDC dc;
     if (!g_can_undo) {
-        MessageBox(g_mainwnd, "Brak operacji do cofniecia.", "Cofnij", MB_OK | MB_ICONINFORMATION);
+        MessageBox(g_mainwnd, "No action available to undo.", "Undo", MB_OK | MB_ICONINFORMATION);
         return;
     }
     BitBlt(g_hdc_canvas, 0, 0, g_canvas_w, g_canvas_h, g_hdc_undo, 0, 0, SRCCOPY);
@@ -221,7 +223,7 @@ static void do_undo(void)
     dc = GetDC(g_mainwnd);
     BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
     ReleaseDC(g_mainwnd, dc);
-    set_status("Cofnieto ostatnia operacje.");
+    set_status("Undid last action.");
 }
 
 static void clear_canvas(void)
@@ -238,7 +240,7 @@ static void clear_canvas(void)
     dc = GetDC(g_mainwnd);
     BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
     ReleaseDC(g_mainwnd, dc);
-    set_status("Wyczyszczono plotno do koloru tla.");
+    set_status("Canvas cleared with background color.");
 }
 
 static void invert_canvas(void)
@@ -249,7 +251,7 @@ static void invert_canvas(void)
     dc = GetDC(g_mainwnd);
     BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
     ReleaseDC(g_mainwnd, dc);
-    set_status("Odwrocono kolory plotna.");
+    set_status("Colors inverted.");
 }
 
 static void flip_canvas_h(void)
@@ -269,7 +271,7 @@ static void flip_canvas_h(void)
     dc = GetDC(g_mainwnd);
     BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
     ReleaseDC(g_mainwnd, dc);
-    set_status("Odbito plotno w poziomie.");
+    set_status("Canvas flipped horizontally.");
 }
 
 static void flip_canvas_v(void)
@@ -289,7 +291,7 @@ static void flip_canvas_v(void)
     dc = GetDC(g_mainwnd);
     BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
     ReleaseDC(g_mainwnd, dc);
-    set_status("Odbito plotno w pionie.");
+    set_status("Canvas flipped vertically.");
 }
 
 static void init_canvas_buffers(HWND hwnd)
@@ -543,7 +545,7 @@ static void draw_normal_eraser(HDC target, int cx, int cy, int half, COLORREF bg
     DeleteObject(br);
 }
 
-/* Zapis i odczyt BMP */
+/* BMP File I/O */
 static BOOL save_canvas_to_bmp(const char *path)
 {
     HFILE fh;
@@ -574,7 +576,7 @@ static BOOL save_canvas_to_bmp(const char *path)
 
     fh = _lcreat(path, 0);
     if (fh == HFILE_ERROR) {
-        MessageBox(g_mainwnd, "Nie mozna utworzyc pliku BMP do zapisu.", "Blad zapisu", MB_OK | MB_ICONSTOP);
+        MessageBox(g_mainwnd, "Unable to create BMP file for saving.", "Save Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
@@ -599,7 +601,7 @@ static BOOL save_canvas_to_bmp(const char *path)
     lstrcpy(g_curfile, path);
     wsprintf(g_titlebuf, "PaintCraft - %s", g_curfile);
     SetWindowText(g_mainwnd, g_titlebuf);
-    set_status("Plik zostal pomyslnie zapisany.");
+    set_status("File saved successfully.");
     return TRUE;
 }
 
@@ -615,21 +617,21 @@ static BOOL load_canvas_from_bmp(const char *path)
 
     fh = _lopen(path, 0);
     if (fh == HFILE_ERROR) {
-        MessageBox(g_mainwnd, "Nie mozna otworzyc wybranego pliku.", "Blad odczytu", MB_OK | MB_ICONSTOP);
+        MessageBox(g_mainwnd, "Unable to open selected file.", "Open Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
     _lread(fh, (LPSTR)&fhdr, sizeof(fhdr));
     if (fhdr.bfType != 0x4D42) {
         _lclose(fh);
-        MessageBox(g_mainwnd, "Wybrany plik nie jest poprawnym plikiem BMP.", "Blad", MB_OK | MB_ICONSTOP);
+        MessageBox(g_mainwnd, "Selected file is not a valid BMP bitmap.", "Format Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
     _lread(fh, (LPSTR)&ihdr, sizeof(ihdr));
     if (ihdr.biBitCount != 24 && ihdr.biBitCount != 32) {
         _lclose(fh);
-        MessageBox(g_mainwnd, "PaintCraft obsluguje 24-bitowe mapy bitowe BMP.", "Format pliku", MB_OK | MB_ICONINFORMATION);
+        MessageBox(g_mainwnd, "PaintCraft supports 24-bit and 32-bit BMP files.", "File Format", MB_OK | MB_ICONINFORMATION);
         return FALSE;
     }
 
@@ -665,7 +667,7 @@ static BOOL load_canvas_from_bmp(const char *path)
     lstrcpy(g_curfile, path);
     wsprintf(g_titlebuf, "PaintCraft - %s", g_curfile);
     SetWindowText(g_mainwnd, g_titlebuf);
-    set_status("Wczytano obraz z pliku BMP.");
+    set_status("Loaded BMP image.");
     return TRUE;
 }
 
@@ -673,7 +675,7 @@ static void do_file_open(void)
 {
     OPENFILENAME ofn;
     char file_buf[128];
-    static const char filter[] = "Mapy bitowe (*.bmp)\0*.bmp\0Wszystkie pliki (*.*)\0*.*\0\0";
+    static const char filter[] = "Bitmap Files (*.bmp)\0*.bmp\0All Files (*.*)\0*.*\0\0";
 
     memset(&ofn, 0, sizeof(ofn));
     file_buf[0] = '\0';
@@ -696,7 +698,7 @@ static void do_file_save_as(void)
 {
     OPENFILENAME ofn;
     char file_buf[128];
-    static const char filter[] = "Mapy bitowe (*.bmp)\0*.bmp\0Wszystkie pliki (*.*)\0*.*\0\0";
+    static const char filter[] = "Bitmap Files (*.bmp)\0*.bmp\0All Files (*.*)\0*.*\0\0";
 
     memset(&ofn, 0, sizeof(ofn));
     lstrcpy(file_buf, g_curfile);
@@ -733,7 +735,12 @@ static void draw_modern_ui(HDC dc)
 
     GetClientRect(g_mainwnd, &client_rc);
 
-    /* 1. Tlo panelu sterowania */
+    /* Fill background outside control panel and canvas with neutral background */
+    SetRect(&r, 0, 0, client_rc.right, client_rc.bottom);
+    br = (HBRUSH)(COLOR_BTNFACE + 1);
+    FillRect(dc, &r, br);
+
+    /* 1. Control Panel Background */
     SetRect(&r, 0, 0, client_rc.right, CANVAS_Y - 4);
     br = CreateSolidBrush(RGB(236, 238, 241));
     FillRect(dc, &r, br);
@@ -746,7 +753,7 @@ static void draw_modern_ui(HDC dc)
     SelectObject(dc, old_pen);
     DeleteObject(hp);
 
-    /* 2. Przyciski narzedzi */
+    /* 2. Tool Buttons (Row 1) */
     SetBkMode(dc, TRANSPARENT);
     for (i = 1; i <= TOOL_COUNT; i++) {
         r = g_tools[i].r;
@@ -778,11 +785,11 @@ static void draw_modern_ui(HDC dc)
         DrawText(dc, g_tools[i].name, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    /* 3. Grubosc pedzla */
+    /* 3. Brush Width Options */
     SetTextColor(dc, RGB(60, 64, 72));
-    TextOut(dc, 8, 28, "Grubosc:", 8);
+    TextOut(dc, 8, 28, "Size:", 5);
     for (i = 1; i <= 5; i++) {
-        x = 65 + (i - 1) * 26;
+        x = 52 + (i - 1) * 26;
         y = 26;
         SetRect(&r, x, y, x + 22, y + 18);
         switch (i) {
@@ -806,16 +813,16 @@ static void draw_modern_ui(HDC dc)
         DrawText(dc, buf, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    /* Style ksztaltu */
-    TextOut(dc, 206, 28, "Styl:", 5);
+    /* Shape Style Options */
+    TextOut(dc, 194, 28, "Style:", 6);
     for (i = 1; i <= 3; i++) {
-        x = 245 + (i - 1) * 44;
+        x = 240 + (i - 1) * 44;
         y = 26;
         SetRect(&r, x, y, x + 40, y + 18);
         switch (i) {
-        case 1: lstrcpy(buf, "Obrys"); break;
-        case 2: lstrcpy(buf, "Pelny+"); break;
-        default: lstrcpy(buf, "Pelny"); break;
+        case 1: lstrcpy(buf, "Frame"); break;
+        case 2: lstrcpy(buf, "Fill+"); break;
+        default: lstrcpy(buf, "Solid"); break;
         }
         br = CreateSolidBrush(g_shape_style == i ? RGB(196, 220, 250) : RGB(255, 255, 255));
         FillRect(dc, &r, br);
@@ -831,17 +838,17 @@ static void draw_modern_ui(HDC dc)
         DrawText(dc, buf, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    /* Akcje */
+    /* Quick Action Buttons */
     for (i = 1; i <= 5; i++) {
-        x = 386 + (i - 1) * 44;
+        x = 384 + (i - 1) * 44;
         y = 26;
         SetRect(&r, x, y, x + 41, y + 18);
         switch (i) {
-        case 1: lstrcpy(buf, "Cofnij"); break;
-        case 2: lstrcpy(buf, "Czysc"); break;
-        case 3: lstrcpy(buf, "Negat"); break;
-        case 4: lstrcpy(buf, "Odb.X"); break;
-        default: lstrcpy(buf, "Odb.Y"); break;
+        case 1: lstrcpy(buf, "Undo"); break;
+        case 2: lstrcpy(buf, "Clear"); break;
+        case 3: lstrcpy(buf, "Invert"); break;
+        case 4: lstrcpy(buf, "FlipX"); break;
+        default: lstrcpy(buf, "FlipY"); break;
         }
         br = CreateSolidBrush(RGB(244, 245, 247));
         FillRect(dc, &r, br);
@@ -857,7 +864,7 @@ static void draw_modern_ui(HDC dc)
         DrawText(dc, buf, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    /* 4. Dual-color indicator */
+    /* 4. Dual-color Indicator */
     SetRect(&r, 22, 58, 48, 80);
     br = CreateSolidBrush(g_col_secondary);
     FillRect(dc, &r, br);
@@ -876,7 +883,7 @@ static void draw_modern_ui(HDC dc)
     SelectObject(dc, old_pen);
     DeleteObject(hp);
 
-    /* 5. 28 probek barwnych */
+    /* 5. 28-Color Swatches */
     for (i = 0; i < 28; i++) {
         if (i < 14) {
             x = 56 + i * 19;
@@ -899,7 +906,7 @@ static void draw_modern_ui(HDC dc)
         DeleteObject(hp);
     }
 
-    /* 6. Ramka wokol plotna */
+    /* 6. Border around Canvas */
     hp = CreatePen(PS_SOLID, 1, RGB(160, 165, 175));
     old_pen = (HPEN)SelectObject(dc, hp);
     old_br = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -908,7 +915,16 @@ static void draw_modern_ui(HDC dc)
     SelectObject(dc, old_pen);
     DeleteObject(hp);
 
-    /* 7. Status bar */
+    /* Canvas Drop Shadow */
+    hp = CreatePen(PS_SOLID, 1, RGB(200, 205, 212));
+    old_pen = (HPEN)SelectObject(dc, hp);
+    MoveTo(dc, CANVAS_X + g_canvas_w + 1, CANVAS_Y);
+    LineTo(dc, CANVAS_X + g_canvas_w + 1, CANVAS_Y + g_canvas_h + 2);
+    LineTo(dc, CANVAS_X, CANVAS_Y + g_canvas_h + 1);
+    SelectObject(dc, old_pen);
+    DeleteObject(hp);
+
+    /* 7. Bottom Status Bar */
     SetRect(&r, 0, client_rc.bottom - 22, client_rc.right, client_rc.bottom);
     br = CreateSolidBrush(RGB(240, 242, 245));
     FillRect(dc, &r, br);
@@ -936,7 +952,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     switch (msg) {
     case WM_CREATE:
         init_canvas_buffers(hwnd);
-        lstrcpy(g_statustext, "PaintCraft - Gotowy. LPM: Kolor glowny, PPM: Kolor tla.");
+        lstrcpy(g_statustext, "PaintCraft - Ready. LMB: Primary Color, RMB: Background Color.");
         return 0;
 
     case WM_PAINT:
@@ -945,6 +961,10 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         if (g_hdc_canvas)
             BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
         EndPaint(hwnd, &ps);
+        return 0;
+
+    case WM_SIZE:
+        InvalidateRect(hwnd, NULL, TRUE);
         return 0;
 
     case WM_ERASEBKGND:
@@ -965,16 +985,16 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         case IDM_ABOUT:
             MessageBox(
                 hwnd,
-                "PaintCraft dla Win16 & DOS\r\n"
-                "Nowoczesne studio rysunku - zamiennik Paintbrush.\r\n\r\n"
-                "Cechy:\r\n"
-                "- Podwojnie buforowane plotno GDI\r\n"
-                "- Podglad ksztaltow w locie (Rubber-banding)\r\n"
-                "- 14 narzedzi i nowoczesna paleta 28 barw\r\n"
-                "- Odczyt i zapis standardowych map bitowych BMP (24-bit)\r\n"
-                "- Wielopoziomowe Undo i filtry obrazu\r\n\r\n"
-                "Projekt Win16Loader - mztulip",
-                "O programie PaintCraft",
+                "PaintCraft Studio for Windows & DOS\r\n"
+                "A modern pixel art & graphics editor.\r\n\r\n"
+                "Features:\r\n"
+                "- Double-buffered GDI canvas\r\n"
+                "- Real-time interactive shape preview\r\n"
+                "- 14 drawing tools & 28-color palette\r\n"
+                "- Direct 24-bit BMP loading and saving\r\n"
+                "- Multi-level Undo & canvas transformations\r\n\r\n"
+                "Win16Loader Project",
+                "About PaintCraft",
                 MB_OK | 0x0040
             );
             break;
@@ -985,21 +1005,21 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         x = LOWORD(lparam);
         y = HIWORD(lparam);
 
-        /* 1. Narzedzia */
+        /* 1. Tools */
         for (i = 1; i <= TOOL_COUNT; i++) {
             if (x >= g_tools[i].r.left && x <= g_tools[i].r.right &&
                 y >= g_tools[i].r.top && y <= g_tools[i].r.bottom) {
                 g_active_tool = i;
                 g_poly_count = 0;
                 InvalidateRect(hwnd, NULL, FALSE);
-                set_status("Zmieniono aktywne narzedzie.");
+                set_status("Active tool changed.");
                 return 0;
             }
         }
 
-        /* 2. Grubosc */
-        if (y >= 26 && y <= 44 && x >= 65 && x <= 195) {
-            i = ((x - 65) / 26) + 1;
+        /* 2. Brush Size */
+        if (y >= 26 && y <= 44 && x >= 52 && x <= 182) {
+            i = ((x - 52) / 26) + 1;
             switch (i) {
             case 1: g_brush_size = 1; break;
             case 2: g_brush_size = 2; break;
@@ -1008,22 +1028,22 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             default: g_brush_size = 12; break;
             }
             InvalidateRect(hwnd, NULL, FALSE);
-            set_status("Zmieniono grubosc pedzla.");
+            set_status("Brush size changed.");
             return 0;
         }
 
-        /* 3. Style */
-        if (y >= 26 && y <= 44 && x >= 245 && x <= 377) {
-            i = ((x - 245) / 44) + 1;
+        /* 3. Shape Style */
+        if (y >= 26 && y <= 44 && x >= 240 && x <= 372) {
+            i = ((x - 240) / 44) + 1;
             if (i >= 1 && i <= 3) g_shape_style = i;
             InvalidateRect(hwnd, NULL, FALSE);
-            set_status("Zmieniono styl figur.");
+            set_status("Shape style changed.");
             return 0;
         }
 
-        /* 4. Szybkie akcje */
-        if (y >= 26 && y <= 44 && x >= 386 && x <= 606) {
-            i = ((x - 386) / 44) + 1;
+        /* 4. Quick Actions */
+        if (y >= 26 && y <= 44 && x >= 384 && x <= 604) {
+            i = ((x - 384) / 44) + 1;
             switch (i) {
             case 1: do_undo(); break;
             case 2: clear_canvas(); break;
@@ -1034,19 +1054,19 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             return 0;
         }
 
-        /* 5. Paleta LPM */
+        /* 5. Palette LMB */
         if (y >= 50 && y <= 80 && x >= 56 && x <= 56 + 14 * 19) {
             swatch_idx = (x - 56) / 19;
             if (swatch_idx >= 0 && swatch_idx < 14) {
                 if (y >= 66) swatch_idx += 14;
                 g_col_primary = g_palette[swatch_idx];
                 InvalidateRect(hwnd, NULL, FALSE);
-                set_status("Ustawiono kolor glowny (LPM).");
+                set_status("Primary color selected (LMB).");
                 return 0;
             }
         }
 
-        /* 6. Plotno */
+        /* 6. Canvas Area */
         if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
             y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
             SetCapture(hwnd);
@@ -1092,13 +1112,13 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 dc = GetDC(hwnd);
                 BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
                 ReleaseDC(hwnd, dc);
-                set_status("Wypelniono obszar kolorem.");
+                set_status("Surface filled.");
                 break;
 
             case TOOL_EYEDROPPER:
                 g_col_primary = GetPixel(g_hdc_canvas, x, y);
                 InvalidateRect(hwnd, NULL, FALSE);
-                set_status("Pobrano kolor glowny pipeta.");
+                set_status("Primary color picked from canvas.");
                 break;
 
             case TOOL_TEXT:
@@ -1109,7 +1129,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 dc = GetDC(hwnd);
                 BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
                 ReleaseDC(hwnd, dc);
-                set_status("Wstawiono napis tekstowy.");
+                set_status("Text stamped onto canvas.");
                 break;
 
             case TOOL_POLYGON:
@@ -1119,7 +1139,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                     g_poly_pts[0].y = y;
                     g_poly_count = 1;
                     g_last_x = x; g_last_y = y;
-                    set_status("Wielokat: Klikaj punkty. Dwuklik zamyka.");
+                    set_status("Polygon: Click points. Double-click to close.");
                 } else if (g_poly_count < 30) {
                     if (abs(x - g_poly_pts[0].x) < 6 && abs(y - g_poly_pts[0].y) < 6 && g_poly_count >= 2) {
                         Polygon(g_hdc_canvas, g_poly_pts, g_poly_count);
@@ -1127,7 +1147,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                         dc = GetDC(hwnd);
                         BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
                         ReleaseDC(hwnd, dc);
-                        set_status("Zamknieto i wypelniono wielokat.");
+                        set_status("Polygon closed and filled.");
                     } else {
                         g_poly_pts[g_poly_count].x = x;
                         g_poly_pts[g_poly_count].y = y;
@@ -1159,14 +1179,14 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         x = LOWORD(lparam);
         y = HIWORD(lparam);
 
-        /* Paleta PPM -> Kolor tla */
+        /* Palette RMB -> Background Color */
         if (y >= 50 && y <= 80 && x >= 56 && x <= 56 + 14 * 19) {
             swatch_idx = (x - 56) / 19;
             if (swatch_idx >= 0 && swatch_idx < 14) {
                 if (y >= 66) swatch_idx += 14;
                 g_col_secondary = g_palette[swatch_idx];
                 InvalidateRect(hwnd, NULL, FALSE);
-                set_status("Ustawiono kolor tla (PPM).");
+                set_status("Background color selected (RMB).");
                 return 0;
             }
         }
@@ -1176,7 +1196,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             if (g_active_tool == TOOL_EYEDROPPER) {
                 g_col_secondary = GetPixel(g_hdc_canvas, x - CANVAS_X, y - CANVAS_Y);
                 InvalidateRect(hwnd, NULL, FALSE);
-                set_status("Pobrano kolor tla pipeta.");
+                set_status("Background color picked from canvas.");
                 return 0;
             }
         }
@@ -1188,7 +1208,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
         if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
             y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
-            wsprintf(coord_buf, "Kursor: X=%d Y=%d px  |  Plotno: 580 x 310", x - CANVAS_X, y - CANVAS_Y);
+            wsprintf(coord_buf, "Cursor: X=%d Y=%d px  |  Canvas: 580 x 310", x - CANVAS_X, y - CANVAS_Y);
             set_status(coord_buf);
         }
 
@@ -1259,7 +1279,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             dc = GetDC(hwnd);
             BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
             ReleaseDC(hwnd, dc);
-            set_status("Narysowano ksztalt.");
+            set_status("Shape drawn.");
         }
         return 0;
 
@@ -1270,7 +1290,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             dc = GetDC(hwnd);
             BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
             ReleaseDC(hwnd, dc);
-            set_status("Zamknieto i ukonczono wielokat.");
+            set_status("Polygon completed.");
         }
         return 0;
 
@@ -1292,26 +1312,26 @@ static void create_main_menu(HWND hwnd)
     hmenu = CreateMenu();
 
     hfile = CreatePopupMenu();
-    AppendMenu(hfile, MF_STRING, IDM_NEW,    "&Nowy\tCtrl+N");
-    AppendMenu(hfile, MF_STRING, IDM_OPEN,   "&Otworz...\tCtrl+O");
-    AppendMenu(hfile, MF_STRING, IDM_SAVE,   "&Zapisz\tCtrl+S");
-    AppendMenu(hfile, MF_STRING, IDM_SAVEAS, "Zapisz &jako...");
+    AppendMenu(hfile, MF_STRING, IDM_NEW,    "&New\tCtrl+N");
+    AppendMenu(hfile, MF_STRING, IDM_OPEN,   "&Open...\tCtrl+O");
+    AppendMenu(hfile, MF_STRING, IDM_SAVE,   "&Save\tCtrl+S");
+    AppendMenu(hfile, MF_STRING, IDM_SAVEAS, "Save &As...");
     AppendMenu(hfile, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hfile, MF_STRING, IDM_EXIT,   "&Zakoncz\tAlt+F4");
-    AppendMenu(hmenu, MF_POPUP, hfile, "&Plik");
+    AppendMenu(hfile, MF_STRING, IDM_EXIT,   "E&xit\tAlt+F4");
+    AppendMenu(hmenu, MF_POPUP, hfile, "&File");
 
     hedit = CreatePopupMenu();
-    AppendMenu(hedit, MF_STRING, IDM_UNDO,   "&Cofnij\tCtrl+Z");
+    AppendMenu(hedit, MF_STRING, IDM_UNDO,   "&Undo\tCtrl+Z");
     AppendMenu(hedit, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hedit, MF_STRING, IDM_CLEAR,  "&Wyczysc plotno");
-    AppendMenu(hedit, MF_STRING, IDM_INVERT, "&Odwroc kolory (Negatyw)");
-    AppendMenu(hedit, MF_STRING, IDM_FLIPH,  "Odbij w &poziomie");
-    AppendMenu(hedit, MF_STRING, IDM_FLIPV,  "Odbij w &pionie");
-    AppendMenu(hmenu, MF_POPUP, hedit, "&Edycja");
+    AppendMenu(hedit, MF_STRING, IDM_CLEAR,  "&Clear Canvas");
+    AppendMenu(hedit, MF_STRING, IDM_INVERT, "&Invert Colors");
+    AppendMenu(hedit, MF_STRING, IDM_FLIPH,  "Flip &Horizontal");
+    AppendMenu(hedit, MF_STRING, IDM_FLIPV,  "Flip &Vertical");
+    AppendMenu(hmenu, MF_POPUP, hedit, "&Edit");
 
     hhelp = CreatePopupMenu();
-    AppendMenu(hhelp, MF_STRING, IDM_ABOUT,  "&O programie PaintCraft...");
-    AppendMenu(hmenu, MF_POPUP, hhelp, "P&omoc");
+    AppendMenu(hhelp, MF_STRING, IDM_ABOUT,  "&About PaintCraft...");
+    AppendMenu(hmenu, MF_POPUP, hhelp, "&Help");
 
     SetMenu(hwnd, hmenu);
 }
@@ -1339,12 +1359,13 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev_inst, LPSTR cmdline, int show
 
     if (!RegisterClass(&wc)) return 1;
 
+    /* Fully resizable window with Maximize, Minimize, System Menu, Caption, Thick Frame */
     g_mainwnd = CreateWindow(
         "W16PaintCraftClass",
-        "PaintCraft - [Bez tytulu]",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        "PaintCraft - [Untitled]",
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT,
-        620, 460,
+        624, 468,
         NULL, NULL, hinst, NULL
     );
 

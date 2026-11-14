@@ -143,6 +143,7 @@ def main():
         ("windir/SYSTEM.INI", "SYSTEM.INI"),
         ("windir/DOSPRMPT.PIF", "DOSPRMPT.PIF"),
         ("windir/FREEDOS.ICO", "FREEDOS.ICO"),
+        ("control.exe", "CONTROL.EXE"),
     ]
     notepad_candidates = [
         args.notepad_exe,

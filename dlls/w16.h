@@ -23,6 +23,8 @@ typedef WORD           HMENU;
 typedef WORD           HBRUSH;
 typedef WORD           HCURSOR;
 typedef WORD           HDC;
+typedef WORD           HFONT;
+typedef WORD           HGDIOBJ;
 typedef DWORD          COLORREF;
 typedef LONG           LRESULT;
 typedef WORD           WPARAM;
@@ -97,6 +99,76 @@ typedef struct tagOFN {
 } OPENFILENAME;
 typedef OPENFILENAME __far *LPOPENFILENAME;
 
+#pragma pack(push, 1)
+typedef struct {
+    int  lfHeight;
+    int  lfWidth;
+    int  lfEscapement;
+    int  lfOrientation;
+    int  lfWeight;
+    BYTE lfItalic;
+    BYTE lfUnderline;
+    BYTE lfStrikeOut;
+    BYTE lfCharSet;
+    BYTE lfOutPrecision;
+    BYTE lfClipPrecision;
+    BYTE lfQuality;
+    BYTE lfPitchAndFamily;
+    char lfFaceName[32];
+} LOGFONT;
+typedef LOGFONT __far *LPLOGFONT;
+
+typedef struct {
+    DWORD        lStructSize;
+    HWND         hwndOwner;
+    HDC          hDC;
+    LPLOGFONT    lpLogFont;
+    int          iPointSize;
+    DWORD        Flags;
+    COLORREF     rgbColors;
+    LPARAM       lCustData;
+    FARPROC      lpfnHook;
+    LPCSTR       lpTemplateName;
+    HINSTANCE    hInstance;
+    LPSTR        lpszStyle;
+    WORD         nFontType;
+    int          nSizeMin;
+    int          nSizeMax;
+} CHOOSEFONT;
+typedef CHOOSEFONT __far *LPCHOOSEFONT;
+
+typedef struct {
+    DWORD        lStructSize;
+    HWND         hwndOwner;
+    HINSTANCE    hInstance;
+    COLORREF     rgbResult;
+    COLORREF __far *lpCustColors;
+    DWORD        Flags;
+    LPARAM       lCustData;
+    FARPROC      lpfnHook;
+    LPCSTR       lpTemplateName;
+} CHOOSECOLOR;
+typedef CHOOSECOLOR __far *LPCHOOSECOLOR;
+#pragma pack(pop)
+
+#define CF_SCREENFONTS          0x00000001L
+#define CF_PRINTERFONTS         0x00000002L
+#define CF_BOTH                 0x00000003L
+#define CF_SHOWHELP             0x00000004L
+#define CF_ENABLEHOOK           0x00000008L
+#define CF_ENABLETEMPLATE       0x00000010L
+#define CF_ENABLETEMPLATEHANDLE 0x00000020L
+#define CF_INITTOLOGFONTSTRUCT  0x00000040L
+#define CF_USESTYLE             0x00000080L
+#define CF_EFFECTS              0x00000100L
+
+#define SCREEN_FONTTYPE         0x2000
+#define BOLD_FONTTYPE           0x0100
+#define ITALIC_FONTTYPE         0x0200
+#define REGULAR_FONTTYPE        0x0400
+
+#define CC_RGBINIT              0x00000001L
+
 #define OFN_READONLY                    0x00000001L
 #define OFN_OVERWRITEPROMPT             0x00000002L
 #define OFN_HIDEREADONLY                0x00000004L
@@ -160,6 +232,9 @@ typedef OPENFILENAME __far *LPOPENFILENAME;
 #define CBS_DROPDOWNLIST                0x0003
 #define BS_PUSHBUTTON                   0x0000
 #define BS_DEFPUSHBUTTON                0x0001
+#define BS_GROUPBOX                     0x0007
+#define SS_LEFT                         0x0000
+#define SS_CENTER                       0x0001
 
 #define IDOK                            1
 #define IDCANCEL                        2
@@ -243,9 +318,13 @@ int     API GetDlgItemText(HWND, int, LPSTR, int);
 LRESULT API SendDlgItemMessage(HWND, int, WORD, WORD, LONG);
 int     API MessageBox(HWND, LPCSTR, LPCSTR, WORD);
 HCURSOR API LoadCursor(HINSTANCE, LPCSTR);
+void    API InvalidateRect(HWND, LPRECT, BOOL);
 
 /* ---- GDI ---- */
 HANDLE  API GetStockObject(int);
+HFONT   API CreateFontIndirect(const LOGFONT __far *);
+BOOL    API DeleteObject(HGDIOBJ);
+HGDIOBJ API SelectObject(HDC, HGDIOBJ);
 
 /* ---- USER (prywatne) ---- */
 HICON  API UserIconFromDIB(BYTE __far *bi, DWORD size);

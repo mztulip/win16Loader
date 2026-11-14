@@ -6,7 +6,7 @@ uses
   WinProcs, WinTypes, Strings;
 
 const
-  { Narzedzia rysowania }
+  { Drawing Tools }
   TOOL_PENCIL       = 1;
   TOOL_BRUSH        = 2;
   TOOL_AIRBRUSH     = 3;
@@ -23,18 +23,18 @@ const
   TOOL_SELECT       = 14;
   TOOL_COUNT        = 14;
 
-  { Style wypelnienia ksztaltow }
+  { Shape Styles }
   STYLE_OUTLINE       = 1;
   STYLE_FILLED_BORDER = 2;
   STYLE_FILLED_SOLID  = 3;
 
-  { Wymiary obszaru roboczego }
+  { Canvas Default Dimensions }
   CANVAS_DEF_W = 580;
   CANVAS_DEF_H = 310;
   CANVAS_X     = 10;
   CANVAS_Y     = 88;
 
-  { Identyfikatory menu }
+  { Menu Identifiers }
   IDM_NEW       = 1001;
   IDM_OPEN      = 1002;
   IDM_SAVE      = 1003;
@@ -49,7 +49,7 @@ const
 
   IDM_ABOUT     = 1020;
 
-  { Flagi DrawText }
+  { DrawText Flags }
   DT_TOP        = $0000;
   DT_LEFT       = $0000;
   DT_CENTER     = $0001;
@@ -59,7 +59,7 @@ const
   DT_WORDBREAK  = $0010;
   DT_SINGLELINE = $0020;
 
-  { Flagi FloodFill }
+  { FloodFill Flags }
   FLOODFILLBORDER  = 0;
   FLOODFILLSURFACE = 1;
 
@@ -128,7 +128,7 @@ var
   G_TitleBuf: array[0..160] of Char;
   G_StatusText: array[0..120] of Char;
 
-  { Buforowanie plotna GDI }
+  { GDI Canvas Buffering }
   G_CanvasW: Integer;
   G_CanvasH: Integer;
   G_hdcCanvas: HDC;
@@ -144,7 +144,7 @@ var
   G_hBmpTemp: HBITMAP;
   G_hBmpOldTemp: HBITMAP;
 
-  { Stan narzedzi i rysowania }
+  { Tool States }
   G_ActiveTool: Integer;
   G_BrushSize: Integer;
   G_ShapeStyle: Integer;
@@ -157,15 +157,15 @@ var
   G_LastX, G_LastY: Integer;
   G_CurX, G_CurY: Integer;
 
-  { Wielokat }
+  { Polygon }
   G_PolyPoints: array[0..31] of TPoint;
   G_PolyCount: Integer;
 
-  { Przyciski interfejsu }
+  { UI Elements }
   G_Tools: array[1..TOOL_COUNT] of TToolBtn;
   G_Palette: array[0..27] of TColorRef;
 
-  { Generator liczb losowych dla spraya }
+  { Pseudo-random Seed for Spray }
   G_RandSeed: Word;
 
 procedure Dbg(S: PChar);
@@ -199,44 +199,43 @@ end;
 
 procedure InitPalette;
 begin
-  { Rzad 1 - barwy podstawowe i ciemniejsze }
-  G_Palette[0]  := RGB(0, 0, 0);         { Czarny }
-  G_Palette[1]  := RGB(96, 96, 96);      { Ciemnoszary }
-  G_Palette[2]  := RGB(144, 0, 0);       { Bordowy }
-  G_Palette[3]  := RGB(220, 20, 20);     { Czerwony }
-  G_Palette[4]  := RGB(240, 110, 0);     { Pomaranczowy }
-  G_Palette[5]  := RGB(248, 192, 0);     { Zloty }
-  G_Palette[6]  := RGB(248, 240, 32);    { Zolty }
-  G_Palette[7]  := RGB(0, 112, 32);      { Ciemnozielony }
-  G_Palette[8]  := RGB(16, 176, 64);     { Zielony }
-  G_Palette[9]  := RGB(112, 224, 32);    { Jasnozielony/Limonka }
-  G_Palette[10] := RGB(0, 128, 128);     { Morski/Teal }
-  G_Palette[11] := RGB(0, 200, 224);     { Jasnoniebieski/Cyjan }
-  G_Palette[12] := RGB(16, 32, 144);     { Granatowy }
-  G_Palette[13] := RGB(32, 96, 224);     { Blekit krolewski }
+  { Row 1 - Deep & vibrant colors }
+  G_Palette[0]  := RGB(0, 0, 0);
+  G_Palette[1]  := RGB(96, 96, 96);
+  G_Palette[2]  := RGB(144, 0, 0);
+  G_Palette[3]  := RGB(220, 20, 20);
+  G_Palette[4]  := RGB(240, 110, 0);
+  G_Palette[5]  := RGB(248, 192, 0);
+  G_Palette[6]  := RGB(248, 240, 32);
+  G_Palette[7]  := RGB(0, 112, 32);
+  G_Palette[8]  := RGB(16, 176, 64);
+  G_Palette[9]  := RGB(112, 224, 32);
+  G_Palette[10] := RGB(0, 128, 128);
+  G_Palette[11] := RGB(0, 200, 224);
+  G_Palette[12] := RGB(16, 32, 144);
+  G_Palette[13] := RGB(32, 96, 224);
 
-  { Rzad 2 - barwy jasne, pastelowe i akcentowe }
-  G_Palette[14] := RGB(255, 255, 255);   { Bialy }
-  G_Palette[15] := RGB(192, 192, 192);   { Jasnoszary }
-  G_Palette[16] := RGB(128, 64, 16);     { Brazowy }
-  G_Palette[17] := RGB(240, 128, 128);   { Lososiowy }
-  G_Palette[18] := RGB(255, 192, 160);   { Brzoskwiniowy }
-  G_Palette[19] := RGB(255, 255, 176);   { Kremowy }
-  G_Palette[20] := RGB(176, 240, 192);   { Mientowy }
-  G_Palette[21] := RGB(128, 208, 255);   { Blekitny }
-  G_Palette[22] := RGB(200, 232, 255);   { Lodowy }
-  G_Palette[23] := RGB(80, 48, 160);     { Ciemnofioletowy }
-  G_Palette[24] := RGB(144, 48, 192);    { Fioletowy }
-  G_Palette[25] := RGB(224, 40, 192);    { Magenta/Fuksja }
-  G_Palette[26] := RGB(255, 128, 192);   { Rozowy }
-  G_Palette[27] := RGB(160, 120, 80);    { Bezowy/Khaki }
+  { Row 2 - Light, pastel and accents }
+  G_Palette[14] := RGB(255, 255, 255);
+  G_Palette[15] := RGB(192, 192, 192);
+  G_Palette[16] := RGB(128, 64, 16);
+  G_Palette[17] := RGB(240, 128, 128);
+  G_Palette[18] := RGB(255, 192, 160);
+  G_Palette[19] := RGB(255, 255, 176);
+  G_Palette[20] := RGB(176, 240, 192);
+  G_Palette[21] := RGB(128, 208, 255);
+  G_Palette[22] := RGB(200, 232, 255);
+  G_Palette[23] := RGB(80, 48, 160);
+  G_Palette[24] := RGB(144, 48, 192);
+  G_Palette[25] := RGB(224, 40, 192);
+  G_Palette[26] := RGB(255, 128, 192);
+  G_Palette[27] := RGB(160, 120, 80);
 end;
 
 procedure InitButtons;
 var
   I, X, Y, W, H: Integer;
 begin
-  { Przyciski narzedzi w rzedzie 1 }
   W := 38;
   H := 20;
   Y := 4;
@@ -249,20 +248,20 @@ begin
     G_Tools[I].R.bottom := Y + H;
     G_Tools[I].Id       := I;
     case I of
-      TOOL_PENCIL:       StrCopy(G_Tools[I].Name, 'Olow');
-      TOOL_BRUSH:        StrCopy(G_Tools[I].Name, 'Pedz');
+      TOOL_PENCIL:       StrCopy(G_Tools[I].Name, 'Penc');
+      TOOL_BRUSH:        StrCopy(G_Tools[I].Name, 'Brsh');
       TOOL_AIRBRUSH:     StrCopy(G_Tools[I].Name, 'Spry');
-      TOOL_ERASER:       StrCopy(G_Tools[I].Name, 'Gumk');
-      TOOL_COLOR_ERASER: StrCopy(G_Tools[I].Name, 'G.Kl');
-      TOOL_FILL:         StrCopy(G_Tools[I].Name, 'Wiad');
-      TOOL_LINE:         StrCopy(G_Tools[I].Name, 'Lin.');
-      TOOL_RECT:         StrCopy(G_Tools[I].Name, 'Pros');
-      TOOL_ROUNDRECT:    StrCopy(G_Tools[I].Name, 'Zaok');
-      TOOL_ELLIPSE:      StrCopy(G_Tools[I].Name, 'Elip');
-      TOOL_POLYGON:      StrCopy(G_Tools[I].Name, 'Wiel');
-      TOOL_EYEDROPPER:   StrCopy(G_Tools[I].Name, 'Pipe');
-      TOOL_TEXT:         StrCopy(G_Tools[I].Name, 'Teks');
-      TOOL_SELECT:       StrCopy(G_Tools[I].Name, 'Zazn');
+      TOOL_ERASER:       StrCopy(G_Tools[I].Name, 'Eras');
+      TOOL_COLOR_ERASER: StrCopy(G_Tools[I].Name, 'C.Er');
+      TOOL_FILL:         StrCopy(G_Tools[I].Name, 'Fill');
+      TOOL_LINE:         StrCopy(G_Tools[I].Name, 'Line');
+      TOOL_RECT:         StrCopy(G_Tools[I].Name, 'Rect');
+      TOOL_ROUNDRECT:    StrCopy(G_Tools[I].Name, 'RndR');
+      TOOL_ELLIPSE:      StrCopy(G_Tools[I].Name, 'Oval');
+      TOOL_POLYGON:      StrCopy(G_Tools[I].Name, 'Poly');
+      TOOL_EYEDROPPER:   StrCopy(G_Tools[I].Name, 'Pick');
+      TOOL_TEXT:         StrCopy(G_Tools[I].Name, 'Text');
+      TOOL_SELECT:       StrCopy(G_Tools[I].Name, 'Sel.');
     end;
   end;
 end;
@@ -282,11 +281,10 @@ var
 begin
   if not G_CanUndo then
   begin
-    MessageBox(G_MainWnd, 'Brak operacji do cofniecia.', 'Cofnij', MB_OK or MB_ICONINFORMATION);
+    MessageBox(G_MainWnd, 'No action available to undo.', 'Undo', MB_OK or MB_ICONINFORMATION);
     Exit;
   end;
 
-  { Kopiuj stan z bufora Undo z powrotem na plotno }
   BitBlt(G_hdcCanvas, 0, 0, G_CanvasW, G_CanvasH, G_hdcUndo, 0, 0, SRCCOPY);
   G_CanUndo := False;
 
@@ -294,7 +292,7 @@ begin
   BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
   ReleaseDC(G_MainWnd, HdcScr);
 
-  SetStatus('Cofnieto ostatnia operacje.');
+  SetStatus('Undid last action.');
 end;
 
 procedure ClearCanvas;
@@ -313,7 +311,7 @@ begin
   BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
   ReleaseDC(G_MainWnd, HdcScr);
 
-  SetStatus('Wyczyszczono plotno do koloru tla.');
+  SetStatus('Canvas cleared with background color.');
 end;
 
 procedure InvertCanvas;
@@ -327,7 +325,7 @@ begin
   BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
   ReleaseDC(G_MainWnd, HdcScr);
 
-  SetStatus('Odwrocono kolory plotna.');
+  SetStatus('Colors inverted.');
 end;
 
 procedure FlipCanvasH;
@@ -352,7 +350,7 @@ begin
   BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
   ReleaseDC(G_MainWnd, HdcScr);
 
-  SetStatus('Odbito plotno w poziomie.');
+  SetStatus('Canvas flipped horizontally.');
 end;
 
 procedure FlipCanvasV;
@@ -377,7 +375,7 @@ begin
   BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
   ReleaseDC(G_MainWnd, HdcScr);
 
-  SetStatus('Odbito plotno w pionie.');
+  SetStatus('Canvas flipped vertically.');
 end;
 
 procedure InitCanvasBuffers(Wnd: HWND);
@@ -391,24 +389,20 @@ begin
 
   HdcScr := GetDC(Wnd);
 
-  { Glowny bufor plotna }
   G_hdcCanvas := CreateCompatibleDC(HdcScr);
   G_hBmpCanvas := CreateCompatibleBitmap(HdcScr, G_CanvasW, G_CanvasH);
   G_hBmpOldCanvas := SelectObject(G_hdcCanvas, G_hBmpCanvas);
 
-  { Bufor Undo }
   G_hdcUndo := CreateCompatibleDC(HdcScr);
   G_hBmpUndo := CreateCompatibleBitmap(HdcScr, G_CanvasW, G_CanvasH);
   G_hBmpOldUndo := SelectObject(G_hdcUndo, G_hBmpUndo);
 
-  { Bufor podgladu tymczasowego }
   G_hdcTemp := CreateCompatibleDC(HdcScr);
   G_hBmpTemp := CreateCompatibleBitmap(HdcScr, G_CanvasW, G_CanvasH);
   G_hBmpOldTemp := SelectObject(G_hdcTemp, G_hBmpTemp);
 
   ReleaseDC(Wnd, HdcScr);
 
-  { Wyczysc plotno do bieli }
   HBr := CreateSolidBrush(RGB(255, 255, 255));
   Rc.left := 0; Rc.top := 0; Rc.right := G_CanvasW; Rc.bottom := G_CanvasH;
   FillRect(G_hdcCanvas, Rc, HBr);
@@ -440,7 +434,6 @@ begin
   end;
 end;
 
-{ Procedury rysowania narzedzi na DC }
 procedure ApplyDrawShape(TargetDC: HDC; Tool, Style, X1, Y1, X2, Y2: Integer; ColPen, ColFill: TColorRef; BSize: Integer);
 var
   HP: HPEN;
@@ -585,7 +578,6 @@ begin
 
     TOOL_SELECT:
     begin
-      { Rysuj linie przerywana / ramke wyboru }
       HP := CreatePen(PS_DOT, 1, RGB(0, 0, 0));
       HBr := GetStockObject(NULL_BRUSH);
       OldPen := SelectObject(TargetDC, HP);
@@ -649,7 +641,6 @@ begin
   begin
     R := (SimpleRand mod Radius);
     Angle := (SimpleRand mod 360);
-    { Proste przyblizenie geometryczne }
     Px := CenterX + (R * (180 - Abs(Angle - 180))) div 120 - (R div 2);
     Py := CenterY + (R * (180 - Abs(((Angle + 90) mod 360) - 180))) div 120 - (R div 2);
     if (Px >= 0) and (Px < G_CanvasW) and (Py >= 0) and (Py < G_CanvasH) then
@@ -691,7 +682,6 @@ begin
   DeleteObject(HBr);
 end;
 
-{ Zapis i odczyt plikow BMP }
 function SaveCanvasToBMP(APath: PChar): Boolean;
 var
   FH: HFILE;
@@ -711,7 +701,7 @@ begin
   FillChar(FileHdr, SizeOf(FileHdr), 0);
   FillChar(InfoHdr, SizeOf(InfoHdr), 0);
 
-  FileHdr.bfType := $4D42; { 'BM' }
+  FileHdr.bfType := $4D42;
   FileHdr.bfOffBits := SizeOf(TBitmapFileHeader) + SizeOf(TBitmapInfoHeader);
   FileHdr.bfSize := FileHdr.bfOffBits + Longint(RowBytes + PadBytes) * Longint(G_CanvasH);
 
@@ -720,13 +710,13 @@ begin
   InfoHdr.biHeight := G_CanvasH;
   InfoHdr.biPlanes := 1;
   InfoHdr.biBitCount := 24;
-  InfoHdr.biCompression := 0; { BI_RGB }
+  InfoHdr.biCompression := 0;
   InfoHdr.biSizeImage := Longint(RowBytes + PadBytes) * Longint(G_CanvasH);
 
   FH := _lcreat(APath, 0);
   if FH = HFILE_ERROR then
   begin
-    MessageBox(G_MainWnd, 'Nie mozna utworzyc pliku BMP do zapisu.', 'Blad zapisu', MB_OK or MB_ICONSTOP);
+    MessageBox(G_MainWnd, 'Unable to create BMP file for saving.', 'Save Error', MB_OK or MB_ICONSTOP);
     Exit;
   end;
 
@@ -735,17 +725,15 @@ begin
 
   PadZero := 0;
 
-  { Skanowanie linii od dolu do gory (standard BMP) }
   for Y := G_CanvasH - 1 downto 0 do
   begin
     Idx := 0;
     for X := 0 to G_CanvasW - 1 do
     begin
       Color := GetPixel(G_hdcCanvas, X, Y);
-      { BGR }
-      RowBuf[Idx]     := (Color shr 16) and $FF; { Blue }
-      RowBuf[Idx + 1] := (Color shr 8) and $FF;  { Green }
-      RowBuf[Idx + 2] := Color and $FF;         { Red }
+      RowBuf[Idx]     := (Color shr 16) and $FF;
+      RowBuf[Idx + 1] := (Color shr 8) and $FF;
+      RowBuf[Idx + 2] := Color and $FF;
       Inc(Idx, 3);
     end;
     _lwrite(FH, @RowBuf[0], RowBytes);
@@ -758,7 +746,7 @@ begin
   StrCopy(G_TitleBuf, 'PaintCraft - ');
   StrCat(G_TitleBuf, G_CurFile);
   SetWindowText(G_MainWnd, G_TitleBuf);
-  SetStatus('Plik zostal pomyslnie zapisany.');
+  SetStatus('File saved successfully.');
   Result := True;
 end;
 
@@ -779,7 +767,7 @@ begin
   FH := _lopen(APath, 0);
   if FH = HFILE_ERROR then
   begin
-    MessageBox(G_MainWnd, 'Nie mozna otworzyc wybranego pliku.', 'Blad odczytu', MB_OK or MB_ICONSTOP);
+    MessageBox(G_MainWnd, 'Unable to open selected file.', 'Open Error', MB_OK or MB_ICONSTOP);
     Exit;
   end;
 
@@ -787,7 +775,7 @@ begin
   if FileHdr.bfType <> $4D42 then
   begin
     _lclose(FH);
-    MessageBox(G_MainWnd, 'Wybrany plik nie jest poprawnym plikiem BMP.', 'Blad', MB_OK or MB_ICONSTOP);
+    MessageBox(G_MainWnd, 'Selected file is not a valid BMP bitmap.', 'Format Error', MB_OK or MB_ICONSTOP);
     Exit;
   end;
 
@@ -795,7 +783,7 @@ begin
   if (InfoHdr.biBitCount <> 24) and (InfoHdr.biBitCount <> 32) then
   begin
     _lclose(FH);
-    MessageBox(G_MainWnd, 'PaintCraft obsluguje 24-bitowe mapy bitowe BMP.', 'Format pliku', MB_OK or MB_ICONINFORMATION);
+    MessageBox(G_MainWnd, 'PaintCraft supports 24-bit and 32-bit BMP files.', 'File Format', MB_OK or MB_ICONINFORMATION);
     Exit;
   end;
 
@@ -819,7 +807,6 @@ begin
       Idx := 0;
       for X := 0 to DrawW - 1 do
       begin
-        { Odczytaj BGR }
         Color := RGB(RowBuf[Idx + 2], RowBuf[Idx + 1], RowBuf[Idx]);
         SetPixel(G_hdcCanvas, X, Y, Color);
         Inc(Idx, InfoHdr.biBitCount div 8);
@@ -837,7 +824,7 @@ begin
   StrCopy(G_TitleBuf, 'PaintCraft - ');
   StrCat(G_TitleBuf, G_CurFile);
   SetWindowText(G_MainWnd, G_TitleBuf);
-  SetStatus('Wczytano obraz z pliku BMP.');
+  SetStatus('Loaded BMP image.');
   Result := True;
 end;
 
@@ -849,7 +836,7 @@ var
 begin
   FillChar(OFN, SizeOf(OFN), 0);
   FileBuf[0] := #0;
-  FilterBuf := 'Mapy bitowe (*.bmp)'#0'*.bmp'#0'Wszystkie pliki (*.*)'#0'*.*'#0#0;
+  FilterBuf := 'Bitmap Files (*.bmp)'#0'*.bmp'#0'All Files (*.*)'#0'*.*'#0#0;
 
   OFN.lStructSize := SizeOf(TOpenFileName);
   OFN.hwndOwner := G_MainWnd;
@@ -875,7 +862,7 @@ var
 begin
   FillChar(OFN, SizeOf(OFN), 0);
   StrCopy(FileBuf, G_CurFile);
-  FilterBuf := 'Mapy bitowe (*.bmp)'#0'*.bmp'#0'Wszystkie pliki (*.*)'#0'*.*'#0#0;
+  FilterBuf := 'Bitmap Files (*.bmp)'#0'*.bmp'#0'All Files (*.*)'#0'*.*'#0#0;
 
   OFN.lStructSize := SizeOf(TOpenFileName);
   OFN.hwndOwner := G_MainWnd;
@@ -901,7 +888,6 @@ begin
     DoFileSaveAs;
 end;
 
-{ Procedury rysowania nowoczesnego interfejsu GDI }
 procedure DrawModernUI(DC: HDC);
 var
   I, X, Y, W: Integer;
@@ -913,13 +899,17 @@ var
 begin
   GetClientRect(G_MainWnd, ClientRc);
 
-  { 1. Tlo panelu sterowania (nowoczesny neutralny jasnoszary) }
+  { Neutral background for window }
+  R.left := 0; R.top := 0; R.right := ClientRc.right; R.bottom := ClientRc.bottom;
+  HBr := COLOR_BTNFACE + 1;
+  FillRect(DC, R, HBr);
+
+  { Control panel background }
   R.left := 0; R.top := 0; R.right := ClientRc.right; R.bottom := CANVAS_Y - 4;
   HBr := CreateSolidBrush(RGB(236, 238, 241));
   FillRect(DC, R, HBr);
   DeleteObject(HBr);
 
-  { Subtelna linia podzialu pod paleta }
   HP := CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
   OldPen := SelectObject(DC, HP);
   MoveTo(DC, 0, CANVAS_Y - 5);
@@ -927,14 +917,12 @@ begin
   SelectObject(DC, OldPen);
   DeleteObject(HP);
 
-  { 2. Rysowanie przyciskow narzedzi (Rzad 1) }
   SetBkMode(DC, TRANSPARENT);
   for I := 1 to TOOL_COUNT do
   begin
     R := G_Tools[I].R;
     if G_ActiveTool = I then
     begin
-      { Aktywne narzedzie - wyraziste podswietlenie w nowoczesnym stylu akcentowym }
       HBr := CreateSolidBrush(RGB(196, 220, 250));
       FillRect(DC, R, HBr);
       DeleteObject(HBr);
@@ -950,7 +938,6 @@ begin
     end
     else
     begin
-      { Przycisk nieaktywny }
       HBr := CreateSolidBrush(RGB(248, 249, 250));
       FillRect(DC, R, HBr);
       DeleteObject(HBr);
@@ -967,13 +954,11 @@ begin
     DrawText(DC, G_Tools[I].Name, -1, R, DT_CENTER or DT_VCENTER or DT_SINGLELINE);
   end;
 
-  { 3. Rzad 2: Opcje narzedzia (Rozmiar pedzla, Style ksztaltu, Akcje) }
-  { Rozmiary pedzla }
   SetTextColor(DC, RGB(60, 64, 72));
-  TextOut(DC, 8, 28, 'Grubosc:', 8);
+  TextOut(DC, 8, 28, 'Size:', 5);
   for I := 1 to 5 do
   begin
-    X := 65 + (I - 1) * 26;
+    X := 52 + (I - 1) * 26;
     Y := 26;
     R.left := X; R.top := Y; R.right := X + 22; R.bottom := Y + 18;
     case I of
@@ -1010,11 +995,10 @@ begin
     DrawText(DC, TextBuf, -1, R, DT_CENTER or DT_VCENTER or DT_SINGLELINE);
   end;
 
-  { Style ksztaltu }
-  TextOut(DC, 206, 28, 'Styl:', 5);
+  TextOut(DC, 194, 28, 'Style:', 6);
   for I := 1 to 3 do
   begin
-    X := 245 + (I - 1) * 44;
+    X := 240 + (I - 1) * 44;
     Y := 26;
     R.left := X; R.top := Y; R.right := X + 40; R.bottom := Y + 18;
     if G_ShapeStyle = I then
@@ -1034,17 +1018,16 @@ begin
     DeleteObject(HP);
 
     case I of
-      1: StrCopy(TextBuf, 'Obrys');
-      2: StrCopy(TextBuf, 'Pelny+');
-      3: StrCopy(TextBuf, 'Pelny');
+      1: StrCopy(TextBuf, 'Frame');
+      2: StrCopy(TextBuf, 'Fill+');
+      3: StrCopy(TextBuf, 'Solid');
     end;
     DrawText(DC, TextBuf, -1, R, DT_CENTER or DT_VCENTER or DT_SINGLELINE);
   end;
 
-  { Przyciski szybkich akcji }
   for I := 1 to 5 do
   begin
-    X := 386 + (I - 1) * 44;
+    X := 384 + (I - 1) * 44;
     Y := 26;
     R.left := X; R.top := Y; R.right := X + 41; R.bottom := Y + 18;
     HBr := CreateSolidBrush(RGB(244, 245, 247));
@@ -1061,17 +1044,15 @@ begin
     DeleteObject(HP);
 
     case I of
-      1: StrCopy(TextBuf, 'Cofnij');
-      2: StrCopy(TextBuf, 'Czysc');
-      3: StrCopy(TextBuf, 'Negat');
-      4: StrCopy(TextBuf, 'Odb.X');
-      5: StrCopy(TextBuf, 'Odb.Y');
+      1: StrCopy(TextBuf, 'Undo');
+      2: StrCopy(TextBuf, 'Clear');
+      3: StrCopy(TextBuf, 'Invert');
+      4: StrCopy(TextBuf, 'FlipX');
+      5: StrCopy(TextBuf, 'FlipY');
     end;
     DrawText(DC, TextBuf, -1, R, DT_CENTER or DT_VCENTER or DT_SINGLELINE);
   end;
 
-  { 4. Podwojny wskaznik aktywnych kolorow (Dual-Color Indicator) }
-  { Kolor Tla (PPM - Prawy przycisk myszy) na dole po prawej }
   R.left := 22; R.top := 58; R.right := 48; R.bottom := 80;
   HBr := CreateSolidBrush(G_ColSecondary);
   FillRect(DC, R, HBr);
@@ -1082,7 +1063,6 @@ begin
   OldBr := SelectObject(DC, HBr);
   Rectangle(DC, R.left, R.top, R.right, R.bottom);
 
-  { Kolor Glowny (LPM - Lewy przycisk myszy) na gorze po lewej (nakladajacy sie) }
   R.left := 10; R.top := 50; R.right := 36; R.bottom := 72;
   HBr := CreateSolidBrush(G_ColPrimary);
   FillRect(DC, R, HBr);
@@ -1092,7 +1072,6 @@ begin
   SelectObject(DC, OldPen);
   DeleteObject(HP);
 
-  { 5. Nowoczesna paleta 28 probek barwnych }
   for I := 0 to 27 do
   begin
     if I < 14 then
@@ -1120,7 +1099,6 @@ begin
     DeleteObject(HP);
   end;
 
-  { 6. Ramka wokol plotna (ciemniejsza, nowoczesna krawedz) }
   HP := CreatePen(PS_SOLID, 1, RGB(160, 165, 175));
   OldPen := SelectObject(DC, HP);
   HBr := GetStockObject(NULL_BRUSH);
@@ -1130,8 +1108,7 @@ begin
   SelectObject(DC, OldPen);
   DeleteObject(HP);
 
-  { Cien z prawej i dolu plotna }
-  HP := CreatePen(PS_SOLID, 1, RGB(210, 215, 222));
+  HP := CreatePen(PS_SOLID, 1, RGB(200, 205, 212));
   OldPen := SelectObject(DC, HP);
   MoveTo(DC, CANVAS_X + G_CanvasW + 1, CANVAS_Y);
   LineTo(DC, CANVAS_X + G_CanvasW + 1, CANVAS_Y + G_CanvasH + 2);
@@ -1139,7 +1116,6 @@ begin
   SelectObject(DC, OldPen);
   DeleteObject(HP);
 
-  { 7. Dolny pasek stanu (Status Bar) }
   R.left := 0; R.top := ClientRc.bottom - 22; R.right := ClientRc.right; R.bottom := ClientRc.bottom;
   HBr := CreateSolidBrush(RGB(240, 242, 245));
   FillRect(DC, R, HBr);
@@ -1181,7 +1157,7 @@ begin
       G_RandSeed     := 12345;
       G_CurFile[0]   := #0;
 
-      StrCopy(G_StatusText, 'PaintCraft - Gotowy. LPM: Kolor glowny, PPM: Kolor tla.');
+      StrCopy(G_StatusText, 'PaintCraft - Ready. LMB: Primary Color, RMB: Background Color.');
       Result := 0;
     end;
 
@@ -1192,6 +1168,12 @@ begin
       if G_hdcCanvas <> 0 then
         BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
       EndPaint(Wnd, PS);
+      Result := 0;
+    end;
+
+    WM_SIZE:
+    begin
+      InvalidateRect(Wnd, nil, True);
       Result := 0;
     end;
 
@@ -1226,20 +1208,17 @@ begin
         IDM_ABOUT:
           MessageBox(
             Wnd,
-            'PaintCraft dla Win16 & DOS'#13#10 +
-            'Nowoczesne studio rysunku i edytor grafiki.'#13#10 +
-            'Zamiennik i rozwiniecie Windows 3.1 Paintbrush.'#13#10#13#10 +
-            'Cechy programu:'#13#10 +
-            '- Podwojnie buforowane plotno GDI (brak migotania)'#13#10 +
-            '- Podglad ksztaltow w czasie rzeczywistym'#13#10 +
-            '- Pelna paleta 28 nowoczesnych barw z podwojnym wskaznikiem'#13#10 +
-            '- Narzedzia: olowek, pedzel, spray, gumka, gumka selektywna,'#13#10 +
-            '  wiadro z farba, linia, figury geometryczne, tekst, pipeta'#13#10 +
-            '- Wielopoziomowe Undo i filtry obrazu (odbicia, negatyw)'#13#10 +
-            '- Zapis i odczyt standardowych map bitowych BMP (24-bit)'#13#10#13#10 +
-            'Napisano w jezyku Pascal dla srodowiska Win16.',
-            'O programie PaintCraft',
-            MB_OK or $0040 { MB_ICONINFORMATION }
+            'PaintCraft Studio for Windows & DOS'#13#10 +
+            'A modern pixel art & graphics editor.'#13#10#13#10 +
+            'Features:'#13#10 +
+            '- Double-buffered GDI canvas (flicker-free)'#13#10 +
+            '- Real-time interactive shape preview'#13#10 +
+            '- 14 drawing tools & 28-color palette'#13#10 +
+            '- Direct 24-bit BMP loading and saving'#13#10 +
+            '- Multi-level Undo & canvas transformations'#13#10#13#10 +
+            'Win16Loader Project',
+            'About PaintCraft',
+            MB_OK or $0040
           );
       end;
       Result := 0;
@@ -1250,7 +1229,6 @@ begin
       X := LOWORD(LParam);
       Y := HIWORD(LParam);
 
-      { 1. Klikniecie w przyciski narzedzi }
       for I := 1 to TOOL_COUNT do
       begin
         if (X >= G_Tools[I].R.left) and (X <= G_Tools[I].R.right) and
@@ -1259,16 +1237,15 @@ begin
           G_ActiveTool := I;
           G_PolyCount := 0;
           InvalidateRect(Wnd, nil, False);
-          SetStatus('Zmieniono aktywne narzedzie.');
+          SetStatus('Active tool changed.');
           Result := 0;
           Exit;
         end;
       end;
 
-      { 2. Wybor grubosci pedzla (Row 2, X: 65..195, Y: 26..44) }
-      if (Y >= 26) and (Y <= 44) and (X >= 65) and (X <= 195) then
+      if (Y >= 26) and (Y <= 44) and (X >= 52) and (X <= 182) then
       begin
-        I := ((X - 65) div 26) + 1;
+        I := ((X - 52) div 26) + 1;
         case I of
           1: G_BrushSize := 1;
           2: G_BrushSize := 2;
@@ -1277,27 +1254,25 @@ begin
           5: G_BrushSize := 12;
         end;
         InvalidateRect(Wnd, nil, False);
-        SetStatus('Zmieniono grubosc pedzla.');
+        SetStatus('Brush size changed.');
         Result := 0;
         Exit;
       end;
 
-      { 3. Wybor stylu ksztaltu (Row 2, X: 245..377, Y: 26..44) }
-      if (Y >= 26) and (Y <= 44) and (X >= 245) and (X <= 377) then
+      if (Y >= 26) and (Y <= 44) and (X >= 240) and (X <= 372) then
       begin
-        I := ((X - 245) div 44) + 1;
+        I := ((X - 240) div 44) + 1;
         if (I >= 1) and (I <= 3) then
           G_ShapeStyle := I;
         InvalidateRect(Wnd, nil, False);
-        SetStatus('Zmieniono styl rysowania figur.');
+        SetStatus('Shape style changed.');
         Result := 0;
         Exit;
       end;
 
-      { 4. Szybkie akcje (Row 2, X: 386..606, Y: 26..44) }
-      if (Y >= 26) and (Y <= 44) and (X >= 386) and (X <= 606) then
+      if (Y >= 26) and (Y <= 44) and (X >= 384) and (X <= 604) then
       begin
-        I := ((X - 386) div 44) + 1;
+        I := ((X - 384) div 44) + 1;
         case I of
           1: DoUndo;
           2: ClearCanvas;
@@ -1309,7 +1284,6 @@ begin
         Exit;
       end;
 
-      { 5. Wybor koloru z palety (LPM -> Kolor glowny) }
       if (Y >= 50) and (Y <= 80) and (X >= 56) and (X <= 56 + 14 * 19) then
       begin
         SwatchIdx := (X - 56) div 19;
@@ -1319,13 +1293,12 @@ begin
             SwatchIdx := SwatchIdx + 14;
           G_ColPrimary := G_Palette[SwatchIdx];
           InvalidateRect(Wnd, nil, False);
-          SetStatus('Ustawiono kolor glowny (LPM).');
+          SetStatus('Primary color selected (LMB).');
           Result := 0;
           Exit;
         end;
       end;
 
-      { 6. Klikniecie wewnatrz obszaru plotna }
       if (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
@@ -1381,14 +1354,14 @@ begin
             DC := GetDC(Wnd);
             BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
             ReleaseDC(Wnd, DC);
-            SetStatus('Wypelniono obszar kolorem.');
+            SetStatus('Surface filled.');
           end;
 
           TOOL_EYEDROPPER:
           begin
             G_ColPrimary := GetPixel(G_hdcCanvas, X, Y);
             InvalidateRect(Wnd, nil, False);
-            SetStatus('Pobrano kolor glowny pipeta.');
+            SetStatus('Primary color picked from canvas.');
           end;
 
           TOOL_TEXT:
@@ -1400,7 +1373,7 @@ begin
             DC := GetDC(Wnd);
             BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
             ReleaseDC(Wnd, DC);
-            SetStatus('Wstawiono napis tekstowy.');
+            SetStatus('Text stamped onto canvas.');
           end;
 
           TOOL_POLYGON:
@@ -1412,27 +1385,24 @@ begin
               G_PolyPoints[0].y := Y;
               G_PolyCount := 1;
               G_LastX := X; G_LastY := Y;
-              SetStatus('Wielokat: Klikaj kolejne punkty. Dwuklik konczy figure.');
+              SetStatus('Polygon: Click points. Double-click to close.');
             end
             else if G_PolyCount < 30 then
             begin
-              { Sprawdz czy klikniecie zamyka wielokat (blisko startu) }
               if (Abs(X - G_PolyPoints[0].x) < 6) and (Abs(Y - G_PolyPoints[0].y) < 6) and (G_PolyCount >= 2) then
               begin
-                { Zamknij wielokat }
                 Polygon(G_hdcCanvas, G_PolyPoints, G_PolyCount);
                 G_PolyCount := 0;
                 DC := GetDC(Wnd);
                 BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
                 ReleaseDC(Wnd, DC);
-                SetStatus('Zamknieto i wypelniono wielokat.');
+                SetStatus('Polygon closed and filled.');
               end
               else
               begin
                 G_PolyPoints[G_PolyCount].x := X;
                 G_PolyPoints[G_PolyCount].y := Y;
                 Inc(G_PolyCount);
-                { Narysuj krawedz }
                 ApplyDrawShape(G_hdcCanvas, TOOL_LINE, 0, G_LastX, G_LastY, X, Y, G_ColPrimary, 0, G_BrushSize);
                 G_LastX := X; G_LastY := Y;
                 DC := GetDC(Wnd);
@@ -1459,7 +1429,6 @@ begin
       X := LOWORD(LParam);
       Y := HIWORD(LParam);
 
-      { Wybor koloru tla (PPM) z palety }
       if (Y >= 50) and (Y <= 80) and (X >= 56) and (X <= 56 + 14 * 19) then
       begin
         SwatchIdx := (X - 56) div 19;
@@ -1469,13 +1438,12 @@ begin
             SwatchIdx := SwatchIdx + 14;
           G_ColSecondary := G_Palette[SwatchIdx];
           InvalidateRect(Wnd, nil, False);
-          SetStatus('Ustawiono kolor tla / wtorny (PPM).');
+          SetStatus('Background color selected (RMB).');
           Result := 0;
           Exit;
         end;
       end;
 
-      { Pipeta pod prawym przyciskiem: probkowanie koloru tla }
       if (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
@@ -1483,7 +1451,7 @@ begin
         begin
           G_ColSecondary := GetPixel(G_hdcCanvas, X - CANVAS_X, Y - CANVAS_Y);
           InvalidateRect(Wnd, nil, False);
-          SetStatus('Pobrano kolor tla pipeta.');
+          SetStatus('Background color picked from canvas.');
           Result := 0;
           Exit;
         end;
@@ -1496,21 +1464,19 @@ begin
       X := LOWORD(LParam);
       Y := HIWORD(LParam);
 
-      { Aktualizuj wspolrzedne na pasku stanu }
       if (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
-        StrCopy(StatusCoord, 'Kursor: X=');
+        StrCopy(StatusCoord, 'Cursor: X=');
         IntToStrBuf(X - CANVAS_X, CoordBuf);
         StrCat(StatusCoord, CoordBuf);
         StrCat(StatusCoord, ' Y=');
         IntToStrBuf(Y - CANVAS_Y, CoordBuf);
         StrCat(StatusCoord, CoordBuf);
-        StrCat(StatusCoord, ' px  |  Plotno: 580 x 310');
+        StrCat(StatusCoord, ' px  |  Canvas: 580 x 310');
         SetStatus(StatusCoord);
       end;
 
-      { Rysowanie ciagle narzedziami odrecznymi }
       if G_IsDrawing and (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
@@ -1551,7 +1517,6 @@ begin
         ReleaseDC(Wnd, DC);
       end;
 
-      { Podglad ksztaltu w locie (Rubber-banding bez migotania przez hdcTemp) }
       if G_IsDragging then
       begin
         X := X - CANVAS_X;
@@ -1587,7 +1552,6 @@ begin
       if G_IsDragging then
       begin
         G_IsDragging := False;
-        { Zatwierdz ostateczny ksztalt na glownym plotnie }
         ApplyDrawShape(G_hdcCanvas, G_ActiveTool, G_ShapeStyle,
                        G_StartX, G_StartY, G_CurX, G_CurY,
                        G_ColPrimary, G_ColSecondary, G_BrushSize);
@@ -1595,14 +1559,13 @@ begin
         DC := GetDC(Wnd);
         BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
         ReleaseDC(Wnd, DC);
-        SetStatus('Narysowano ksztalt.');
+        SetStatus('Shape drawn.');
       end;
       Result := 0;
     end;
 
     WM_LBUTTONDBLCLK:
     begin
-      { Dwuklik w narzedziu wielokata zamyka i wypelnia figure }
       if (G_ActiveTool = TOOL_POLYGON) and (G_PolyCount >= 2) then
       begin
         Polygon(G_hdcCanvas, G_PolyPoints, G_PolyCount);
@@ -1610,7 +1573,7 @@ begin
         DC := GetDC(Wnd);
         BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
         ReleaseDC(Wnd, DC);
-        SetStatus('Zamknieto i ukonczono wielokat.');
+        SetStatus('Polygon completed.');
       end;
       Result := 0;
     end;
@@ -1639,30 +1602,27 @@ var
 begin
   HMenu := CreateMenu;
 
-  { Menu Plik }
   HSubFile := CreatePopupMenu;
-  AppendMenu(HSubFile, MF_STRING, IDM_NEW,    '&Nowy'#9'Ctrl+N');
-  AppendMenu(HSubFile, MF_STRING, IDM_OPEN,   '&Otworz...'#9'Ctrl+O');
-  AppendMenu(HSubFile, MF_STRING, IDM_SAVE,   '&Zapisz'#9'Ctrl+S');
-  AppendMenu(HSubFile, MF_STRING, IDM_SAVEAS, 'Zapisz &jako...');
+  AppendMenu(HSubFile, MF_STRING, IDM_NEW,    '&New'#9'Ctrl+N');
+  AppendMenu(HSubFile, MF_STRING, IDM_OPEN,   '&Open...'#9'Ctrl+O');
+  AppendMenu(HSubFile, MF_STRING, IDM_SAVE,   '&Save'#9'Ctrl+S');
+  AppendMenu(HSubFile, MF_STRING, IDM_SAVEAS, 'Save &As...');
   AppendMenu(HSubFile, MF_SEPARATOR, 0, nil);
-  AppendMenu(HSubFile, MF_STRING, IDM_EXIT,   '&Zakoncz'#9'Alt+F4');
-  AppendMenu(HMenu, MF_POPUP, HSubFile, '&Plik');
+  AppendMenu(HSubFile, MF_STRING, IDM_EXIT,   'E&xit'#9'Alt+F4');
+  AppendMenu(HMenu, MF_POPUP, HSubFile, '&File');
 
-  { Menu Edycja }
   HSubEdit := CreatePopupMenu;
-  AppendMenu(HSubEdit, MF_STRING, IDM_UNDO,   '&Cofnij'#9'Ctrl+Z');
+  AppendMenu(HSubEdit, MF_STRING, IDM_UNDO,   '&Undo'#9'Ctrl+Z');
   AppendMenu(HSubEdit, MF_SEPARATOR, 0, nil);
-  AppendMenu(HSubEdit, MF_STRING, IDM_CLEAR,  '&Wyczysc plotno');
-  AppendMenu(HSubEdit, MF_STRING, IDM_INVERT, '&Odwroc kolory (Negatyw)');
-  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPH,  'Odbij w &poziomie');
-  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPV,  'Odbij w &pionie');
-  AppendMenu(HMenu, MF_POPUP, HSubEdit, '&Edycja');
+  AppendMenu(HSubEdit, MF_STRING, IDM_CLEAR,  '&Clear Canvas');
+  AppendMenu(HSubEdit, MF_STRING, IDM_INVERT, '&Invert Colors');
+  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPH,  'Flip &Horizontal');
+  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPV,  'Flip &Vertical');
+  AppendMenu(HMenu, MF_POPUP, HSubEdit, '&Edit');
 
-  { Menu Pomoc }
   HSubHelp := CreatePopupMenu;
-  AppendMenu(HSubHelp, MF_STRING, IDM_ABOUT,  '&O programie PaintCraft...');
-  AppendMenu(HMenu, MF_POPUP, HSubHelp, 'P&omoc');
+  AppendMenu(HSubHelp, MF_STRING, IDM_ABOUT,  '&About PaintCraft...');
+  AppendMenu(HMenu, MF_POPUP, HSubHelp, '&Help');
 
   SetMenu(Wnd, HMenu);
 end;
@@ -1707,10 +1667,10 @@ begin
 
   G_MainWnd := CreateWindow(
     'W16PaintCraftClass',
-    'PaintCraft - [Bez tytulu]',
-    WS_OVERLAPPED or WS_CAPTION or WS_SYSMENU or WS_MINIMIZEBOX,
+    'PaintCraft - [Untitled]',
+    WS_OVERLAPPEDWINDOW,
     CW_USEDEFAULT, CW_USEDEFAULT,
-    620, 460,
+    624, 468,
     0, 0, G_Instance, nil
   );
 

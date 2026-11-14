@@ -8,7 +8,8 @@ tabelach PRIVATE/ALIAS ponizej.
 Uzycie: tools/gen_lnk.py MODUL plik1.c plik2.c ... > modul.lnk
 """
 import os, re, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 from imports import load_spec, WINE
 
 # Prywatne eksporty (USER <-> GDI), ordinale poza zakresem Windows
@@ -32,6 +33,12 @@ def main():
     byname = {}
     for o, v in spec.items():
         byname.setdefault(v[0].lower(), o)
+    db_path = os.path.join(HERE, '..', 'WIN16API.DB')
+    if os.path.exists(db_path):
+        for line in open(db_path):
+            parts = line.strip().split()
+            if len(parts) >= 4 and parts[0].upper() == mod:
+                byname.setdefault(parts[3].lower(), int(parts[1]))
     funcs = []
     for path in sys.argv[2:]:
         for line in open(path, encoding='latin1'):

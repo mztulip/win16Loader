@@ -545,8 +545,490 @@ BOOL API GetSaveFileName(LPOPENFILENAME ofn)
     return ExecuteFileDialog(ofn, TRUE);
 }
 
-BOOL  API ChooseColor(LPVOID cc)      { (void)cc; return FALSE; }
-BOOL  API ChooseFont(LPVOID cf)       { (void)cf; return FALSE; }
+/* ============================================================
+ * ChooseFont
+ * ============================================================ */
+#define IDC_CF_FACELABEL   101
+#define IDC_CF_FACEEDIT    102
+#define IDC_CF_FACELIST    103
+#define IDC_CF_STYLELABEL  104
+#define IDC_CF_STYLEEDIT   105
+#define IDC_CF_STYLELIST   106
+#define IDC_CF_SIZELABEL   107
+#define IDC_CF_SIZEEDIT    108
+#define IDC_CF_SIZELIST    109
+#define IDC_CF_SAMPLEGRP   110
+#define IDC_CF_SAMPLETEXT  111
+
+static const char * const g_font_names[] = {
+    "MS Sans Serif",
+    "System",
+    "Fixedsys",
+    "Courier",
+    "Small Fonts"
+};
+#define NUM_FONT_NAMES 5
+
+static const char * const g_style_names[] = {
+    "Regular",
+    "Italic",
+    "Bold",
+    "Bold Italic"
+};
+#define NUM_STYLE_NAMES 4
+
+static const int g_size_pts[] = {
+    8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24
+};
+#define NUM_SIZE_PTS 11
+
+static BOOL         g_cf_res = FALSE;
+static LPCHOOSEFONT g_cf = NULL;
+static LOGFONT      g_cf_lf;
+static int          g_cf_pt = 10;
+static HFONT        g_cf_hfont = 0;
+static HWND         g_cf_dlg = 0;
+
+static void int_to_str(int v, char __far *buf)
+{
+    char tmp[10];
+    int i = 0, j = 0;
+    if (v == 0) { buf[0] = '0'; buf[1] = 0; return; }
+    if (v < 0) { buf[j++] = '-'; v = -v; }
+    while (v > 0) { tmp[i++] = (char)('0' + (v % 10)); v /= 10; }
+    while (i > 0) buf[j++] = tmp[--i];
+    buf[j] = 0;
+}
+
+static int str_to_int(LPCSTR s)
+{
+    int v = 0;
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10 + (*s - '0');
+        s++;
+    }
+    return v;
+}
+
+static void update_sample_font(HWND hwnd)
+{
+    HWND hSample = GetDlgItem(hwnd, IDC_CF_SAMPLETEXT);
+    HFONT hNew;
+    int pt = g_cf_pt;
+    if (pt < 4) pt = 4;
+    if (pt > 72) pt = 72;
+
+    /* Wysokosc w pikselach: h = -((pt * 96 + 36) / 72) */
+    g_cf_lf.lfHeight = -((pt * 96 + 36) / 72);
+    g_cf_lf.lfWidth = 0;
+
+    hNew = CreateFontIndirect((const LOGFONT __far *)&g_cf_lf);
+    if (hNew) {
+        if (hSample) {
+            SendMessage(hSample, WM_SETFONT, (WORD)hNew, 1);
+            InvalidateRect(hSample, NULL, TRUE);
+        }
+        if (g_cf_hfont) DeleteObject(g_cf_hfont);
+        g_cf_hfont = hNew;
+    }
+}
+
+static LRESULT __far __pascal ChooseFontDlgProc(HWND hwnd, WORD msg, WORD wp, LONG lp)
+{
+    switch (msg) {
+    case WM_CREATE:
+    {
+        int i, sel_face = 0, sel_style = 0, sel_size = 2;
+        HANDLE hsys = GetStockObject(SYSTEM_FONT);
+        char szbuf[16];
+
+        /* Kolumna 1: Czcionka (Font) */
+        CreateWindow("STATIC", "Czcionka:", WS_CHILD | WS_VISIBLE, 12, 8, 130, 16, hwnd, (HMENU)IDC_CF_FACELABEL, g_hinst, NULL);
+        CreateWindow("EDIT", g_cf_lf.lfFaceName, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 12, 26, 130, 22, hwnd, (HMENU)IDC_CF_FACEEDIT, g_hinst, NULL);
+        CreateWindow("LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | WS_TABSTOP, 12, 50, 130, 110, hwnd, (HMENU)IDC_CF_FACELIST, g_hinst, NULL);
+
+        /* Kolumna 2: Styl (Style) */
+        CreateWindow("STATIC", "Styl:", WS_CHILD | WS_VISIBLE, 150, 8, 110, 16, hwnd, (HMENU)IDC_CF_STYLELABEL, g_hinst, NULL);
+        CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 150, 26, 110, 22, hwnd, (HMENU)IDC_CF_STYLEEDIT, g_hinst, NULL);
+        CreateWindow("LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | WS_TABSTOP, 150, 50, 110, 110, hwnd, (HMENU)IDC_CF_STYLELIST, g_hinst, NULL);
+
+        /* Kolumna 3: Rozmiar (Size) */
+        CreateWindow("STATIC", "Rozmiar:", WS_CHILD | WS_VISIBLE, 268, 8, 60, 16, hwnd, (HMENU)IDC_CF_SIZELABEL, g_hinst, NULL);
+        CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 268, 26, 60, 22, hwnd, (HMENU)IDC_CF_SIZEEDIT, g_hinst, NULL);
+        CreateWindow("LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | WS_TABSTOP, 268, 50, 60, 110, hwnd, (HMENU)IDC_CF_SIZELIST, g_hinst, NULL);
+
+        /* Przyciski */
+        CreateWindow("BUTTON", "OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP, 338, 26, 82, 24, hwnd, (HMENU)IDOK, g_hinst, NULL);
+        CreateWindow("BUTTON", "Anuluj", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, 338, 56, 82, 24, hwnd, (HMENU)IDCANCEL, g_hinst, NULL);
+
+        /* Grupa i tekst podgladu */
+        CreateWindow("BUTTON", "Przyklad", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 12, 166, 408, 76, hwnd, (HMENU)IDC_CF_SAMPLEGRP, g_hinst, NULL);
+        CreateWindow("STATIC", "AaBbYyZz 123", WS_CHILD | WS_VISIBLE | SS_CENTER, 22, 186, 388, 48, hwnd, (HMENU)IDC_CF_SAMPLETEXT, g_hinst, NULL);
+
+        /* Ustawienie fontu systemowego na etykietach i kontrolkach */
+        {
+            int ctl_ids[] = {
+                IDC_CF_FACELABEL, IDC_CF_FACEEDIT, IDC_CF_FACELIST,
+                IDC_CF_STYLELABEL, IDC_CF_STYLEEDIT, IDC_CF_STYLELIST,
+                IDC_CF_SIZELABEL, IDC_CF_SIZEEDIT, IDC_CF_SIZELIST,
+                IDOK, IDCANCEL, IDC_CF_SAMPLEGRP
+            };
+            for (i = 0; i < (int)(sizeof(ctl_ids)/sizeof(ctl_ids[0])); i++) {
+                HWND hc = GetDlgItem(hwnd, ctl_ids[i]);
+                if (hc) SendMessage(hc, WM_SETFONT, (WORD)hsys, 0);
+            }
+        }
+
+        /* Wypelnij liste nazw fontow */
+        for (i = 0; i < NUM_FONT_NAMES; i++) {
+            SendDlgItemMessage(hwnd, IDC_CF_FACELIST, LB_ADDSTRING, 0, (LONG)(LPCSTR)g_font_names[i]);
+            if (w_stricmp(g_cf_lf.lfFaceName, g_font_names[i]) == 0) sel_face = i;
+        }
+        SendDlgItemMessage(hwnd, IDC_CF_FACELIST, LB_SETCURSEL, sel_face, 0);
+        SetDlgItemText(hwnd, IDC_CF_FACEEDIT, g_font_names[sel_face]);
+        w_strncpy(g_cf_lf.lfFaceName, g_font_names[sel_face], sizeof(g_cf_lf.lfFaceName));
+
+        /* Wypelnij liste styli */
+        for (i = 0; i < NUM_STYLE_NAMES; i++) {
+            SendDlgItemMessage(hwnd, IDC_CF_STYLELIST, LB_ADDSTRING, 0, (LONG)(LPCSTR)g_style_names[i]);
+        }
+        sel_style = (g_cf_lf.lfWeight >= 600 ? 2 : 0) | (g_cf_lf.lfItalic ? 1 : 0);
+        SendDlgItemMessage(hwnd, IDC_CF_STYLELIST, LB_SETCURSEL, sel_style, 0);
+        SetDlgItemText(hwnd, IDC_CF_STYLEEDIT, g_style_names[sel_style]);
+
+        /* Wypelnij liste rozmiarow */
+        for (i = 0; i < NUM_SIZE_PTS; i++) {
+            int_to_str(g_size_pts[i], szbuf);
+            SendDlgItemMessage(hwnd, IDC_CF_SIZELIST, LB_ADDSTRING, 0, (LONG)(LPCSTR)szbuf);
+            if (g_size_pts[i] == g_cf_pt) sel_size = i;
+        }
+        SendDlgItemMessage(hwnd, IDC_CF_SIZELIST, LB_SETCURSEL, sel_size, 0);
+        int_to_str(g_cf_pt, szbuf);
+        SetDlgItemText(hwnd, IDC_CF_SIZEEDIT, szbuf);
+
+        update_sample_font(hwnd);
+        SetFocus(GetDlgItem(hwnd, IDC_CF_FACELIST));
+        return 0;
+    }
+
+    case WM_COMMAND:
+    {
+        WORD id = wp;
+        WORD code = HIWORD(lp);
+
+        switch (id) {
+        case IDC_CF_FACELIST:
+            if (code == LBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hwnd, IDC_CF_FACELIST, LB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < NUM_FONT_NAMES) {
+                    w_strncpy(g_cf_lf.lfFaceName, g_font_names[sel], sizeof(g_cf_lf.lfFaceName));
+                    SetDlgItemText(hwnd, IDC_CF_FACEEDIT, g_font_names[sel]);
+                    update_sample_font(hwnd);
+                }
+            } else if (code == LBN_DBLCLK) {
+                SendMessage(hwnd, WM_COMMAND, IDOK, 0);
+            }
+            break;
+
+        case IDC_CF_STYLELIST:
+            if (code == LBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hwnd, IDC_CF_STYLELIST, LB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < NUM_STYLE_NAMES) {
+                    SetDlgItemText(hwnd, IDC_CF_STYLEEDIT, g_style_names[sel]);
+                    g_cf_lf.lfWeight = (sel == 2 || sel == 3) ? 700 : 400;
+                    g_cf_lf.lfItalic = (sel == 1 || sel == 3) ? 1 : 0;
+                    update_sample_font(hwnd);
+                }
+            } else if (code == LBN_DBLCLK) {
+                SendMessage(hwnd, WM_COMMAND, IDOK, 0);
+            }
+            break;
+
+        case IDC_CF_SIZELIST:
+            if (code == LBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessage(hwnd, IDC_CF_SIZELIST, LB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < NUM_SIZE_PTS) {
+                    char szbuf[16];
+                    g_cf_pt = g_size_pts[sel];
+                    int_to_str(g_cf_pt, szbuf);
+                    SetDlgItemText(hwnd, IDC_CF_SIZEEDIT, szbuf);
+                    update_sample_font(hwnd);
+                }
+            } else if (code == LBN_DBLCLK) {
+                SendMessage(hwnd, WM_COMMAND, IDOK, 0);
+            }
+            break;
+
+        case IDOK:
+        {
+            char buf[32];
+            int sel_pt;
+
+            GetDlgItemText(hwnd, IDC_CF_FACEEDIT, (LPSTR)buf, sizeof(buf));
+            if (buf[0]) w_strncpy(g_cf_lf.lfFaceName, buf, sizeof(g_cf_lf.lfFaceName));
+
+            GetDlgItemText(hwnd, IDC_CF_SIZEEDIT, (LPSTR)buf, sizeof(buf));
+            sel_pt = str_to_int(buf);
+            if (sel_pt >= 4 && sel_pt <= 72) g_cf_pt = sel_pt;
+
+            g_cf_lf.lfHeight = -((g_cf_pt * 96 + 36) / 72);
+            g_cf_lf.lfWidth = 0;
+
+            if (g_cf->lpLogFont && HIWORD(g_cf->lpLogFont)) {
+                w_memcpy(g_cf->lpLogFont, &g_cf_lf, sizeof(LOGFONT));
+            }
+            g_cf->iPointSize = g_cf_pt * 10;
+            g_cf->nFontType = SCREEN_FONTTYPE | (g_cf_lf.lfWeight >= 600 ? BOLD_FONTTYPE : 0) | (g_cf_lf.lfItalic ? ITALIC_FONTTYPE : 0);
+            if (g_cf_lf.lfWeight < 600 && !g_cf_lf.lfItalic) g_cf->nFontType |= REGULAR_FONTTYPE;
+
+            g_cf_res = TRUE;
+            DestroyWindow(hwnd);
+            break;
+        }
+
+        case IDCANCEL:
+            g_cf_res = FALSE;
+            DestroyWindow(hwnd);
+            break;
+        }
+        return 0;
+    }
+
+    case WM_CLOSE:
+        g_cf_res = FALSE;
+        DestroyWindow(hwnd);
+        return 0;
+
+    case WM_DESTROY:
+        if (g_cf_hfont) {
+            DeleteObject(g_cf_hfont);
+            g_cf_hfont = 0;
+        }
+        return 0;
+
+    default:
+        return DefWindowProc(hwnd, msg, wp, lp);
+    }
+}
+
+BOOL API ChooseFont(LPCHOOSEFONT cf)
+{
+    MSG msg;
+    RECT rc;
+    int x, y;
+    static BOOL cf_class_reg = FALSE;
+
+    if (!cf || !HIWORD(cf)) return FALSE;
+    dbg("COMMDLG: ChooseFont called, flags="); dbg_hex((WORD)cf->Flags, 4); dbg("\n");
+
+    g_cf = cf;
+    g_cf_res = FALSE;
+    g_cf_hfont = 0;
+    w_memset(&g_cf_lf, 0, sizeof(LOGFONT));
+    g_cf_pt = 10;
+
+    if ((cf->Flags & CF_INITTOLOGFONTSTRUCT) && cf->lpLogFont && HIWORD(cf->lpLogFont)) {
+        w_memcpy(&g_cf_lf, cf->lpLogFont, sizeof(LOGFONT));
+        if (cf->iPointSize > 0) {
+            g_cf_pt = cf->iPointSize / 10;
+        } else if (g_cf_lf.lfHeight != 0) {
+            int h = g_cf_lf.lfHeight < 0 ? -g_cf_lf.lfHeight : g_cf_lf.lfHeight;
+            g_cf_pt = (h * 72 + 48) / 96;
+        }
+    } else {
+        w_strcpy(g_cf_lf.lfFaceName, "MS Sans Serif");
+        g_cf_lf.lfWeight = 400;
+        g_cf_lf.lfItalic = 0;
+        g_cf_pt = 10;
+    }
+    if (g_cf_pt < 6) g_cf_pt = 10;
+
+    if (!cf_class_reg) {
+        WNDCLASS wc;
+        w_memset(&wc, 0, sizeof(wc));
+        wc.style = 3; /* CS_HREDRAW | CS_VREDRAW */
+        wc.lpfnWndProc = ChooseFontDlgProc;
+        wc.hInstance = g_hinst;
+        wc.hCursor = LoadCursor(0, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        wc.lpszClassName = "W16ChooseFontDlg";
+        if (RegisterClass(&wc)) cf_class_reg = TRUE;
+    }
+
+    x = 100; y = 80;
+    if (cf->hwndOwner && IsWindow(cf->hwndOwner)) {
+        GetWindowRect(cf->hwndOwner, (LPRECT)&rc);
+        x = rc.left + (rc.right - rc.left - 436) / 2;
+        y = rc.top + (rc.bottom - rc.top - 280) / 2;
+    }
+    if (x < 10) x = 10;
+    if (y < 10) y = 10;
+
+    g_cf_dlg = CreateWindow(
+        "W16ChooseFontDlg",
+        "Czcionka",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_BORDER,
+        x, y, 436, 280,
+        cf->hwndOwner, 0, g_hinst, NULL
+    );
+
+    if (!g_cf_dlg) return FALSE;
+
+    if (cf->hwndOwner && IsWindow(cf->hwndOwner)) EnableWindow(cf->hwndOwner, FALSE);
+
+    while (IsWindow(g_cf_dlg) && GetMessage(&msg, 0, 0, 0)) {
+        if (!IsDialogMessage(g_cf_dlg, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+
+    if (cf->hwndOwner && IsWindow(cf->hwndOwner)) {
+        EnableWindow(cf->hwndOwner, TRUE);
+        SetActiveWindow(cf->hwndOwner);
+    }
+
+    dbg("COMMDLG: ChooseFont end, res="); dbg_hex(g_cf_res, 4); dbg(" face='"); dbg(g_cf_lf.lfFaceName); dbg("'\n");
+    return g_cf_res;
+}
+
+/* ============================================================
+ * ChooseColor
+ * ============================================================ */
+static const COLORREF g_basic_colors[16] = {
+    0x000000L, 0x000080L, 0x008000L, 0x008080L,
+    0x800000L, 0x800080L, 0x808000L, 0x808080L,
+    0xC0C0C0L, 0x0000FFL, 0x00FF00L, 0x00FFFFL,
+    0xFF0000L, 0xFF00FFL, 0xFFFF00L, 0xFFFFFFL
+};
+
+static BOOL          g_cc_res = FALSE;
+static LPCHOOSECOLOR g_cc = NULL;
+static COLORREF      g_cc_cur = 0;
+static HWND          g_cc_dlg = 0;
+
+static LRESULT __far __pascal ChooseColorDlgProc(HWND hwnd, WORD msg, WORD wp, LONG lp)
+{
+    switch (msg) {
+    case WM_CREATE:
+    {
+        int i;
+        HANDLE hsys = GetStockObject(SYSTEM_FONT);
+        CreateWindow("STATIC", "Podstawowe kolory:", WS_CHILD | WS_VISIBLE, 12, 10, 200, 16, hwnd, (HMENU)100, g_hinst, NULL);
+
+        for (i = 0; i < 16; i++) {
+            int col = i % 8;
+            int row = i / 8;
+            char num[4];
+            num[0] = (char)('1' + i);
+            if (i >= 9) { num[0] = '1'; num[1] = (char)('0' + (i - 9)); num[2] = 0; } else num[1] = 0;
+            CreateWindow("BUTTON", num, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
+                         12 + col * 28, 32 + row * 28, 24, 24, hwnd, (HMENU)(200 + i), g_hinst, NULL);
+        }
+
+        CreateWindow("BUTTON", "OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP, 12, 100, 76, 24, hwnd, (HMENU)IDOK, g_hinst, NULL);
+        CreateWindow("BUTTON", "Anuluj", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, 100, 100, 76, 24, hwnd, (HMENU)IDCANCEL, g_hinst, NULL);
+
+        {
+            HWND hc = GetDlgItem(hwnd, 100);
+            if (hc) SendMessage(hc, WM_SETFONT, (WORD)hsys, 0);
+            hc = GetDlgItem(hwnd, IDOK);
+            if (hc) SendMessage(hc, WM_SETFONT, (WORD)hsys, 0);
+            hc = GetDlgItem(hwnd, IDCANCEL);
+            if (hc) SendMessage(hc, WM_SETFONT, (WORD)hsys, 0);
+        }
+        return 0;
+    }
+
+    case WM_COMMAND:
+    {
+        WORD id = wp;
+        if (id >= 200 && id < 216) {
+            g_cc_cur = g_basic_colors[id - 200];
+            SendMessage(hwnd, WM_COMMAND, IDOK, 0);
+        } else if (id == IDOK) {
+            if (g_cc) g_cc->rgbResult = g_cc_cur;
+            g_cc_res = TRUE;
+            DestroyWindow(hwnd);
+        } else if (id == IDCANCEL) {
+            g_cc_res = FALSE;
+            DestroyWindow(hwnd);
+        }
+        return 0;
+    }
+
+    case WM_CLOSE:
+        g_cc_res = FALSE;
+        DestroyWindow(hwnd);
+        return 0;
+
+    default:
+        return DefWindowProc(hwnd, msg, wp, lp);
+    }
+}
+
+BOOL API ChooseColor(LPCHOOSECOLOR cc)
+{
+    MSG msg;
+    RECT rc;
+    int x, y;
+    static BOOL cc_class_reg = FALSE;
+
+    if (!cc || !HIWORD(cc)) return FALSE;
+    dbg("COMMDLG: ChooseColor called\n");
+
+    g_cc = cc;
+    g_cc_res = FALSE;
+    g_cc_cur = (cc->Flags & CC_RGBINIT) ? cc->rgbResult : 0;
+
+    if (!cc_class_reg) {
+        WNDCLASS wc;
+        w_memset(&wc, 0, sizeof(wc));
+        wc.style = 3;
+        wc.lpfnWndProc = ChooseColorDlgProc;
+        wc.hInstance = g_hinst;
+        wc.hCursor = LoadCursor(0, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        wc.lpszClassName = "W16ChooseColorDlg";
+        if (RegisterClass(&wc)) cc_class_reg = TRUE;
+    }
+
+    x = 120; y = 120;
+    if (cc->hwndOwner && IsWindow(cc->hwndOwner)) {
+        GetWindowRect(cc->hwndOwner, (LPRECT)&rc);
+        x = rc.left + (rc.right - rc.left - 250) / 2;
+        y = rc.top + (rc.bottom - rc.top - 160) / 2;
+    }
+    if (x < 10) x = 10;
+    if (y < 10) y = 10;
+
+    g_cc_dlg = CreateWindow(
+        "W16ChooseColorDlg",
+        "Kolor",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_BORDER,
+        x, y, 250, 160,
+        cc->hwndOwner, 0, g_hinst, NULL
+    );
+
+    if (!g_cc_dlg) return FALSE;
+
+    if (cc->hwndOwner && IsWindow(cc->hwndOwner)) EnableWindow(cc->hwndOwner, FALSE);
+
+    while (IsWindow(g_cc_dlg) && GetMessage(&msg, 0, 0, 0)) {
+        if (!IsDialogMessage(g_cc_dlg, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+
+    if (cc->hwndOwner && IsWindow(cc->hwndOwner)) {
+        EnableWindow(cc->hwndOwner, TRUE);
+        SetActiveWindow(cc->hwndOwner);
+    }
+
+    return g_cc_res;
+}
+
 BOOL  API PrintDlg(LPVOID pd)         { (void)pd; return FALSE; }
 HWND  API FindText(LPVOID fr)         { (void)fr; return 0; }
 HWND  API ReplaceText(LPVOID fr)      { (void)fr; return 0; }
