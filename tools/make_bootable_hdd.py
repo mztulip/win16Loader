@@ -213,6 +213,8 @@ def main():
 
     run(["mcopy", "-oi", mpart, "windir/DOSPRMPT.PIF", "::CALMIRA/DOSPRMPT.PIF"])
     run(["mcopy", "-oi", mpart, "windir/FREEDOS.ICO", "::CALMIRA/FREEDOS.ICO"])
+    if os.path.exists("windir/CALMIRA.INI"):
+        run(["mcopy", "-oi", mpart, "windir/CALMIRA.INI", "::CALMIRA/CALMIRA.INI"])
 
     # 9. Create C:\SKIFREE with SKI.EXE and README.TXT
     print("Setting up C:\\SKIFREE and documentation...")

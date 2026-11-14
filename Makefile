@@ -559,7 +559,7 @@ control.exe: control.c
 
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
              $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) \
-             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/REG.TXT $(FDBOOT)
+             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/REG.TXT windir/CALMIRA.INI $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE)
