@@ -1272,7 +1272,7 @@ static HBITMAP load_bmp_file(LPCSTR name, int __far *out_w, int __far *out_h)
     file_len = (DWORD)_llseek(hf, 0L, 2 /*SEEK_END*/);
     _llseek(hf, 0L, 0 /*SEEK_SET*/);
 
-    if (file_len < 54 || file_len > 1048576UL) {
+    if (file_len < 54 || file_len > 2097152UL) {
         _lclose(hf);
         return 0;
     }
