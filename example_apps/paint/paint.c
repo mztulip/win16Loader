@@ -202,6 +202,24 @@ static void init_buttons(void)
     }
 }
 
+static BOOL tool_supports_size(int tool)
+{
+    switch (tool) {
+    case TOOL_BRUSH:
+    case TOOL_AIRBRUSH:
+    case TOOL_ERASER:
+    case TOOL_COLOR_ERASER:
+    case TOOL_LINE:
+    case TOOL_RECT:
+    case TOOL_ROUNDRECT:
+    case TOOL_ELLIPSE:
+    case TOOL_POLYGON:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
 static void save_undo_state(void)
 {
     if (g_hdc_canvas && g_hdc_undo) {
@@ -732,6 +750,7 @@ static void draw_modern_ui(HDC dc)
     HPEN hp, old_pen;
     int i, x, y, w;
     char buf[16];
+    BOOL has_size;
 
     GetClientRect(g_mainwnd, &client_rc);
 
@@ -786,7 +805,8 @@ static void draw_modern_ui(HDC dc)
     }
 
     /* 3. Brush Width Options */
-    SetTextColor(dc, RGB(60, 64, 72));
+    has_size = tool_supports_size(g_active_tool);
+    SetTextColor(dc, has_size ? RGB(60, 64, 72) : RGB(150, 155, 165));
     TextOut(dc, 8, 28, "Size:", 5);
     for (i = 1; i <= 5; i++) {
         x = 52 + (i - 1) * 26;
@@ -799,11 +819,24 @@ static void draw_modern_ui(HDC dc)
         case 4: w = 8; lstrcpy(buf, "8"); break;
         default: w = 12; lstrcpy(buf, "12"); break;
         }
-        br = CreateSolidBrush(g_brush_size == w ? RGB(196, 220, 250) : RGB(255, 255, 255));
+        if (has_size) {
+            br = CreateSolidBrush(g_brush_size == w ? RGB(196, 220, 250) : RGB(255, 255, 255));
+            hp = CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
+            SetTextColor(dc, g_brush_size == w ? RGB(16, 48, 128) : RGB(40, 44, 52));
+        } else {
+            if (g_active_tool == TOOL_PENCIL && w == 1) {
+                br = CreateSolidBrush(RGB(226, 230, 238));
+                hp = CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
+                SetTextColor(dc, RGB(100, 110, 130));
+            } else {
+                br = CreateSolidBrush(RGB(240, 241, 243));
+                hp = CreatePen(PS_SOLID, 1, RGB(215, 218, 224));
+                SetTextColor(dc, RGB(170, 175, 185));
+            }
+        }
         FillRect(dc, &r, br);
         DeleteObject(br);
 
-        hp = CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
         old_pen = (HPEN)SelectObject(dc, hp);
         old_br = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
         Rectangle(dc, r.left, r.top, r.right, r.bottom);
@@ -1019,6 +1052,13 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
         /* 2. Brush Size */
         if (y >= 26 && y <= 44 && x >= 52 && x <= 182) {
+            if (!tool_supports_size(g_active_tool)) {
+                if (g_active_tool == TOOL_PENCIL)
+                    set_status("Pencil is fixed at 1 px (hairline).");
+                else
+                    set_status("Size option is not available for this tool.");
+                return 0;
+            }
             i = ((x - 52) / 26) + 1;
             switch (i) {
             case 1: g_brush_size = 1; break;

@@ -266,6 +266,17 @@ begin
   end;
 end;
 
+function ToolSupportsSize(Tool: Integer): Boolean;
+begin
+  case Tool of
+    TOOL_BRUSH, TOOL_AIRBRUSH, TOOL_ERASER, TOOL_COLOR_ERASER,
+    TOOL_LINE, TOOL_RECT, TOOL_ROUNDRECT, TOOL_ELLIPSE, TOOL_POLYGON:
+      ToolSupportsSize := True;
+    else
+      ToolSupportsSize := False;
+  end;
+end;
+
 procedure SaveUndoState;
 begin
   if (G_hdcCanvas <> 0) and (G_hdcUndo <> 0) then
@@ -896,6 +907,7 @@ var
   HP, OldPen: HPEN;
   ClientRc: TRect;
   TextBuf: array[0..64] of Char;
+  HasSize: Boolean;
 begin
   GetClientRect(G_MainWnd, ClientRc);
 
@@ -954,7 +966,11 @@ begin
     DrawText(DC, G_Tools[I].Name, -1, R, DT_CENTER or DT_VCENTER or DT_SINGLELINE);
   end;
 
-  SetTextColor(DC, RGB(60, 64, 72));
+  HasSize := ToolSupportsSize(G_ActiveTool);
+  if HasSize then
+    SetTextColor(DC, RGB(60, 64, 72))
+  else
+    SetTextColor(DC, RGB(150, 155, 165));
   TextOut(DC, 8, 28, 'Size:', 5);
   for I := 1 to 5 do
   begin
@@ -969,14 +985,38 @@ begin
       5: W := 12;
       else W := 1;
     end;
-    if G_BrushSize = W then
-      HBr := CreateSolidBrush(RGB(196, 220, 250))
+    if HasSize then
+    begin
+      if G_BrushSize = W then
+      begin
+        HBr := CreateSolidBrush(RGB(196, 220, 250));
+        SetTextColor(DC, RGB(16, 48, 128));
+      end
+      else
+      begin
+        HBr := CreateSolidBrush(RGB(255, 255, 255));
+        SetTextColor(DC, RGB(40, 44, 52));
+      end;
+      HP := CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
+    end
     else
-      HBr := CreateSolidBrush(RGB(255, 255, 255));
+    begin
+      if (G_ActiveTool = TOOL_PENCIL) and (W = 1) then
+      begin
+        HBr := CreateSolidBrush(RGB(226, 230, 238));
+        HP := CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
+        SetTextColor(DC, RGB(100, 110, 130));
+      end
+      else
+      begin
+        HBr := CreateSolidBrush(RGB(240, 241, 243));
+        HP := CreatePen(PS_SOLID, 1, RGB(215, 218, 224));
+        SetTextColor(DC, RGB(170, 175, 185));
+      end;
+    end;
     FillRect(DC, R, HBr);
     DeleteObject(HBr);
 
-    HP := CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
     OldPen := SelectObject(DC, HP);
     HBr := GetStockObject(NULL_BRUSH);
     OldBr := SelectObject(DC, HBr);
@@ -1245,6 +1285,15 @@ begin
 
       if (Y >= 26) and (Y <= 44) and (X >= 52) and (X <= 182) then
       begin
+        if not ToolSupportsSize(G_ActiveTool) then
+        begin
+          if G_ActiveTool = TOOL_PENCIL then
+            SetStatus('Pencil is fixed at 1 px (hairline).')
+          else
+            SetStatus('Size option is not available for this tool.');
+          Result := 0;
+          Exit;
+        end;
         I := ((X - 52) div 26) + 1;
         case I of
           1: G_BrushSize := 1;
