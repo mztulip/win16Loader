@@ -118,6 +118,13 @@ type
     biClrImportant: Longint;
   end;
 
+  TRgbQuad = packed record
+    rgbBlue: Byte;
+    rgbGreen: Byte;
+    rgbRed: Byte;
+    rgbReserved: Byte;
+  end;
+
   TToolBtn = record
     R: TRect;
     Id: Integer;
@@ -191,6 +198,10 @@ var
 
   { Pseudo-random Seed for Spray }
   G_RandSeed: Word;
+
+  { BMP I/O Buffers (global to protect stack) }
+  G_BmpRow: array[0..4095] of Byte;
+  G_BmpPalette: array[0..255] of TRgbQuad;
 
 procedure Dbg(S: PChar);
 begin
@@ -984,7 +995,6 @@ var
   X, Y: Integer;
   RowBytes, PadBytes: Integer;
   Color: TColorRef;
-  RowBuf: array[0..2047] of Byte;
   Idx: Integer;
   PadZero: Longint;
 begin
@@ -1025,12 +1035,12 @@ begin
     for X := 0 to G_CanvasW - 1 do
     begin
       Color := GetPixel(G_hdcCanvas, X, Y);
-      RowBuf[Idx]     := (Color shr 16) and $FF;
-      RowBuf[Idx + 1] := (Color shr 8) and $FF;
-      RowBuf[Idx + 2] := Color and $FF;
+      G_BmpRow[Idx]     := (Color shr 16) and $FF;
+      G_BmpRow[Idx + 1] := (Color shr 8) and $FF;
+      G_BmpRow[Idx + 2] := Color and $FF;
       Inc(Idx, 3);
     end;
-    _lwrite(FH, @RowBuf[0], RowBytes);
+    _lwrite(FH, @G_BmpRow[0], RowBytes);
     if PadBytes > 0 then
       _lwrite(FH, @PadZero, PadBytes);
   end;
@@ -1050,12 +1060,16 @@ var
   FileHdr: TBitmapFileHeader;
   InfoHdr: TBitmapInfoHeader;
   X, Y: Integer;
-  RowBytes, PadBytes: Integer;
-  RowBuf: array[0..2047] of Byte;
-  Idx: Integer;
-  Color: TColorRef;
-  HdcScr: HDC;
   DrawW, DrawH: Integer;
+  ImgW, ImgH, Bpp: Integer;
+  TopDown: Boolean;
+  RowStride, BytesToRead, ExtraSkip: Longint;
+  NumColors, PalBytes: Longint;
+  ScreenY: Integer;
+  ByteIdx, BitIdx, PalIdx: Integer;
+  Color: TColorRef;
+  HBr: HBRUSH;
+  Rc: TRect;
 begin
   Result := False;
   FH := _lopen(APath, 0);
@@ -1065,7 +1079,13 @@ begin
     Exit;
   end;
 
-  _lread(FH, @FileHdr, SizeOf(FileHdr));
+  if _lread(FH, @FileHdr, SizeOf(FileHdr)) <> SizeOf(FileHdr) then
+  begin
+    _lclose(FH);
+    MessageBox(G_MainWnd, 'Failed reading BMP file header.', 'Format Error', MB_OK or MB_ICONSTOP);
+    Exit;
+  end;
+
   if FileHdr.bfType <> $4D42 then
   begin
     _lclose(FH);
@@ -1073,46 +1093,188 @@ begin
     Exit;
   end;
 
-  _lread(FH, @InfoHdr, SizeOf(InfoHdr));
-  if (InfoHdr.biBitCount <> 24) and (InfoHdr.biBitCount <> 32) then
+  if _lread(FH, @InfoHdr, SizeOf(InfoHdr)) <> SizeOf(InfoHdr) then
   begin
     _lclose(FH);
-    MessageBox(G_MainWnd, 'PaintCraft supports 24-bit and 32-bit BMP files.', 'File Format', MB_OK or MB_ICONINFORMATION);
+    MessageBox(G_MainWnd, 'Failed reading BMP info header.', 'Format Error', MB_OK or MB_ICONSTOP);
     Exit;
   end;
 
+  if InfoHdr.biCompression <> 0 then
+  begin
+    _lclose(FH);
+    MessageBox(G_MainWnd, 'Compressed BMP files (RLE) are not supported.', 'File Format', MB_OK or MB_ICONINFORMATION);
+    Exit;
+  end;
+
+  Bpp := InfoHdr.biBitCount;
+  if (Bpp <> 1) and (Bpp <> 4) and (Bpp <> 8) and (Bpp <> 24) and (Bpp <> 32) then
+  begin
+    _lclose(FH);
+    MessageBox(G_MainWnd, 'Unsupported bit depth. Supported: 1, 4, 8, 24, 32 bpp.', 'File Format', MB_OK or MB_ICONINFORMATION);
+    Exit;
+  end;
+
+  ImgW := InfoHdr.biWidth;
+  if ImgW <= 0 then
+  begin
+    _lclose(FH);
+    MessageBox(G_MainWnd, 'Invalid bitmap width.', 'Format Error', MB_OK or MB_ICONSTOP);
+    Exit;
+  end;
+
+  if InfoHdr.biHeight < 0 then
+  begin
+    TopDown := True;
+    ImgH := -InfoHdr.biHeight;
+  end
+  else
+  begin
+    TopDown := False;
+    ImgH := InfoHdr.biHeight;
+  end;
+
+  if ImgH <= 0 then
+  begin
+    _lclose(FH);
+    MessageBox(G_MainWnd, 'Invalid bitmap height.', 'Format Error', MB_OK or MB_ICONSTOP);
+    Exit;
+  end;
+
+  { Read palette for indexed formats (<= 8 bpp) }
+  if Bpp <= 8 then
+  begin
+    NumColors := InfoHdr.biClrUsed;
+    if NumColors = 0 then
+      NumColors := Longint(1) shl Bpp;
+    if NumColors > 256 then
+      NumColors := 256;
+
+    _llseek(FH, SizeOf(TBitmapFileHeader) + InfoHdr.biSize, 0);
+    PalBytes := NumColors * SizeOf(TRgbQuad);
+    FillChar(G_BmpPalette, SizeOf(G_BmpPalette), 0);
+    _lread(FH, @G_BmpPalette[0], Word(PalBytes));
+  end;
+
+  CommitSelection;
   SaveUndoState;
+
+  { Clear canvas to white }
+  HBr := CreateSolidBrush(RGB(255, 255, 255));
+  SetRect(Rc, 0, 0, G_CanvasW, G_CanvasH);
+  FillRect(G_hdcCanvas, Rc, HBr);
+  DeleteObject(HBr);
+
+  { Row stride aligned to 4 bytes }
+  RowStride := ((Longint(ImgW) * Longint(Bpp) + 31) div 32) * 4;
+  BytesToRead := RowStride;
+  if BytesToRead > SizeOf(G_BmpRow) then
+  begin
+    BytesToRead := SizeOf(G_BmpRow);
+    ExtraSkip := RowStride - BytesToRead;
+  end
+  else
+    ExtraSkip := 0;
+
+  DrawW := ImgW;
+  if DrawW > G_CanvasW then DrawW := G_CanvasW;
+  DrawH := ImgH;
+  if DrawH > G_CanvasH then DrawH := G_CanvasH;
 
   _llseek(FH, FileHdr.bfOffBits, 0);
 
-  DrawW := InfoHdr.biWidth;
-  if DrawW > G_CanvasW then DrawW := G_CanvasW;
-  DrawH := InfoHdr.biHeight;
-  if DrawH > G_CanvasH then DrawH := G_CanvasH;
-
-  RowBytes := InfoHdr.biWidth * (InfoHdr.biBitCount div 8);
-  PadBytes := (4 - (RowBytes mod 4)) mod 4;
-
-  for Y := InfoHdr.biHeight - 1 downto 0 do
+  for Y := 0 to ImgH - 1 do
   begin
-    _lread(FH, @RowBuf[0], RowBytes + PadBytes);
-    if Y < DrawH then
+    if TopDown then
+      ScreenY := Y
+    else
+      ScreenY := ImgH - 1 - Y;
+
+    _lread(FH, @G_BmpRow[0], Word(BytesToRead));
+    if ExtraSkip > 0 then
+      _llseek(FH, ExtraSkip, 1);
+
+    if ScreenY < DrawH then
     begin
-      Idx := 0;
-      for X := 0 to DrawW - 1 do
+      if Bpp = 1 then
       begin
-        Color := RGB(RowBuf[Idx + 2], RowBuf[Idx + 1], RowBuf[Idx]);
-        SetPixel(G_hdcCanvas, X, Y, Color);
-        Inc(Idx, InfoHdr.biBitCount div 8);
+        for X := 0 to DrawW - 1 do
+        begin
+          ByteIdx := X shr 3;
+          if ByteIdx < BytesToRead then
+          begin
+            BitIdx := 7 - (X and 7);
+            PalIdx := (G_BmpRow[ByteIdx] shr BitIdx) and 1;
+            Color := RGB(G_BmpPalette[PalIdx].rgbRed,
+                         G_BmpPalette[PalIdx].rgbGreen,
+                         G_BmpPalette[PalIdx].rgbBlue);
+            SetPixel(G_hdcCanvas, X, ScreenY, Color);
+          end;
+        end;
+      end
+      else if Bpp = 4 then
+      begin
+        for X := 0 to DrawW - 1 do
+        begin
+          ByteIdx := X shr 1;
+          if ByteIdx < BytesToRead then
+          begin
+            if (X and 1) = 0 then
+              PalIdx := (G_BmpRow[ByteIdx] shr 4) and $0F
+            else
+              PalIdx := G_BmpRow[ByteIdx] and $0F;
+            Color := RGB(G_BmpPalette[PalIdx].rgbRed,
+                         G_BmpPalette[PalIdx].rgbGreen,
+                         G_BmpPalette[PalIdx].rgbBlue);
+            SetPixel(G_hdcCanvas, X, ScreenY, Color);
+          end;
+        end;
+      end
+      else if Bpp = 8 then
+      begin
+        for X := 0 to DrawW - 1 do
+        begin
+          if X < BytesToRead then
+          begin
+            PalIdx := G_BmpRow[X];
+            Color := RGB(G_BmpPalette[PalIdx].rgbRed,
+                         G_BmpPalette[PalIdx].rgbGreen,
+                         G_BmpPalette[PalIdx].rgbBlue);
+            SetPixel(G_hdcCanvas, X, ScreenY, Color);
+          end;
+        end;
+      end
+      else if Bpp = 24 then
+      begin
+        ByteIdx := 0;
+        for X := 0 to DrawW - 1 do
+        begin
+          if ByteIdx + 2 < BytesToRead then
+          begin
+            Color := RGB(G_BmpRow[ByteIdx + 2], G_BmpRow[ByteIdx + 1], G_BmpRow[ByteIdx]);
+            SetPixel(G_hdcCanvas, X, ScreenY, Color);
+          end;
+          Inc(ByteIdx, 3);
+        end;
+      end
+      else if Bpp = 32 then
+      begin
+        ByteIdx := 0;
+        for X := 0 to DrawW - 1 do
+        begin
+          if ByteIdx + 2 < BytesToRead then
+          begin
+            Color := RGB(G_BmpRow[ByteIdx + 2], G_BmpRow[ByteIdx + 1], G_BmpRow[ByteIdx]);
+            SetPixel(G_hdcCanvas, X, ScreenY, Color);
+          end;
+          Inc(ByteIdx, 4);
+        end;
       end;
     end;
   end;
 
   _lclose(FH);
-
-  HdcScr := GetDC(G_MainWnd);
-  BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-  ReleaseDC(G_MainWnd, HdcScr);
+  RefreshCanvas;
 
   StrCopy(G_CurFile, APath);
   StrCopy(G_TitleBuf, 'PaintCraft - ');

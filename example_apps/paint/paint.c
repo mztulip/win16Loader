@@ -85,6 +85,13 @@ typedef struct {
     DWORD biClrUsed;
     DWORD biClrImportant;
 } BMPINFOHDR;
+
+typedef struct {
+    BYTE rgbBlue;
+    BYTE rgbGreen;
+    BYTE rgbRed;
+    BYTE rgbReserved;
+} BMPRGBQUAD;
 #pragma pack(pop)
 
 typedef struct {
@@ -838,6 +845,9 @@ static void draw_normal_eraser(HDC target, int cx, int cy, int half, COLORREF bg
 }
 
 /* BMP File I/O */
+static BYTE s_bmp_row[4096];
+static BMPRGBQUAD s_bmp_palette[256];
+
 static BOOL save_canvas_to_bmp(const char *path)
 {
     HFILE fh;
@@ -845,7 +855,6 @@ static BOOL save_canvas_to_bmp(const char *path)
     BMPINFOHDR ihdr;
     int x, y, row_bytes, pad_bytes, idx;
     COLORREF col;
-    BYTE row_buf[2048];
     DWORD zero = 0;
 
     row_bytes = g_canvas_w * 3;
@@ -879,12 +888,12 @@ static BOOL save_canvas_to_bmp(const char *path)
         idx = 0;
         for (x = 0; x < g_canvas_w; x++) {
             col = GetPixel(g_hdc_canvas, x, y);
-            row_buf[idx]     = (BYTE)((col >> 16) & 0xFF); /* Blue */
-            row_buf[idx + 1] = (BYTE)((col >> 8) & 0xFF);  /* Green */
-            row_buf[idx + 2] = (BYTE)(col & 0xFF);         /* Red */
+            s_bmp_row[idx]     = (BYTE)((col >> 16) & 0xFF); /* Blue */
+            s_bmp_row[idx + 1] = (BYTE)((col >> 8) & 0xFF);  /* Green */
+            s_bmp_row[idx + 2] = (BYTE)(col & 0xFF);         /* Red */
             idx += 3;
         }
-        _lwrite(fh, (LPCSTR)row_buf, row_bytes);
+        _lwrite(fh, (LPCSTR)s_bmp_row, row_bytes);
         if (pad_bytes > 0)
             _lwrite(fh, (LPCSTR)&zero, pad_bytes);
     }
@@ -902,10 +911,14 @@ static BOOL load_canvas_from_bmp(const char *path)
     HFILE fh;
     BMPFILEHDR fhdr;
     BMPINFOHDR ihdr;
-    int x, y, row_bytes, pad_bytes, idx, dw, dh, bpp_step;
+    int x, y, dw, dh;
+    int img_w, img_h, bpp, top_down;
+    DWORD row_stride, bytes_to_read, extra_skip;
+    DWORD num_colors, pal_bytes;
     COLORREF col;
-    BYTE row_buf[2048];
-    HDC dc;
+    int screen_y;
+    HBRUSH br;
+    RECT r;
 
     fh = _lopen(path, 0);
     if (fh == HFILE_ERROR) {
@@ -913,48 +926,165 @@ static BOOL load_canvas_from_bmp(const char *path)
         return FALSE;
     }
 
-    _lread(fh, (LPSTR)&fhdr, sizeof(fhdr));
+    if (_lread(fh, (LPSTR)&fhdr, sizeof(fhdr)) != sizeof(fhdr)) {
+        _lclose(fh);
+        MessageBox(g_mainwnd, "Failed reading BMP file header.", "Format Error", MB_OK | MB_ICONSTOP);
+        return FALSE;
+    }
+
     if (fhdr.bfType != 0x4D42) {
         _lclose(fh);
         MessageBox(g_mainwnd, "Selected file is not a valid BMP bitmap.", "Format Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
-    _lread(fh, (LPSTR)&ihdr, sizeof(ihdr));
-    if (ihdr.biBitCount != 24 && ihdr.biBitCount != 32) {
+    if (_lread(fh, (LPSTR)&ihdr, sizeof(ihdr)) != sizeof(ihdr)) {
         _lclose(fh);
-        MessageBox(g_mainwnd, "PaintCraft supports 24-bit and 32-bit BMP files.", "File Format", MB_OK | MB_ICONINFORMATION);
+        MessageBox(g_mainwnd, "Failed reading BMP info header.", "Format Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
-    save_undo_state();
-    _llseek(fh, fhdr.bfOffBits, 0);
+    if (ihdr.biCompression != 0) {
+        _lclose(fh);
+        MessageBox(g_mainwnd, "Compressed BMP files (RLE) are not supported.", "File Format", MB_OK | MB_ICONINFORMATION);
+        return FALSE;
+    }
 
-    dw = (int)ihdr.biWidth;
+    bpp = (int)ihdr.biBitCount;
+    if (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 24 && bpp != 32) {
+        _lclose(fh);
+        MessageBox(g_mainwnd, "Unsupported bit depth. Supported: 1, 4, 8, 24, 32 bpp.", "File Format", MB_OK | MB_ICONINFORMATION);
+        return FALSE;
+    }
+
+    img_w = (int)ihdr.biWidth;
+    if (img_w <= 0) {
+        _lclose(fh);
+        MessageBox(g_mainwnd, "Invalid bitmap width.", "Format Error", MB_OK | MB_ICONSTOP);
+        return FALSE;
+    }
+
+    if (ihdr.biHeight < 0) {
+        top_down = 1;
+        img_h = (int)(-ihdr.biHeight);
+    } else {
+        top_down = 0;
+        img_h = (int)ihdr.biHeight;
+    }
+    if (img_h <= 0) {
+        _lclose(fh);
+        MessageBox(g_mainwnd, "Invalid bitmap height.", "Format Error", MB_OK | MB_ICONSTOP);
+        return FALSE;
+    }
+
+    /* Read palette if indexed (<= 8 bpp) */
+    if (bpp <= 8) {
+        num_colors = ihdr.biClrUsed;
+        if (num_colors == 0)
+            num_colors = 1UL << bpp;
+        if (num_colors > 256)
+            num_colors = 256;
+
+        _llseek(fh, (LONG)(sizeof(BMPFILEHDR) + ihdr.biSize), 0);
+        pal_bytes = num_colors * sizeof(BMPRGBQUAD);
+        memset(s_bmp_palette, 0, sizeof(s_bmp_palette));
+        _lread(fh, (LPSTR)s_bmp_palette, (WORD)pal_bytes);
+    }
+
+    /* Commit selection & save undo before modifying canvas */
+    commit_selection();
+    save_undo_state();
+
+    /* Clear canvas to clean white before drawing loaded pixels */
+    br = CreateSolidBrush(RGB(255, 255, 255));
+    SetRect(&r, 0, 0, g_canvas_w, g_canvas_h);
+    FillRect(g_hdc_canvas, &r, br);
+    DeleteObject(br);
+
+    /* Row stride in bytes, aligned to 4 bytes */
+    row_stride = (((DWORD)img_w * bpp + 31) / 32) * 4;
+    bytes_to_read = row_stride;
+    if (bytes_to_read > sizeof(s_bmp_row)) {
+        bytes_to_read = sizeof(s_bmp_row);
+        extra_skip = row_stride - bytes_to_read;
+    } else {
+        extra_skip = 0;
+    }
+
+    dw = img_w;
     if (dw > g_canvas_w) dw = g_canvas_w;
-    dh = (int)ihdr.biHeight;
+    dh = img_h;
     if (dh > g_canvas_h) dh = g_canvas_h;
 
-    bpp_step = ihdr.biBitCount / 8;
-    row_bytes = (int)ihdr.biWidth * bpp_step;
-    pad_bytes = (4 - (row_bytes % 4)) % 4;
+    /* Seek to pixel data */
+    _llseek(fh, (LONG)fhdr.bfOffBits, 0);
 
-    for (y = (int)ihdr.biHeight - 1; y >= 0; y--) {
-        _lread(fh, (LPSTR)row_buf, row_bytes + pad_bytes);
-        if (y < dh) {
-            idx = 0;
-            for (x = 0; x < dw; x++) {
-                col = RGB(row_buf[idx + 2], row_buf[idx + 1], row_buf[idx]);
-                SetPixel(g_hdc_canvas, x, y, col);
-                idx += bpp_step;
+    for (y = 0; y < img_h; y++) {
+        screen_y = top_down ? y : (img_h - 1 - y);
+
+        _lread(fh, (LPSTR)s_bmp_row, (WORD)bytes_to_read);
+        if (extra_skip > 0)
+            _llseek(fh, (LONG)extra_skip, 1);
+
+        if (screen_y < dh) {
+            if (bpp == 1) {
+                for (x = 0; x < dw; x++) {
+                    int byte_idx = x >> 3;
+                    if (byte_idx < (int)bytes_to_read) {
+                        int bit_idx = 7 - (x & 7);
+                        int pal_idx = (s_bmp_row[byte_idx] >> bit_idx) & 1;
+                        col = RGB(s_bmp_palette[pal_idx].rgbRed,
+                                  s_bmp_palette[pal_idx].rgbGreen,
+                                  s_bmp_palette[pal_idx].rgbBlue);
+                        SetPixel(g_hdc_canvas, x, screen_y, col);
+                    }
+                }
+            } else if (bpp == 4) {
+                for (x = 0; x < dw; x++) {
+                    int byte_idx = x >> 1;
+                    if (byte_idx < (int)bytes_to_read) {
+                        int pal_idx = ((x & 1) == 0) ? ((s_bmp_row[byte_idx] >> 4) & 0x0F)
+                                                     : (s_bmp_row[byte_idx] & 0x0F);
+                        col = RGB(s_bmp_palette[pal_idx].rgbRed,
+                                  s_bmp_palette[pal_idx].rgbGreen,
+                                  s_bmp_palette[pal_idx].rgbBlue);
+                        SetPixel(g_hdc_canvas, x, screen_y, col);
+                    }
+                }
+            } else if (bpp == 8) {
+                for (x = 0; x < dw; x++) {
+                    if (x < (int)bytes_to_read) {
+                        int pal_idx = s_bmp_row[x];
+                        col = RGB(s_bmp_palette[pal_idx].rgbRed,
+                                  s_bmp_palette[pal_idx].rgbGreen,
+                                  s_bmp_palette[pal_idx].rgbBlue);
+                        SetPixel(g_hdc_canvas, x, screen_y, col);
+                    }
+                }
+            } else if (bpp == 24) {
+                int idx = 0;
+                for (x = 0; x < dw; x++) {
+                    if (idx + 2 < (int)bytes_to_read) {
+                        col = RGB(s_bmp_row[idx + 2], s_bmp_row[idx + 1], s_bmp_row[idx]);
+                        SetPixel(g_hdc_canvas, x, screen_y, col);
+                    }
+                    idx += 3;
+                }
+            } else if (bpp == 32) {
+                int idx = 0;
+                for (x = 0; x < dw; x++) {
+                    if (idx + 2 < (int)bytes_to_read) {
+                        col = RGB(s_bmp_row[idx + 2], s_bmp_row[idx + 1], s_bmp_row[idx]);
+                        SetPixel(g_hdc_canvas, x, screen_y, col);
+                    }
+                    idx += 4;
+                }
             }
         }
     }
     _lclose(fh);
 
-    dc = GetDC(g_mainwnd);
-    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-    ReleaseDC(g_mainwnd, dc);
+    refresh_canvas();
 
     lstrcpy(g_curfile, path);
     wsprintf(g_titlebuf, "PaintCraft - %s", g_curfile);
