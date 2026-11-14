@@ -164,7 +164,6 @@ def main():
     ]
     for c in paint_candidates:
         if c and os.path.exists(c):
-            win_files.append((c, "PAINT.EXE"))
             win_files.append((c, "PBRUSH.EXE"))
             break
 
@@ -323,7 +322,7 @@ def main():
         "------------------\r\n"
         "C:\\WINDOWS\\       - Srodowisko uruchomieniowe Win16 (Win16Loader, DLL, fonty)\r\n"
         "C:\\WINDOWS\\NOTEPAD.EXE - Edytor tekstu (autor: mztulip, FPC)\r\n"
-        "C:\\WINDOWS\\PAINT.EXE   - Studio graficzne PaintCraft (zamiennik Paintbrush)\r\n"
+        "C:\\WINDOWS\\PBRUSH.EXE  - PaintCraft Studio (grafika i rysowanie)\r\n"
         "C:\\CALMIRA\\       - Powloka graficzna Calmira II\r\n"
         "C:\\FREEDOS\\BIN\\   - Narzedzia i powloka systemu FreeDOS\r\n"
         "C:\\SKIFREE\\       - Kultowa gra narciarska SkiFree (Chris Pirih)\r\n"
