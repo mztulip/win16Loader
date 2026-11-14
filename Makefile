@@ -537,9 +537,13 @@ CALMIRA_DIR = ../win31_apps/english_calmira/calmii33
 HDD_MB      = 64
 
 NOTEPAD_EXE = example_apps/notepad/NOTEPAD.exe
+PAINT_EXE   = example_apps/paint/PAINT.EXE
 
 $(NOTEPAD_EXE): example_apps/notepad/NOTEPAD.PAS
 	$(MAKE) -C example_apps/notepad
+
+$(PAINT_EXE): example_apps/paint/paint.c
+	$(MAKE) -C example_apps/paint
 
 windir/FREEDOS.ICO: tools/make_freedos_ico.py
 	python3 tools/make_freedos_ico.py
@@ -551,11 +555,11 @@ floppy.img: tools/make_floppy.py
 	python3 tools/make_floppy.py $@
 
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
-             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) \
+             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) \
              windir/DOSPRMPT.PIF windir/FREEDOS.ICO $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
-	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE)
+	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE)
 
 # ExitWindows(EW_REBOOTSYSTEM) resetuje PC - domyslnie pozwalamy QEMU na reboot.
 # Diagnostyka crashy (zatrzymanie po triple fault): make run-calmira QEMU_REBOOT="-no-reboot -no-shutdown"

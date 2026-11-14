@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--user-bin", default="user/USER.EXE", help="USER.EXE path")
     parser.add_argument("--gdi-bin", default="gdi/GDI.EXE", help="GDI.EXE path")
     parser.add_argument("--notepad-exe", default="example_apps/notepad/NOTEPAD.exe", help="NOTEPAD.EXE path")
+    parser.add_argument("--paint-exe", default="example_apps/paint/PAINT.EXE", help="PAINT.EXE path")
     parser.add_argument("--mario-dir", default="../games/mario", help="Mario game directory")
     args = parser.parse_args()
 
@@ -153,6 +154,17 @@ def main():
     for c in notepad_candidates:
         if c and os.path.exists(c):
             win_files.append((c, "NOTEPAD.EXE"))
+            break
+
+    paint_candidates = [
+        args.paint_exe,
+        "example_apps/paint/PAINT.EXE",
+        "example_apps/paint/PAINT.exe",
+    ]
+    for c in paint_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "PAINT.EXE"))
+            win_files.append((c, "PBRUSH.EXE"))
             break
 
     for src, dst in win_files:
@@ -310,6 +322,7 @@ def main():
         "------------------\r\n"
         "C:\\WINDOWS\\       - Srodowisko uruchomieniowe Win16 (Win16Loader, DLL, fonty)\r\n"
         "C:\\WINDOWS\\NOTEPAD.EXE - Edytor tekstu (autor: mztulip, FPC)\r\n"
+        "C:\\WINDOWS\\PAINT.EXE   - Studio graficzne PaintCraft (zamiennik Paintbrush)\r\n"
         "C:\\CALMIRA\\       - Powloka graficzna Calmira II\r\n"
         "C:\\FREEDOS\\BIN\\   - Narzedzia i powloka systemu FreeDOS\r\n"
         "C:\\SKIFREE\\       - Kultowa gra narciarska SkiFree (Chris Pirih)\r\n"
