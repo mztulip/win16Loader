@@ -141,6 +141,7 @@ def main():
         ("WIN16API.DB", "WIN16API.DB"),
         ("windir/WIN.INI", "WIN.INI"),
         ("windir/SYSTEM.INI", "SYSTEM.INI"),
+        ("windir/REG.TXT", "REG.TXT"),
         ("windir/DOSPRMPT.PIF", "DOSPRMPT.PIF"),
         ("windir/FREEDOS.ICO", "FREEDOS.ICO"),
         ("control.exe", "CONTROL.EXE"),

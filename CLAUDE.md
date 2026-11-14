@@ -122,14 +122,15 @@ z katalogu systemowego (`A:\`) `*.FON`. Potem przechodzi do PM i woła LibEntry 
 | `kernel/` | KERNEL.EXE | -ms -zu | pamiec (XMS, selektory, LocalHeap), DOS3Call z tlumaczeniem wskaznikow, INI, moduly/zasoby, INT 21h z PM |
 | `gdi/` | GDI.EXE | -ms -zu | DC, obiekty, ROP2/ROP3, regiony, bitmapy DIB/DDB, fonty .FON (FNT 2/3), kursor myszy (prywatne Gdi* 900-914) |
 | `user/` | USER.EXE | -mm -zu | okna, klasy, kolejka, malowanie NC w stylu Win16, menu (owner-draw), dialogi, kontrolki (uctl.c), schowek, DCE (dce_update), ikony okien zminimalizowanych jak w Win16 (uicon.c: miejsca na dole rodzica, ArrangeIconicWindows, tytul #32772, WM_PAINTICON), prywatne UserIcon* 950-951 |
-| `dlls/` | SHELL.DLL, KEYBOARD.DRV, TOOLHELP.DLL, DDEML.DLL, VER.DLL, MMSYSTEM.DLL, COMMDLG.DLL | -ms -zu | rejestr w `<windir>\REG.TXT`, ExtractIcon, ANSI<->OEM; reszta zwraca "brak/anuluj" |
+| `dlls/` | SHELL.DLL, KEYBOARD.DRV, TOOLHELP.DLL, DDEML.DLL, VER.DLL, MMSYSTEM.DLL, COMMDLG.DLL | -ms -zu | rejestr w `<windir>\REG.TXT`, ExtractIcon, ANSI<->OEM, COMMDLG (GetOpenFileName, GetSaveFileName, ChooseFont, ChooseColor) |
 | `example_apps/` | testy | aplikacje | po jednej na funkcjonalnosc, wyniki `TEST ...` na COM1 (README.md) |
 
-Eksporty: `tools/gen_lnk.py MODUL pliki.c` (ordynaly z .spec Wine, prywatne w PRIVATE),
+Eksporty: `tools/gen_lnk.py MODUL pliki.c` (ordynaly z .spec Wine, prywatne w PRIVATE, fallback do WIN16API.DB),
 weryfikacja `retf N` vs .spec: `tools/check_args.py plik:MODUL` (KERNEL.354 = falszywy alarm).
 Calmira II 3.3 (`../win31_apps/english_calmira/calmii33`) dziala: pulpit, pasek zadan, menu Start, dialogi.
+Aplikacje systemowe: CONTROL.EXE (wlasna implementacja: main.cpl Desktop, Date/Time), NOTEPAD.EXE, PBRUSH.EXE.
 Zadania kooperacyjne (`kernel/ktask.c`): WinExec/ShellExecute/LoadLibrary laduja moduly w trakcie pracy przez `INT E0h` (`mod_exec_rm`), stan w `TODO.txt` ETAP 21.
-Brak: COMMDLG (zawsze "Anuluj"), DDE.
+Brak: DDE, drukarki (PrintDlg).
 
 ### Wyglad: wlasny styl, NIE kopiujemy Windows
 

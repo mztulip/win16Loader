@@ -20,6 +20,7 @@ steps/STEP1[0-9]/loader.exe
 /kernel.exe
 /gdi.exe
 /loader.exe
+/control.exe
 
 # Python cache
 __pycache__/

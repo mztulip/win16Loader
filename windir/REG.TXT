@@ -1,0 +1,12 @@
+.txt=txtfile
+txtfile=Dokument tekstowy
+txtfile\shell\open\command=C:\WINDOWS\NOTEPAD.EXE %1
+txtfile\DefaultIcon=C:\WINDOWS\NOTEPAD.EXE,0
+.ini=inifile
+inifile=Plik konfiguracji
+inifile\shell\open\command=C:\WINDOWS\NOTEPAD.EXE %1
+inifile\DefaultIcon=C:\WINDOWS\NOTEPAD.EXE,0
+.bmp=paintfile
+paintfile=Rysunek
+paintfile\shell\open\command=C:\WINDOWS\PAINT.EXE %1
+paintfile\DefaultIcon=C:\WINDOWS\PAINT.EXE,0

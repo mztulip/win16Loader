@@ -1729,3 +1729,20 @@ Narzedzia VBE pod DOS (zrodla zweryfikowane tylko jako istniejace, bez gwarancji
   - VOGONS - przeglad narzedzi VESA (VBEPlus TSR dodaje tryby VBE, UniVBE/SciTech, VBE15bpp):
     https://www.vogons.org/viewtopic.php?p=147961
   - zrodlo vbeinfo.c (Linux, atitvout; nie binarka DOS): https://sources.debian.org/src/atitvout/0.4-12/vbeinfo.c
+
+--------------------------------------------------------------------------------
+ETAP 25: Aplet Panelu Sterowania (CONTROL.EXE), COMMDLG ChooseFont i ikony plikow
+--------------------------------------------------------------------------------
+- [x] CONTROL.EXE (control.c): wlasna implementacja Win16 dla apletu Windows Control Panel
+      - Obsluga 'control.exe main.cpl Desktop' (wlasciwosci pulpitu: tapeta, kafelkowanie, wzor, odstep ikon, zapis do WIN.INI, WM_WININICHANGE)
+      - Obsluga 'control.exe main.cpl Date/Time' (data i godzina przez DOS INT 21h AH=2Ah..2Dh)
+      - Obsluga okna glownego 'control.exe' z modulami Pulpit, Data/Czas, Czcionki, Kolory
+      - Dodano reguly w Makefile i make_bootable_hdd.py
+- [x] COMMDLG.DLL: pelna implementacja ChooseFont i ChooseColor
+      - ChooseFont: modalny dialog z lista czcionek (GDI fonts), stylami, rozmiarami, podgladem na zywo (WM_SETFONT / CreateFontIndirect)
+      - Zwraca wypelniony LOGFONT i TRUE, dzieki czemu Calmira i TFontDialog aktualizuja czcionki
+      - ChooseColor: wybor z palety 16 kolorow
+      - gen_lnk.py: fallback na WIN16API.DB przy braku drzewa spec Wine
+- [x] Skojarzenia i ikony plikow (Calmira / Windows 3.1):
+      - Dodano windir/REG.TXT z powiazaniami .txt, .ini, .bmp do NOTEPAD.EXE i PAINT.EXE
+      - Dodano sekcje [Icons] i [File Types] do CALMIRA.INI (np. txt=C:\WINDOWS\NOTEPAD.EXE(0))
