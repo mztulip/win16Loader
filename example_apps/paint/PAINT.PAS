@@ -41,11 +41,17 @@ const
   IDM_SAVEAS    = 1004;
   IDM_EXIT      = 1005;
 
+  IDM_CUT       = 1006;
+  IDM_COPY      = 1007;
+  IDM_PASTE     = 1008;
+  IDM_DELETE    = 1009;
+
   IDM_UNDO      = 1010;
   IDM_CLEAR     = 1011;
   IDM_INVERT    = 1012;
   IDM_FLIPH     = 1013;
   IDM_FLIPV     = 1014;
+  IDM_SELECTALL = 1015;
 
   IDM_ABOUT     = 1020;
 
@@ -143,6 +149,24 @@ var
   G_hdcTemp: HDC;
   G_hBmpTemp: HBITMAP;
   G_hBmpOldTemp: HBITMAP;
+
+  { Selection State }
+  G_HasSel: Boolean;
+  G_SelRc: TRect;
+  G_SelW, G_SelH: Integer;
+  G_hdcSel: HDC;
+  G_hBmpSel: HBITMAP;
+  G_hBmpOldSel: HBITMAP;
+  G_SelFloating: Boolean;
+  G_SelDragging: Boolean;
+  G_SelAnchorX, G_SelAnchorY: Integer;
+
+  { Clipboard Buffer }
+  G_hdcClip: HDC;
+  G_hBmpClip: HBITMAP;
+  G_hBmpOldClip: HBITMAP;
+  G_ClipW, G_ClipH: Integer;
+  G_HasClip: Boolean;
 
   { Tool States }
   G_ActiveTool: Integer;
@@ -286,9 +310,221 @@ begin
   end;
 end;
 
-procedure DoUndo;
+procedure RenderCanvasToDC(TargetDC: HDC);
+var
+  HP, OldPen: HPEN;
+  OldBr: HBRUSH;
+begin
+  if (G_hdcCanvas = 0) or (G_hdcTemp = 0) then Exit;
+
+  BitBlt(G_hdcTemp, 0, 0, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
+
+  if G_HasSel and G_SelFloating and (G_hdcSel <> 0) and (G_hBmpSel <> 0) then
+    BitBlt(G_hdcTemp, G_SelRc.left, G_SelRc.top, G_SelW, G_SelH, G_hdcSel, 0, 0, SRCCOPY);
+
+  if G_HasSel then
+  begin
+    HP := CreatePen(PS_DOT, 1, RGB(0, 0, 0));
+    OldPen := SelectObject(G_hdcTemp, HP);
+    OldBr := SelectObject(G_hdcTemp, GetStockObject(NULL_BRUSH));
+    Rectangle(G_hdcTemp, G_SelRc.left, G_SelRc.top, G_SelRc.right, G_SelRc.bottom);
+    SelectObject(G_hdcTemp, OldBr);
+    SelectObject(G_hdcTemp, OldPen);
+    DeleteObject(HP);
+  end;
+
+  BitBlt(TargetDC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcTemp, 0, 0, SRCCOPY);
+end;
+
+procedure RefreshCanvas;
+var
+  DC: HDC;
+begin
+  if G_MainWnd <> 0 then
+  begin
+    DC := GetDC(G_MainWnd);
+    if DC <> 0 then
+    begin
+      RenderCanvasToDC(DC);
+      ReleaseDC(G_MainWnd, DC);
+    end;
+  end;
+end;
+
+procedure CommitSelection;
+begin
+  if not G_HasSel then Exit;
+
+  if G_SelFloating and (G_hdcSel <> 0) and (G_hBmpSel <> 0) and (G_hdcCanvas <> 0) then
+  begin
+    BitBlt(G_hdcCanvas, G_SelRc.left, G_SelRc.top, G_SelW, G_SelH, G_hdcSel, 0, 0, SRCCOPY);
+    SelectObject(G_hdcSel, G_hBmpOldSel);
+    DeleteObject(G_hBmpSel);
+    G_hBmpSel := 0;
+    G_SelFloating := False;
+  end;
+  G_HasSel := False;
+  G_SelDragging := False;
+  RefreshCanvas;
+end;
+
+procedure DoCopy;
 var
   HdcScr: HDC;
+  HBmp: HBITMAP;
+begin
+  if G_MainWnd = 0 then Exit;
+  HdcScr := GetDC(G_MainWnd);
+
+  if G_HasSel then
+  begin
+    HBmp := CreateCompatibleBitmap(HdcScr, G_SelW, G_SelH);
+    if G_hBmpClip <> 0 then DeleteObject(G_hBmpClip);
+    G_hBmpClip := HBmp;
+    SelectObject(G_hdcClip, G_hBmpClip);
+    G_ClipW := G_SelW;
+    G_ClipH := G_SelH;
+    G_HasClip := True;
+
+    if G_SelFloating and (G_hdcSel <> 0) then
+      BitBlt(G_hdcClip, 0, 0, G_SelW, G_SelH, G_hdcSel, 0, 0, SRCCOPY)
+    else
+      BitBlt(G_hdcClip, 0, 0, G_SelW, G_SelH, G_hdcCanvas, G_SelRc.left, G_SelRc.top, SRCCOPY);
+    SetStatus('Selection copied to clipboard.');
+  end
+  else
+  begin
+    HBmp := CreateCompatibleBitmap(HdcScr, G_CanvasW, G_CanvasH);
+    if G_hBmpClip <> 0 then DeleteObject(G_hBmpClip);
+    G_hBmpClip := HBmp;
+    SelectObject(G_hdcClip, G_hBmpClip);
+    G_ClipW := G_CanvasW;
+    G_ClipH := G_CanvasH;
+    G_HasClip := True;
+    BitBlt(G_hdcClip, 0, 0, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
+    SetStatus('Entire canvas copied to clipboard.');
+  end;
+  ReleaseDC(G_MainWnd, HdcScr);
+end;
+
+procedure DoCut;
+var
+  HBr: HBRUSH;
+begin
+  if not G_HasSel then
+  begin
+    SetStatus('Nothing selected to cut.');
+    Exit;
+  end;
+  DoCopy;
+  SaveUndoState;
+  if not G_SelFloating then
+  begin
+    HBr := CreateSolidBrush(G_ColSecondary);
+    FillRect(G_hdcCanvas, G_SelRc, HBr);
+    DeleteObject(HBr);
+  end
+  else
+  begin
+    if G_hBmpSel <> 0 then
+    begin
+      SelectObject(G_hdcSel, G_hBmpOldSel);
+      DeleteObject(G_hBmpSel);
+      G_hBmpSel := 0;
+    end;
+    G_SelFloating := False;
+  end;
+  G_HasSel := False;
+  G_SelDragging := False;
+  RefreshCanvas;
+  SetStatus('Selection cut to clipboard.');
+end;
+
+procedure DoPaste;
+var
+  HdcScr: HDC;
+begin
+  if (not G_HasClip) or (G_MainWnd = 0) then
+  begin
+    SetStatus('Clipboard is empty.');
+    Exit;
+  end;
+  CommitSelection;
+  SaveUndoState;
+
+  HdcScr := GetDC(G_MainWnd);
+  if G_hBmpSel <> 0 then
+  begin
+    SelectObject(G_hdcSel, G_hBmpOldSel);
+    DeleteObject(G_hBmpSel);
+  end;
+  G_hBmpSel := CreateCompatibleBitmap(HdcScr, G_ClipW, G_ClipH);
+  ReleaseDC(G_MainWnd, HdcScr);
+
+  SelectObject(G_hdcSel, G_hBmpSel);
+  BitBlt(G_hdcSel, 0, 0, G_ClipW, G_ClipH, G_hdcClip, 0, 0, SRCCOPY);
+
+  G_HasSel := True;
+  G_SelFloating := True;
+  G_SelW := G_ClipW;
+  G_SelH := G_ClipH;
+  G_SelRc.left := 10;
+  G_SelRc.top := 10;
+  G_SelRc.right := 10 + G_SelW;
+  G_SelRc.bottom := 10 + G_SelH;
+  G_ActiveTool := TOOL_SELECT;
+
+  InvalidateRect(G_MainWnd, nil, False);
+  RefreshCanvas;
+  SetStatus('Pasted from clipboard. Drag inside to move, click outside to stamp.');
+end;
+
+procedure DoDelete;
+var
+  HBr: HBRUSH;
+begin
+  if not G_HasSel then Exit;
+  SaveUndoState;
+  if not G_SelFloating then
+  begin
+    HBr := CreateSolidBrush(G_ColSecondary);
+    FillRect(G_hdcCanvas, G_SelRc, HBr);
+    DeleteObject(HBr);
+  end
+  else
+  begin
+    if G_hBmpSel <> 0 then
+    begin
+      SelectObject(G_hdcSel, G_hBmpOldSel);
+      DeleteObject(G_hBmpSel);
+      G_hBmpSel := 0;
+    end;
+    G_SelFloating := False;
+  end;
+  G_HasSel := False;
+  G_SelDragging := False;
+  RefreshCanvas;
+  SetStatus('Selection cleared.');
+end;
+
+procedure DoSelectAll;
+begin
+  CommitSelection;
+  G_HasSel := True;
+  G_SelFloating := False;
+  G_SelRc.left := 0;
+  G_SelRc.top := 0;
+  G_SelRc.right := G_CanvasW;
+  G_SelRc.bottom := G_CanvasH;
+  G_SelW := G_CanvasW;
+  G_SelH := G_CanvasH;
+  G_ActiveTool := TOOL_SELECT;
+  InvalidateRect(G_MainWnd, nil, False);
+  RefreshCanvas;
+  SetStatus('Entire canvas selected.');
+end;
+
+procedure DoUndo;
 begin
   if not G_CanUndo then
   begin
@@ -296,13 +532,22 @@ begin
     Exit;
   end;
 
+  if G_HasSel then
+  begin
+    if G_SelFloating and (G_hBmpSel <> 0) then
+    begin
+      SelectObject(G_hdcSel, G_hBmpOldSel);
+      DeleteObject(G_hBmpSel);
+      G_hBmpSel := 0;
+    end;
+    G_HasSel := False;
+    G_SelFloating := False;
+    G_SelDragging := False;
+  end;
+
   BitBlt(G_hdcCanvas, 0, 0, G_CanvasW, G_CanvasH, G_hdcUndo, 0, 0, SRCCOPY);
   G_CanUndo := False;
-
-  HdcScr := GetDC(G_MainWnd);
-  BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-  ReleaseDC(G_MainWnd, HdcScr);
-
+  RefreshCanvas;
   SetStatus('Undid last action.');
 end;
 
@@ -310,32 +555,36 @@ procedure ClearCanvas;
 var
   HBr: HBRUSH;
   Rc: TRect;
-  HdcScr: HDC;
 begin
+  if G_HasSel then
+  begin
+    DoDelete;
+    Exit;
+  end;
   SaveUndoState;
   HBr := CreateSolidBrush(G_ColSecondary);
   Rc.left := 0; Rc.top := 0; Rc.right := G_CanvasW; Rc.bottom := G_CanvasH;
   FillRect(G_hdcCanvas, Rc, HBr);
   DeleteObject(HBr);
-
-  HdcScr := GetDC(G_MainWnd);
-  BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-  ReleaseDC(G_MainWnd, HdcScr);
-
+  RefreshCanvas;
   SetStatus('Canvas cleared with background color.');
 end;
 
 procedure InvertCanvas;
-var
-  HdcScr: HDC;
 begin
   SaveUndoState;
+  if G_HasSel then
+  begin
+    if G_SelFloating and (G_hdcSel <> 0) then
+      PatBlt(G_hdcSel, 0, 0, G_SelW, G_SelH, DSTINVERT)
+    else
+      PatBlt(G_hdcCanvas, G_SelRc.left, G_SelRc.top, G_SelW, G_SelH, DSTINVERT);
+    RefreshCanvas;
+    SetStatus('Selection colors inverted.');
+    Exit;
+  end;
   PatBlt(G_hdcCanvas, 0, 0, G_CanvasW, G_CanvasH, DSTINVERT);
-
-  HdcScr := GetDC(G_MainWnd);
-  BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-  ReleaseDC(G_MainWnd, HdcScr);
-
+  RefreshCanvas;
   SetStatus('Colors inverted.');
 end;
 
@@ -343,11 +592,23 @@ procedure FlipCanvasH;
 var
   X, Y: Integer;
   ColL, ColR: TColorRef;
-  HdcScr: HDC;
 begin
   SaveUndoState;
-  for Y := 0 to G_CanvasH - 1 do
+  if G_HasSel and G_SelFloating and (G_hdcSel <> 0) then
   begin
+    for Y := 0 to G_SelH - 1 do
+      for X := 0 to (G_SelW div 2) - 1 do
+      begin
+        ColL := GetPixel(G_hdcSel, X, Y);
+        ColR := GetPixel(G_hdcSel, G_SelW - 1 - X, Y);
+        SetPixel(G_hdcSel, X, Y, ColR);
+        SetPixel(G_hdcSel, G_SelW - 1 - X, Y, ColL);
+      end;
+    RefreshCanvas;
+    SetStatus('Selection flipped horizontally.');
+    Exit;
+  end;
+  for Y := 0 to G_CanvasH - 1 do
     for X := 0 to (G_CanvasW div 2) - 1 do
     begin
       ColL := GetPixel(G_hdcCanvas, X, Y);
@@ -355,12 +616,7 @@ begin
       SetPixel(G_hdcCanvas, X, Y, ColR);
       SetPixel(G_hdcCanvas, G_CanvasW - 1 - X, Y, ColL);
     end;
-  end;
-
-  HdcScr := GetDC(G_MainWnd);
-  BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-  ReleaseDC(G_MainWnd, HdcScr);
-
+  RefreshCanvas;
   SetStatus('Canvas flipped horizontally.');
 end;
 
@@ -368,11 +624,23 @@ procedure FlipCanvasV;
 var
   X, Y: Integer;
   ColT, ColB: TColorRef;
-  HdcScr: HDC;
 begin
   SaveUndoState;
-  for Y := 0 to (G_CanvasH div 2) - 1 do
+  if G_HasSel and G_SelFloating and (G_hdcSel <> 0) then
   begin
+    for Y := 0 to (G_SelH div 2) - 1 do
+      for X := 0 to G_SelW - 1 do
+      begin
+        ColT := GetPixel(G_hdcSel, X, Y);
+        ColB := GetPixel(G_hdcSel, X, G_SelH - 1 - Y);
+        SetPixel(G_hdcSel, X, Y, ColB);
+        SetPixel(G_hdcSel, X, G_SelH - 1 - Y, ColT);
+      end;
+    RefreshCanvas;
+    SetStatus('Selection flipped vertically.');
+    Exit;
+  end;
+  for Y := 0 to (G_CanvasH div 2) - 1 do
     for X := 0 to G_CanvasW - 1 do
     begin
       ColT := GetPixel(G_hdcCanvas, X, Y);
@@ -380,12 +648,7 @@ begin
       SetPixel(G_hdcCanvas, X, Y, ColB);
       SetPixel(G_hdcCanvas, X, G_CanvasH - 1 - Y, ColT);
     end;
-  end;
-
-  HdcScr := GetDC(G_MainWnd);
-  BitBlt(HdcScr, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-  ReleaseDC(G_MainWnd, HdcScr);
-
+  RefreshCanvas;
   SetStatus('Canvas flipped vertically.');
 end;
 
@@ -411,6 +674,12 @@ begin
   G_hdcTemp := CreateCompatibleDC(HdcScr);
   G_hBmpTemp := CreateCompatibleBitmap(HdcScr, G_CanvasW, G_CanvasH);
   G_hBmpOldTemp := SelectObject(G_hdcTemp, G_hBmpTemp);
+
+  G_hdcSel := CreateCompatibleDC(HdcScr);
+  G_hBmpOldSel := SelectObject(G_hdcSel, CreateCompatibleBitmap(HdcScr, 1, 1));
+
+  G_hdcClip := CreateCompatibleDC(HdcScr);
+  G_hBmpOldClip := SelectObject(G_hdcClip, CreateCompatibleBitmap(HdcScr, 1, 1));
 
   ReleaseDC(Wnd, HdcScr);
 
@@ -442,6 +711,20 @@ begin
     SelectObject(G_hdcTemp, G_hBmpOldTemp);
     DeleteObject(G_hBmpTemp);
     DeleteDC(G_hdcTemp);
+  end;
+  if G_hdcSel <> 0 then
+  begin
+    SelectObject(G_hdcSel, G_hBmpOldSel);
+    if G_hBmpSel <> 0 then DeleteObject(G_hBmpSel);
+    DeleteDC(G_hdcSel);
+    G_hdcSel := 0;
+  end;
+  if G_hdcClip <> 0 then
+  begin
+    SelectObject(G_hdcClip, G_hBmpOldClip);
+    if G_hBmpClip <> 0 then DeleteObject(G_hBmpClip);
+    DeleteDC(G_hdcClip);
+    G_hdcClip := 0;
   end;
 end;
 
@@ -1183,6 +1466,9 @@ var
   CoordBuf: array[0..16] of Char;
   TargetCol: TColorRef;
   FillBr, OldFillBr: HBRUSH;
+  Pt: TPoint;
+  Left, Top, Right, Bottom: Integer;
+  HdcScr: HDC;
 begin
   case Msg of
     WM_CREATE:
@@ -1207,8 +1493,7 @@ begin
     begin
       DC := BeginPaint(Wnd, PS);
       DrawModernUI(DC);
-      if G_hdcCanvas <> 0 then
-        BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
+      RenderCanvasToDC(DC);
       EndPaint(Wnd, PS);
       Result := 0;
     end;
@@ -1224,19 +1509,64 @@ begin
       Result := 1;
     end;
 
+    WM_KEYDOWN:
+    begin
+      if WParam = $2E { VK_DELETE } then
+      begin
+        DoDelete;
+        Result := 0;
+        Exit;
+      end;
+      if GetKeyState($11 { VK_CONTROL }) < 0 then
+      begin
+        case WParam of
+          Ord('Z'), Ord('z'): begin DoUndo; Result := 0; Exit; end;
+          Ord('X'), Ord('x'): begin DoCut; Result := 0; Exit; end;
+          Ord('C'), Ord('c'): begin DoCopy; Result := 0; Exit; end;
+          Ord('V'), Ord('v'): begin DoPaste; Result := 0; Exit; end;
+          Ord('A'), Ord('a'): begin DoSelectAll; Result := 0; Exit; end;
+          Ord('N'), Ord('n'): begin CommitSelection; ClearCanvas; Result := 0; Exit; end;
+          Ord('O'), Ord('o'): begin CommitSelection; DoFileOpen; Result := 0; Exit; end;
+          Ord('S'), Ord('s'): begin CommitSelection; DoFileSave; Result := 0; Exit; end;
+        end;
+      end;
+    end;
+
     WM_COMMAND:
     begin
       case WParam of
         IDM_NEW:
+        begin
+          CommitSelection;
           ClearCanvas;
+        end;
         IDM_OPEN:
+        begin
+          CommitSelection;
           DoFileOpen;
+        end;
         IDM_SAVE:
+        begin
+          CommitSelection;
           DoFileSave;
+        end;
         IDM_SAVEAS:
+        begin
+          CommitSelection;
           DoFileSaveAs;
+        end;
         IDM_UNDO:
           DoUndo;
+        IDM_CUT:
+          DoCut;
+        IDM_COPY:
+          DoCopy;
+        IDM_PASTE:
+          DoPaste;
+        IDM_DELETE:
+          DoDelete;
+        IDM_SELECTALL:
+          DoSelectAll;
         IDM_CLEAR:
           ClearCanvas;
         IDM_INVERT:
@@ -1276,6 +1606,8 @@ begin
         if (X >= G_Tools[I].R.left) and (X <= G_Tools[I].R.right) and
            (Y >= G_Tools[I].R.top) and (Y <= G_Tools[I].R.bottom) then
         begin
+          if I <> TOOL_SELECT then
+            CommitSelection;
           G_ActiveTool := I;
           G_PolyCount := 0;
           InvalidateRect(Wnd, nil, False);
@@ -1353,9 +1685,60 @@ begin
       if (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
-        SetCapture(Wnd);
         X := X - CANVAS_X;
         Y := Y - CANVAS_Y;
+
+        if G_ActiveTool = TOOL_SELECT then
+        begin
+          Pt.x := X; Pt.y := Y;
+          if G_HasSel and PtInRect(G_SelRc, Pt) then
+          begin
+            SetCapture(Wnd);
+            if not G_SelFloating then
+            begin
+              SaveUndoState;
+              HdcScr := GetDC(Wnd);
+              if G_hBmpSel <> 0 then
+              begin
+                SelectObject(G_hdcSel, G_hBmpOldSel);
+                DeleteObject(G_hBmpSel);
+              end;
+              G_hBmpSel := CreateCompatibleBitmap(HdcScr, G_SelW, G_SelH);
+              ReleaseDC(Wnd, HdcScr);
+              SelectObject(G_hdcSel, G_hBmpSel);
+              BitBlt(G_hdcSel, 0, 0, G_SelW, G_SelH, G_hdcCanvas, G_SelRc.left, G_SelRc.top, SRCCOPY);
+
+              if not (GetKeyState($11 { VK_CONTROL }) < 0) then
+              begin
+                FillBr := CreateSolidBrush(G_ColSecondary);
+                FillRect(G_hdcCanvas, G_SelRc, FillBr);
+                DeleteObject(FillBr);
+              end;
+              G_SelFloating := True;
+            end;
+            G_SelDragging := True;
+            G_SelAnchorX := X - G_SelRc.left;
+            G_SelAnchorY := Y - G_SelRc.top;
+            SetStatus('Moving selection. Release to place.');
+            Result := 0;
+            Exit;
+          end
+          else
+          begin
+            CommitSelection;
+            SetCapture(Wnd);
+            G_IsDragging := True;
+            G_StartX := X; G_CurX := X;
+            G_StartY := Y; G_CurY := Y;
+            SetStatus('Select: Drag cursor to define region.');
+            Result := 0;
+            Exit;
+          end;
+        end
+        else
+          CommitSelection;
+
+        SetCapture(Wnd);
 
         case G_ActiveTool of
           TOOL_PENCIL, TOOL_BRUSH, TOOL_AIRBRUSH, TOOL_ERASER, TOOL_COLOR_ERASER:
@@ -1471,7 +1854,7 @@ begin
             end;
           end;
 
-          TOOL_LINE, TOOL_RECT, TOOL_ROUNDRECT, TOOL_ELLIPSE, TOOL_SELECT:
+          TOOL_LINE, TOOL_RECT, TOOL_ROUNDRECT, TOOL_ELLIPSE:
           begin
             SaveUndoState;
             G_IsDragging := True;
@@ -1557,6 +1940,17 @@ begin
         SetStatus(StatusCoord);
       end;
 
+      if G_SelDragging then
+      begin
+        G_SelRc.left := (X - CANVAS_X) - G_SelAnchorX;
+        G_SelRc.top  := (Y - CANVAS_Y) - G_SelAnchorY;
+        G_SelRc.right := G_SelRc.left + G_SelW;
+        G_SelRc.bottom := G_SelRc.top + G_SelH;
+        RefreshCanvas;
+        Result := 0;
+        Exit;
+      end;
+
       if G_IsDrawing and (X >= CANVAS_X) and (X < CANVAS_X + G_CanvasW) and
          (Y >= CANVAS_Y) and (Y < CANVAS_Y + G_CanvasH) then
       begin
@@ -1629,17 +2023,49 @@ begin
         G_IsDrawing := False;
       end;
 
+      if G_SelDragging then
+      begin
+        G_SelDragging := False;
+        RefreshCanvas;
+        SetStatus('Selection moved. Drag to move again, or click outside to stamp.');
+        Result := 0;
+        Exit;
+      end;
+
       if G_IsDragging then
       begin
         G_IsDragging := False;
-        ApplyDrawShape(G_hdcCanvas, G_ActiveTool, G_ShapeStyle,
-                       G_StartX, G_StartY, G_CurX, G_CurY,
-                       G_ColPrimary, G_ColSecondary, G_BrushSize);
-
-        DC := GetDC(Wnd);
-        BitBlt(DC, CANVAS_X, CANVAS_Y, G_CanvasW, G_CanvasH, G_hdcCanvas, 0, 0, SRCCOPY);
-        ReleaseDC(Wnd, DC);
-        SetStatus('Shape drawn.');
+        if G_ActiveTool = TOOL_SELECT then
+        begin
+          if G_StartX < G_CurX then begin Left := G_StartX; Right := G_CurX; end else begin Left := G_CurX; Right := G_StartX; end;
+          if G_StartY < G_CurY then begin Top := G_StartY; Bottom := G_CurY; end else begin Top := G_CurY; Bottom := G_StartY; end;
+          if (Right - Left > 2) and (Bottom - Top > 2) then
+          begin
+            G_HasSel := True;
+            G_SelFloating := False;
+            G_SelRc.left := Left;
+            G_SelRc.top := Top;
+            G_SelRc.right := Right;
+            G_SelRc.bottom := Bottom;
+            G_SelW := Right - Left;
+            G_SelH := Bottom - Top;
+            SetStatus('Area selected. Drag inside to move, Ctrl+C to copy, Del to clear.');
+          end
+          else
+          begin
+            G_HasSel := False;
+            SetStatus('Ready.');
+          end;
+          RefreshCanvas;
+        end
+        else
+        begin
+          ApplyDrawShape(G_hdcCanvas, G_ActiveTool, G_ShapeStyle,
+                         G_StartX, G_StartY, G_CurX, G_CurY,
+                         G_ColPrimary, G_ColSecondary, G_BrushSize);
+          RefreshCanvas;
+          SetStatus('Shape drawn.');
+        end;
       end;
       Result := 0;
     end;
@@ -1692,12 +2118,18 @@ begin
   AppendMenu(HMenu, MF_POPUP, HSubFile, '&File');
 
   HSubEdit := CreatePopupMenu;
-  AppendMenu(HSubEdit, MF_STRING, IDM_UNDO,   '&Undo'#9'Ctrl+Z');
+  AppendMenu(HSubEdit, MF_STRING, IDM_UNDO,      '&Undo'#9'Ctrl+Z');
   AppendMenu(HSubEdit, MF_SEPARATOR, 0, nil);
-  AppendMenu(HSubEdit, MF_STRING, IDM_CLEAR,  '&Clear Canvas');
-  AppendMenu(HSubEdit, MF_STRING, IDM_INVERT, '&Invert Colors');
-  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPH,  'Flip &Horizontal');
-  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPV,  'Flip &Vertical');
+  AppendMenu(HSubEdit, MF_STRING, IDM_CUT,       'Cu&t'#9'Ctrl+X');
+  AppendMenu(HSubEdit, MF_STRING, IDM_COPY,      '&Copy'#9'Ctrl+C');
+  AppendMenu(HSubEdit, MF_STRING, IDM_PASTE,     '&Paste'#9'Ctrl+V');
+  AppendMenu(HSubEdit, MF_STRING, IDM_DELETE,    '&Delete'#9'Del');
+  AppendMenu(HSubEdit, MF_STRING, IDM_SELECTALL, 'Select &All'#9'Ctrl+A');
+  AppendMenu(HSubEdit, MF_SEPARATOR, 0, nil);
+  AppendMenu(HSubEdit, MF_STRING, IDM_CLEAR,     '&Clear Canvas');
+  AppendMenu(HSubEdit, MF_STRING, IDM_INVERT,    '&Invert Colors');
+  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPH,     'Flip &Horizontal');
+  AppendMenu(HSubEdit, MF_STRING, IDM_FLIPV,     'Flip &Vertical');
   AppendMenu(HMenu, MF_POPUP, HSubEdit, '&Edit');
 
   HSubHelp := CreatePopupMenu;

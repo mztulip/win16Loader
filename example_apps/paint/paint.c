@@ -49,11 +49,17 @@
 #define IDM_SAVEAS    1004
 #define IDM_EXIT      1005
 
+#define IDM_CUT       1006
+#define IDM_COPY      1007
+#define IDM_PASTE     1008
+#define IDM_DELETE    1009
+
 #define IDM_UNDO      1010
 #define IDM_CLEAR     1011
 #define IDM_INVERT    1012
 #define IDM_FLIPH     1013
 #define IDM_FLIPV     1014
+#define IDM_SELECTALL 1015
 
 #define IDM_ABOUT     1020
 
@@ -108,6 +114,24 @@ static BOOL    g_can_undo = FALSE;
 static HDC     g_hdc_temp = NULL;
 static HBITMAP g_hbmp_temp = NULL;
 static HBITMAP g_hbmp_old_temp = NULL;
+
+/* Selection State */
+static BOOL    g_has_sel = FALSE;
+static RECT    g_sel_rc;
+static int     g_sel_w = 0, g_sel_h = 0;
+static HDC     g_hdc_sel = NULL;
+static HBITMAP g_hbmp_sel = NULL;
+static HBITMAP g_hbmp_old_sel = NULL;
+static BOOL    g_sel_floating = FALSE;
+static BOOL    g_sel_dragging = FALSE;
+static int     g_sel_anchor_x = 0, g_sel_anchor_y = 0;
+
+/* Clipboard Buffer */
+static HDC     g_hdc_clip = NULL;
+static HBITMAP g_hbmp_clip = NULL;
+static HBITMAP g_hbmp_old_clip = NULL;
+static int     g_clip_w = 0, g_clip_h = 0;
+static BOOL    g_has_clip = FALSE;
 
 /* Tool States */
 static int      g_active_tool = TOOL_PENCIL;
@@ -228,19 +252,224 @@ static void save_undo_state(void)
     }
 }
 
+static void render_canvas_to_dc(HDC target_dc)
+{
+    HPEN hp, old_pen;
+    HBRUSH old_br;
+
+    if (!g_hdc_canvas || !g_hdc_temp) return;
+
+    /* Copy base canvas to temp composite buffer */
+    BitBlt(g_hdc_temp, 0, 0, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+
+    /* If selection is floating, blit it on top */
+    if (g_has_sel && g_sel_floating && g_hdc_sel && g_hbmp_sel) {
+        BitBlt(g_hdc_temp, g_sel_rc.left, g_sel_rc.top, g_sel_w, g_sel_h, g_hdc_sel, 0, 0, SRCCOPY);
+    }
+
+    /* If selection is active, draw dotted focus border */
+    if (g_has_sel) {
+        hp = CreatePen(PS_DOT, 1, RGB(0, 0, 0));
+        old_pen = (HPEN)SelectObject(g_hdc_temp, hp);
+        old_br = (HBRUSH)SelectObject(g_hdc_temp, GetStockObject(NULL_BRUSH));
+        Rectangle(g_hdc_temp, g_sel_rc.left, g_sel_rc.top, g_sel_rc.right, g_sel_rc.bottom);
+        SelectObject(g_hdc_temp, old_br);
+        SelectObject(g_hdc_temp, old_pen);
+        DeleteObject(hp);
+    }
+
+    /* Blit composite temp buffer to screen window */
+    BitBlt(target_dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_temp, 0, 0, SRCCOPY);
+}
+
+static void refresh_canvas(void)
+{
+    if (g_mainwnd) {
+        HDC dc = GetDC(g_mainwnd);
+        if (dc) {
+            render_canvas_to_dc(dc);
+            ReleaseDC(g_mainwnd, dc);
+        }
+    }
+}
+
+static void commit_selection(void)
+{
+    if (!g_has_sel) return;
+
+    if (g_sel_floating && g_hdc_sel && g_hbmp_sel && g_hdc_canvas) {
+        BitBlt(g_hdc_canvas, g_sel_rc.left, g_sel_rc.top, g_sel_w, g_sel_h, g_hdc_sel, 0, 0, SRCCOPY);
+        SelectObject(g_hdc_sel, g_hbmp_old_sel);
+        DeleteObject(g_hbmp_sel);
+        g_hbmp_sel = NULL;
+        g_sel_floating = FALSE;
+    }
+    g_has_sel = FALSE;
+    g_sel_dragging = FALSE;
+    refresh_canvas();
+}
+
+static void do_copy(void)
+{
+    HDC scr;
+    HBITMAP hbmp;
+
+    if (!g_mainwnd) return;
+    scr = GetDC(g_mainwnd);
+
+    if (g_has_sel) {
+        hbmp = CreateCompatibleBitmap(scr, g_sel_w, g_sel_h);
+        if (g_hbmp_clip) DeleteObject(g_hbmp_clip);
+        g_hbmp_clip = hbmp;
+        SelectObject(g_hdc_clip, g_hbmp_clip);
+        g_clip_w = g_sel_w;
+        g_clip_h = g_sel_h;
+        g_has_clip = TRUE;
+
+        if (g_sel_floating && g_hdc_sel) {
+            BitBlt(g_hdc_clip, 0, 0, g_sel_w, g_sel_h, g_hdc_sel, 0, 0, SRCCOPY);
+        } else {
+            BitBlt(g_hdc_clip, 0, 0, g_sel_w, g_sel_h, g_hdc_canvas, g_sel_rc.left, g_sel_rc.top, SRCCOPY);
+        }
+        set_status("Selection copied to clipboard.");
+    } else {
+        /* Copy whole canvas */
+        hbmp = CreateCompatibleBitmap(scr, g_canvas_w, g_canvas_h);
+        if (g_hbmp_clip) DeleteObject(g_hbmp_clip);
+        g_hbmp_clip = hbmp;
+        SelectObject(g_hdc_clip, g_hbmp_clip);
+        g_clip_w = g_canvas_w;
+        g_clip_h = g_canvas_h;
+        g_has_clip = TRUE;
+        BitBlt(g_hdc_clip, 0, 0, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+        set_status("Entire canvas copied to clipboard.");
+    }
+    ReleaseDC(g_mainwnd, scr);
+}
+
+static void do_cut(void)
+{
+    HBRUSH br;
+    if (!g_has_sel) {
+        set_status("Nothing selected to cut.");
+        return;
+    }
+    do_copy();
+    save_undo_state();
+    if (!g_sel_floating) {
+        br = CreateSolidBrush(g_col_secondary);
+        FillRect(g_hdc_canvas, &g_sel_rc, br);
+        DeleteObject(br);
+    } else {
+        if (g_hbmp_sel) {
+            SelectObject(g_hdc_sel, g_hbmp_old_sel);
+            DeleteObject(g_hbmp_sel);
+            g_hbmp_sel = NULL;
+        }
+        g_sel_floating = FALSE;
+    }
+    g_has_sel = FALSE;
+    g_sel_dragging = FALSE;
+    refresh_canvas();
+    set_status("Selection cut to clipboard.");
+}
+
+static void do_paste(void)
+{
+    HDC scr;
+
+    if (!g_has_clip || !g_mainwnd) {
+        set_status("Clipboard is empty.");
+        return;
+    }
+    commit_selection();
+    save_undo_state();
+
+    scr = GetDC(g_mainwnd);
+    if (g_hbmp_sel) {
+        SelectObject(g_hdc_sel, g_hbmp_old_sel);
+        DeleteObject(g_hbmp_sel);
+    }
+    g_hbmp_sel = CreateCompatibleBitmap(scr, g_clip_w, g_clip_h);
+    ReleaseDC(g_mainwnd, scr);
+
+    SelectObject(g_hdc_sel, g_hbmp_sel);
+    BitBlt(g_hdc_sel, 0, 0, g_clip_w, g_clip_h, g_hdc_clip, 0, 0, SRCCOPY);
+
+    g_has_sel = TRUE;
+    g_sel_floating = TRUE;
+    g_sel_w = g_clip_w;
+    g_sel_h = g_clip_h;
+    g_sel_rc.left = 10;
+    g_sel_rc.top = 10;
+    g_sel_rc.right = 10 + g_sel_w;
+    g_sel_rc.bottom = 10 + g_sel_h;
+    g_active_tool = TOOL_SELECT;
+
+    InvalidateRect(g_mainwnd, NULL, FALSE);
+    refresh_canvas();
+    set_status("Pasted from clipboard. Drag inside to move, click outside to stamp.");
+}
+
+static void do_delete(void)
+{
+    HBRUSH br;
+    if (!g_has_sel) return;
+    save_undo_state();
+    if (!g_sel_floating) {
+        br = CreateSolidBrush(g_col_secondary);
+        FillRect(g_hdc_canvas, &g_sel_rc, br);
+        DeleteObject(br);
+    } else {
+        if (g_hbmp_sel) {
+            SelectObject(g_hdc_sel, g_hbmp_old_sel);
+            DeleteObject(g_hbmp_sel);
+            g_hbmp_sel = NULL;
+        }
+        g_sel_floating = FALSE;
+    }
+    g_has_sel = FALSE;
+    g_sel_dragging = FALSE;
+    refresh_canvas();
+    set_status("Selection cleared.");
+}
+
+static void do_select_all(void)
+{
+    commit_selection();
+    g_has_sel = TRUE;
+    g_sel_floating = FALSE;
+    g_sel_rc.left = 0;
+    g_sel_rc.top = 0;
+    g_sel_rc.right = g_canvas_w;
+    g_sel_rc.bottom = g_canvas_h;
+    g_sel_w = g_canvas_w;
+    g_sel_h = g_canvas_h;
+    g_active_tool = TOOL_SELECT;
+    InvalidateRect(g_mainwnd, NULL, FALSE);
+    refresh_canvas();
+    set_status("Entire canvas selected.");
+}
+
 static void do_undo(void)
 {
-    HDC dc;
     if (!g_can_undo) {
         MessageBox(g_mainwnd, "No action available to undo.", "Undo", MB_OK | MB_ICONINFORMATION);
         return;
     }
+    if (g_has_sel) {
+        if (g_sel_floating && g_hbmp_sel) {
+            SelectObject(g_hdc_sel, g_hbmp_old_sel);
+            DeleteObject(g_hbmp_sel);
+            g_hbmp_sel = NULL;
+        }
+        g_has_sel = FALSE;
+        g_sel_floating = FALSE;
+        g_sel_dragging = FALSE;
+    }
     BitBlt(g_hdc_canvas, 0, 0, g_canvas_w, g_canvas_h, g_hdc_undo, 0, 0, SRCCOPY);
     g_can_undo = FALSE;
-
-    dc = GetDC(g_mainwnd);
-    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-    ReleaseDC(g_mainwnd, dc);
+    refresh_canvas();
     set_status("Undid last action.");
 }
 
@@ -248,27 +477,34 @@ static void clear_canvas(void)
 {
     HBRUSH br;
     RECT r;
-    HDC dc;
+    if (g_has_sel) {
+        do_delete();
+        return;
+    }
     save_undo_state();
     br = CreateSolidBrush(g_col_secondary);
     SetRect(&r, 0, 0, g_canvas_w, g_canvas_h);
     FillRect(g_hdc_canvas, &r, br);
     DeleteObject(br);
-
-    dc = GetDC(g_mainwnd);
-    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-    ReleaseDC(g_mainwnd, dc);
+    refresh_canvas();
     set_status("Canvas cleared with background color.");
 }
 
 static void invert_canvas(void)
 {
-    HDC dc;
     save_undo_state();
+    if (g_has_sel) {
+        if (g_sel_floating && g_hdc_sel) {
+            PatBlt(g_hdc_sel, 0, 0, g_sel_w, g_sel_h, DSTINVERT);
+        } else {
+            PatBlt(g_hdc_canvas, g_sel_rc.left, g_sel_rc.top, g_sel_w, g_sel_h, DSTINVERT);
+        }
+        refresh_canvas();
+        set_status("Selection colors inverted.");
+        return;
+    }
     PatBlt(g_hdc_canvas, 0, 0, g_canvas_w, g_canvas_h, DSTINVERT);
-    dc = GetDC(g_mainwnd);
-    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-    ReleaseDC(g_mainwnd, dc);
+    refresh_canvas();
     set_status("Colors inverted.");
 }
 
@@ -276,8 +512,20 @@ static void flip_canvas_h(void)
 {
     int x, y;
     COLORREF cl, cr;
-    HDC dc;
     save_undo_state();
+    if (g_has_sel && g_sel_floating && g_hdc_sel) {
+        for (y = 0; y < g_sel_h; y++) {
+            for (x = 0; x < g_sel_w / 2; x++) {
+                cl = GetPixel(g_hdc_sel, x, y);
+                cr = GetPixel(g_hdc_sel, g_sel_w - 1 - x, y);
+                SetPixel(g_hdc_sel, x, y, cr);
+                SetPixel(g_hdc_sel, g_sel_w - 1 - x, y, cl);
+            }
+        }
+        refresh_canvas();
+        set_status("Selection flipped horizontally.");
+        return;
+    }
     for (y = 0; y < g_canvas_h; y++) {
         for (x = 0; x < g_canvas_w / 2; x++) {
             cl = GetPixel(g_hdc_canvas, x, y);
@@ -286,9 +534,7 @@ static void flip_canvas_h(void)
             SetPixel(g_hdc_canvas, g_canvas_w - 1 - x, y, cl);
         }
     }
-    dc = GetDC(g_mainwnd);
-    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-    ReleaseDC(g_mainwnd, dc);
+    refresh_canvas();
     set_status("Canvas flipped horizontally.");
 }
 
@@ -296,8 +542,20 @@ static void flip_canvas_v(void)
 {
     int x, y;
     COLORREF ct, cb;
-    HDC dc;
     save_undo_state();
+    if (g_has_sel && g_sel_floating && g_hdc_sel) {
+        for (y = 0; y < g_sel_h / 2; y++) {
+            for (x = 0; x < g_sel_w; x++) {
+                ct = GetPixel(g_hdc_sel, x, y);
+                cb = GetPixel(g_hdc_sel, x, g_sel_h - 1 - y);
+                SetPixel(g_hdc_sel, x, y, cb);
+                SetPixel(g_hdc_sel, x, g_sel_h - 1 - y, ct);
+            }
+        }
+        refresh_canvas();
+        set_status("Selection flipped vertically.");
+        return;
+    }
     for (y = 0; y < g_canvas_h / 2; y++) {
         for (x = 0; x < g_canvas_w; x++) {
             ct = GetPixel(g_hdc_canvas, x, y);
@@ -306,9 +564,7 @@ static void flip_canvas_v(void)
             SetPixel(g_hdc_canvas, x, g_canvas_h - 1 - y, ct);
         }
     }
-    dc = GetDC(g_mainwnd);
-    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-    ReleaseDC(g_mainwnd, dc);
+    refresh_canvas();
     set_status("Canvas flipped vertically.");
 }
 
@@ -330,6 +586,12 @@ static void init_canvas_buffers(HWND hwnd)
     g_hdc_temp = CreateCompatibleDC(scr);
     g_hbmp_temp = CreateCompatibleBitmap(scr, g_canvas_w, g_canvas_h);
     g_hbmp_old_temp = (HBITMAP)SelectObject(g_hdc_temp, g_hbmp_temp);
+
+    g_hdc_sel = CreateCompatibleDC(scr);
+    g_hbmp_old_sel = (HBITMAP)SelectObject(g_hdc_sel, CreateCompatibleBitmap(scr, 1, 1));
+
+    g_hdc_clip = CreateCompatibleDC(scr);
+    g_hbmp_old_clip = (HBITMAP)SelectObject(g_hdc_clip, CreateCompatibleBitmap(scr, 1, 1));
 
     ReleaseDC(hwnd, scr);
 
@@ -357,6 +619,18 @@ static void destroy_canvas_buffers(void)
         SelectObject(g_hdc_temp, g_hbmp_old_temp);
         DeleteObject(g_hbmp_temp);
         DeleteDC(g_hdc_temp);
+    }
+    if (g_hdc_sel) {
+        SelectObject(g_hdc_sel, g_hbmp_old_sel);
+        if (g_hbmp_sel) DeleteObject(g_hbmp_sel);
+        DeleteDC(g_hdc_sel);
+        g_hdc_sel = NULL;
+    }
+    if (g_hdc_clip) {
+        SelectObject(g_hdc_clip, g_hbmp_old_clip);
+        if (g_hbmp_clip) DeleteObject(g_hbmp_clip);
+        DeleteDC(g_hdc_clip);
+        g_hdc_clip = NULL;
     }
 }
 
@@ -737,6 +1011,7 @@ static void do_file_save_as(void)
 
 static void do_file_save(void)
 {
+    commit_selection();
     if (g_curfile[0])
         save_canvas_to_bmp(g_curfile);
     else
@@ -993,8 +1268,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case WM_PAINT:
         dc = BeginPaint(hwnd, &ps);
         draw_modern_ui(dc);
-        if (g_hdc_canvas)
-            BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+        render_canvas_to_dc(dc);
         EndPaint(hwnd, &ps);
         return 0;
 
@@ -1005,18 +1279,45 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     case WM_ERASEBKGND:
         return 1;
 
+    case WM_KEYDOWN:
+        {
+            BOOL ctrl = (GetKeyState(VK_CONTROL) < 0);
+            if (wparam == VK_DELETE) {
+                do_delete();
+                return 0;
+            }
+            if (ctrl) {
+                switch (wparam) {
+                case 'Z': case 'z': do_undo(); return 0;
+                case 'X': case 'x': do_cut(); return 0;
+                case 'C': case 'c': do_copy(); return 0;
+                case 'V': case 'v': do_paste(); return 0;
+                case 'A': case 'a': do_select_all(); return 0;
+                case 'N': case 'n': commit_selection(); clear_canvas(); return 0;
+                case 'O': case 'o': commit_selection(); do_file_open(); return 0;
+                case 'S': case 's': commit_selection(); do_file_save(); return 0;
+                }
+            }
+        }
+        break;
+
     case WM_COMMAND:
         switch (wparam) {
-        case IDM_NEW:    clear_canvas(); break;
-        case IDM_OPEN:   do_file_open(); break;
-        case IDM_SAVE:   do_file_save(); break;
-        case IDM_SAVEAS: do_file_save_as(); break;
-        case IDM_UNDO:   do_undo(); break;
-        case IDM_CLEAR:  clear_canvas(); break;
-        case IDM_INVERT: invert_canvas(); break;
-        case IDM_FLIPH:  flip_canvas_h(); break;
-        case IDM_FLIPV:  flip_canvas_v(); break;
-        case IDM_EXIT:   SendMessage(hwnd, WM_CLOSE, 0, 0); break;
+        case IDM_NEW:       commit_selection(); clear_canvas(); break;
+        case IDM_OPEN:      commit_selection(); do_file_open(); break;
+        case IDM_SAVE:      commit_selection(); do_file_save(); break;
+        case IDM_SAVEAS:    commit_selection(); do_file_save_as(); break;
+        case IDM_UNDO:      do_undo(); break;
+        case IDM_CUT:       do_cut(); break;
+        case IDM_COPY:      do_copy(); break;
+        case IDM_PASTE:     do_paste(); break;
+        case IDM_DELETE:    do_delete(); break;
+        case IDM_SELECTALL: do_select_all(); break;
+        case IDM_CLEAR:     clear_canvas(); break;
+        case IDM_INVERT:    invert_canvas(); break;
+        case IDM_FLIPH:     flip_canvas_h(); break;
+        case IDM_FLIPV:     flip_canvas_v(); break;
+        case IDM_EXIT:      SendMessage(hwnd, WM_CLOSE, 0, 0); break;
         case IDM_ABOUT:
             MessageBox(
                 hwnd,
@@ -1044,6 +1345,9 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         for (i = 1; i <= TOOL_COUNT; i++) {
             if (x >= g_tools[i].r.left && x <= g_tools[i].r.right &&
                 y >= g_tools[i].r.top && y <= g_tools[i].r.bottom) {
+                if (i != TOOL_SELECT) {
+                    commit_selection();
+                }
                 g_active_tool = i;
                 g_poly_count = 0;
                 InvalidateRect(hwnd, NULL, FALSE);
@@ -1111,9 +1415,56 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         /* 6. Canvas Area */
         if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
             y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
-            SetCapture(hwnd);
             x -= CANVAS_X;
             y -= CANVAS_Y;
+
+            if (g_active_tool == TOOL_SELECT) {
+                POINT pt;
+                pt.x = x; pt.y = y;
+                if (g_has_sel && PtInRect(&g_sel_rc, pt)) {
+                    /* Drag existing selection */
+                    SetCapture(hwnd);
+                    if (!g_sel_floating) {
+                        HDC scr;
+                        save_undo_state();
+                        scr = GetDC(hwnd);
+                        if (g_hbmp_sel) {
+                            SelectObject(g_hdc_sel, g_hbmp_old_sel);
+                            DeleteObject(g_hbmp_sel);
+                        }
+                        g_hbmp_sel = CreateCompatibleBitmap(scr, g_sel_w, g_sel_h);
+                        ReleaseDC(hwnd, scr);
+                        SelectObject(g_hdc_sel, g_hbmp_sel);
+                        BitBlt(g_hdc_sel, 0, 0, g_sel_w, g_sel_h, g_hdc_canvas, g_sel_rc.left, g_sel_rc.top, SRCCOPY);
+
+                        /* If Ctrl is NOT pressed, clear old spot with secondary color */
+                        if (!(GetKeyState(VK_CONTROL) < 0)) {
+                            HBRUSH br = CreateSolidBrush(g_col_secondary);
+                            FillRect(g_hdc_canvas, &g_sel_rc, br);
+                            DeleteObject(br);
+                        }
+                        g_sel_floating = TRUE;
+                    }
+                    g_sel_dragging = TRUE;
+                    g_sel_anchor_x = x - g_sel_rc.left;
+                    g_sel_anchor_y = y - g_sel_rc.top;
+                    set_status("Moving selection. Release to place.");
+                    return 0;
+                } else {
+                    /* Clicked outside: commit previous selection, start new rectangle */
+                    commit_selection();
+                    SetCapture(hwnd);
+                    g_is_dragging = TRUE;
+                    g_start_x = g_cur_x = x;
+                    g_start_y = g_cur_y = y;
+                    set_status("Select: Drag cursor to define region.");
+                    return 0;
+                }
+            } else {
+                commit_selection();
+            }
+
+            SetCapture(hwnd);
 
             switch (g_active_tool) {
             case TOOL_PENCIL:
@@ -1214,7 +1565,6 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             case TOOL_RECT:
             case TOOL_ROUNDRECT:
             case TOOL_ELLIPSE:
-            case TOOL_SELECT:
                 save_undo_state();
                 g_is_dragging = TRUE;
                 g_start_x = g_cur_x = x;
@@ -1278,6 +1628,17 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             set_status(coord_buf);
         }
 
+        if (g_sel_dragging) {
+            int cx_pt = x - CANVAS_X;
+            int cy_pt = y - CANVAS_Y;
+            g_sel_rc.left = cx_pt - g_sel_anchor_x;
+            g_sel_rc.top  = cy_pt - g_sel_anchor_y;
+            g_sel_rc.right = g_sel_rc.left + g_sel_w;
+            g_sel_rc.bottom = g_sel_rc.top + g_sel_h;
+            refresh_canvas();
+            return 0;
+        }
+
         if (g_is_drawing && x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
             y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
             x -= CANVAS_X;
@@ -1337,15 +1698,42 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         if (g_is_drawing)
             g_is_drawing = FALSE;
 
+        if (g_sel_dragging) {
+            g_sel_dragging = FALSE;
+            refresh_canvas();
+            set_status("Selection moved. Drag to move again, or click outside to stamp.");
+            return 0;
+        }
+
         if (g_is_dragging) {
             g_is_dragging = FALSE;
-            apply_draw_shape(g_hdc_canvas, g_active_tool, g_shape_style,
-                             g_start_x, g_start_y, g_cur_x, g_cur_y,
-                             g_col_primary, g_col_secondary, g_brush_size);
-            dc = GetDC(hwnd);
-            BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
-            ReleaseDC(hwnd, dc);
-            set_status("Shape drawn.");
+            if (g_active_tool == TOOL_SELECT) {
+                int l = (g_start_x < g_cur_x) ? g_start_x : g_cur_x;
+                int r = (g_start_x < g_cur_x) ? g_cur_x : g_start_x;
+                int t = (g_start_y < g_cur_y) ? g_start_y : g_cur_y;
+                int b = (g_start_y < g_cur_y) ? g_cur_y : g_start_y;
+                if (r - l > 2 && b - t > 2) {
+                    g_has_sel = TRUE;
+                    g_sel_floating = FALSE;
+                    g_sel_rc.left = l;
+                    g_sel_rc.top = t;
+                    g_sel_rc.right = r;
+                    g_sel_rc.bottom = b;
+                    g_sel_w = r - l;
+                    g_sel_h = b - t;
+                    set_status("Area selected. Drag inside to move, Ctrl+C to copy, Del to clear.");
+                } else {
+                    g_has_sel = FALSE;
+                    set_status("Ready.");
+                }
+                refresh_canvas();
+            } else {
+                apply_draw_shape(g_hdc_canvas, g_active_tool, g_shape_style,
+                                 g_start_x, g_start_y, g_cur_x, g_cur_y,
+                                 g_col_primary, g_col_secondary, g_brush_size);
+                refresh_canvas();
+                set_status("Shape drawn.");
+            }
         }
         return 0;
 
@@ -1387,12 +1775,18 @@ static void create_main_menu(HWND hwnd)
     AppendMenu(hmenu, MF_POPUP, hfile, "&File");
 
     hedit = CreatePopupMenu();
-    AppendMenu(hedit, MF_STRING, IDM_UNDO,   "&Undo\tCtrl+Z");
+    AppendMenu(hedit, MF_STRING, IDM_UNDO,      "&Undo\tCtrl+Z");
     AppendMenu(hedit, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hedit, MF_STRING, IDM_CLEAR,  "&Clear Canvas");
-    AppendMenu(hedit, MF_STRING, IDM_INVERT, "&Invert Colors");
-    AppendMenu(hedit, MF_STRING, IDM_FLIPH,  "Flip &Horizontal");
-    AppendMenu(hedit, MF_STRING, IDM_FLIPV,  "Flip &Vertical");
+    AppendMenu(hedit, MF_STRING, IDM_CUT,       "Cu&t\tCtrl+X");
+    AppendMenu(hedit, MF_STRING, IDM_COPY,      "&Copy\tCtrl+C");
+    AppendMenu(hedit, MF_STRING, IDM_PASTE,     "&Paste\tCtrl+V");
+    AppendMenu(hedit, MF_STRING, IDM_DELETE,    "&Delete\tDel");
+    AppendMenu(hedit, MF_STRING, IDM_SELECTALL, "Select &All\tCtrl+A");
+    AppendMenu(hedit, MF_SEPARATOR, 0, NULL);
+    AppendMenu(hedit, MF_STRING, IDM_CLEAR,     "&Clear Canvas");
+    AppendMenu(hedit, MF_STRING, IDM_INVERT,    "&Invert Colors");
+    AppendMenu(hedit, MF_STRING, IDM_FLIPH,     "Flip &Horizontal");
+    AppendMenu(hedit, MF_STRING, IDM_FLIPV,     "Flip &Vertical");
     AppendMenu(hmenu, MF_POPUP, hedit, "&Edit");
 
     hhelp = CreatePopupMenu();
