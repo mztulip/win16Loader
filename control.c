@@ -6,6 +6,14 @@
  *   control.exe (okno glowne)
  */
 #include <windows.h>
+#include <dos.h>
+
+#ifndef FP_SEG
+#define FP_SEG(p) ((WORD)((DWORD)(void __far *)(p) >> 16))
+#endif
+#ifndef FP_OFF
+#define FP_OFF(p) ((WORD)(DWORD)(void __far *)(p))
+#endif
 
 #define IDC_OK              1
 #define IDC_CANCEL          2
@@ -146,14 +154,70 @@ static void dos_set_time(int hour, int min, int sec)
 /* ============================================================
  * Dialog: Ustawienia Pulpitu (Desktop Properties)
  * ============================================================ */
-static const char * const g_wp_list[] = {
-    "(None)",
-    "CHESS.BMP",
-    "CASTLE.BMP",
-    "ZIGZAG.BMP",
-    "SHUTDOWN.BMP"
-};
-#define NUM_WP 5
+#pragma pack(1)
+typedef struct {
+    char reserved[21];
+    BYTE attr;
+    WORD time;
+    WORD date;
+    DWORD size;
+    char name[13];
+} DOS_DTA;
+#pragma pack()
+
+static void populate_wallpapers(HWND hwndList)
+{
+    static DOS_DTA dta;
+    char pattern[] = "C:\\WINDOWS\\*.BMP";
+    WORD seg_dta = FP_SEG(&dta);
+    WORD off_dta = FP_OFF(&dta);
+    WORD seg_pat = FP_SEG(pattern);
+    WORD off_pat = FP_OFF(pattern);
+    int err;
+
+    SendMessage(hwndList, LB_RESETCONTENT, 0, 0);
+    SendMessage(hwndList, LB_ADDSTRING, 0, (LPARAM)(LPCSTR)"(None)");
+
+    /* Ustaw DTA (AH=1Ah) */
+    _asm {
+        push ds
+        mov ax, seg_dta
+        mov ds, ax
+        mov dx, off_dta
+        mov ah, 1Ah
+        int 21h
+        pop ds
+    }
+
+    /* FindFirst (AH=4Eh) */
+    _asm {
+        push ds
+        mov ax, seg_pat
+        mov ds, ax
+        mov dx, off_pat
+        mov cx, 0
+        mov ah, 4Eh
+        int 21h
+        mov err, 0
+        jnc ok1
+        mov err, ax
+    ok1:
+        pop ds
+    }
+
+    while (!err) {
+        SendMessage(hwndList, LB_ADDSTRING, 0, (LPARAM)(LPCSTR)dta.name);
+        /* FindNext (AH=4Fh) */
+        _asm {
+            mov ah, 4Fh
+            int 21h
+            mov err, 0
+            jnc ok2
+            mov err, ax
+        ok2:
+        }
+    }
+}
 
 static const char * const g_pat_list[] = {
     "(None)",
@@ -217,10 +281,9 @@ LRESULT CALLBACK __export DesktopDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                      204, 230, 80, 24, hwnd, (HMENU)IDC_CANCEL, g_hinst, NULL);
 
         /* Wypelnij listbox tapet */
-        for (i = 0; i < NUM_WP; i++) {
-            SendDlgItemMessage(hwnd, IDC_DESK_WPLIST, LB_ADDSTRING, 0, (LPARAM)(LPCSTR)g_wp_list[i]);
-            if (lstrcmpi(cur_wp, g_wp_list[i]) == 0) sel_wp = i;
-        }
+        populate_wallpapers(GetDlgItem(hwnd, IDC_DESK_WPLIST));
+        sel_wp = (int)SendDlgItemMessage(hwnd, IDC_DESK_WPLIST, LB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)(LPCSTR)cur_wp);
+        if (sel_wp < 0) sel_wp = 0;
         SendDlgItemMessage(hwnd, IDC_DESK_WPLIST, LB_SETCURSEL, sel_wp, 0);
 
         /* Wypelnij listbox wzorow */
@@ -255,13 +318,17 @@ LRESULT CALLBACK __export DesktopDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 
         if (id == IDC_DESK_WPLIST && code == LBN_SELCHANGE) {
             int sel = (int)SendDlgItemMessage(hwnd, IDC_DESK_WPLIST, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < NUM_WP) {
-                SetDlgItemText(hwnd, IDC_DESK_WPEDIT, g_wp_list[sel]);
+            if (sel >= 0) {
+                char text[64];
+                SendDlgItemMessage(hwnd, IDC_DESK_WPLIST, LB_GETTEXT, sel, (LPARAM)(LPSTR)text);
+                SetDlgItemText(hwnd, IDC_DESK_WPEDIT, text);
             }
         } else if (id == IDC_DESK_PATLIST && code == LBN_SELCHANGE) {
             int sel = (int)SendDlgItemMessage(hwnd, IDC_DESK_PATLIST, LB_GETCURSEL, 0, 0);
-            if (sel >= 0 && sel < NUM_PAT) {
-                SetDlgItemText(hwnd, IDC_DESK_PATEDIT, g_pat_list[sel]);
+            if (sel >= 0) {
+                char text[64];
+                SendDlgItemMessage(hwnd, IDC_DESK_PATLIST, LB_GETTEXT, sel, (LPARAM)(LPSTR)text);
+                SetDlgItemText(hwnd, IDC_DESK_PATEDIT, text);
             }
         } else if (id == IDC_OK) {
             char wp_buf[64], pat_buf[64], spc_buf[16];
@@ -275,6 +342,9 @@ LRESULT CALLBACK __export DesktopDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             WriteProfileString("Desktop", "TileWallpaper", tile ? "1" : "0");
             WriteProfileString("Desktop", "Pattern", pat_buf);
             if (spc_buf[0]) WriteProfileString("Desktop", "IconSpacing", spc_buf);
+
+            /* Zastosuj natychmiast tapete */
+            SystemParametersInfo(20 /*SPI_SETDESKWALLPAPER*/, 0, (LPVOID)(LPCSTR)wp_buf, 3 /*SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE*/);
 
             /* Powiadomienie innych aplikacji */
             PostMessage(0xFFFF /*HWND_BROADCAST*/, 0x001A /*WM_WININICHANGE*/, 0, (LPARAM)(LPCSTR)"Desktop");

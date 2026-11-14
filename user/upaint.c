@@ -1223,14 +1223,244 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
 /* ============================================================
  * Pulpit i inicjalizacja
  * ============================================================ */
+static HBITMAP g_hdesk_bmp = 0;
+static int g_desk_bmp_w = 0, g_desk_bmp_h = 0;
+static BOOL g_desk_tile = FALSE;
+static HBRUSH g_hdesk_pat_brush = 0;
+
+static BOOL has_path_sep(LPCSTR s)
+{
+    if (!s) return FALSE;
+    while (*s) {
+        if (*s == ':' || *s == '\\' || *s == '/') return TRUE;
+        s++;
+    }
+    return FALSE;
+}
+
+static void ustrcat(LPSTR d, LPCSTR s)
+{
+    while (*d) d++;
+    while ((*d++ = *s++) != 0);
+}
+
+static HBITMAP load_bmp_file(LPCSTR name, int __far *out_w, int __far *out_h)
+{
+    char path[128];
+    HFILE hf;
+    WORD bfType;
+    DWORD bfOffBits, file_len;
+    WORD hmem;
+    BYTE __far *buf;
+    BYTE __far *pbi;
+    BYTE __far *pbits;
+    HBITMAP hbm = 0;
+    int w = 0, h = 0;
+
+    if (!name || !name[0] || name[0] == '(') return 0;
+
+    if (!has_path_sep(name)) {
+        ustrcpy((LPSTR)path, "C:\\WINDOWS\\");
+        ustrcat((LPSTR)path, name);
+    } else {
+        ustrcpy((LPSTR)path, name);
+    }
+
+    hf = _lopen((LPCSTR)path, 0 /*OF_READ*/);
+    if (hf == (HFILE)-1) return 0;
+
+    file_len = (DWORD)_llseek(hf, 0L, 2 /*SEEK_END*/);
+    _llseek(hf, 0L, 0 /*SEEK_SET*/);
+
+    if (file_len < 54 || file_len > 1048576UL) {
+        _lclose(hf);
+        return 0;
+    }
+
+    hmem = GlobalAlloc(0x40, file_len);
+    if (!hmem) {
+        _lclose(hf);
+        return 0;
+    }
+    buf = (BYTE __far *)GlobalLock(hmem);
+    if (!buf) {
+        GlobalFree(hmem);
+        _lclose(hf);
+        return 0;
+    }
+
+    _hread(hf, buf, file_len);
+    _lclose(hf);
+
+    bfType = *(WORD __far *)buf;
+    bfOffBits = *(DWORD __far *)(buf + 10);
+
+    if (bfType != 0x4D42 /* 'BM' */ || bfOffBits >= file_len) {
+        GlobalFree(hmem);
+        return 0;
+    }
+
+    pbi = buf + 14;
+    pbits = buf + bfOffBits;
+
+    if (*(DWORD __far *)pbi >= 40) {
+        long bw = *(long __far *)(pbi + 4);
+        long bh = *(long __far *)(pbi + 8);
+        w = (int)(bw > 0 ? bw : -bw);
+        h = (int)(bh > 0 ? bh : -bh);
+    } else {
+        w = *(WORD __far *)(pbi + 4);
+        h = *(WORD __far *)(pbi + 6);
+    }
+
+    hbm = CreateDIBitmap(0, pbi, 4 /*CBM_INIT*/, pbits, pbi, 0 /*DIB_RGB_COLORS*/);
+    GlobalFree(hmem);
+
+    if (hbm) {
+        *out_w = w;
+        *out_h = h;
+    }
+    return hbm;
+}
+
+static HBRUSH load_pattern(LPCSTR name)
+{
+    char val[64];
+    WORD bits[8];
+    LPCSTR p;
+    int i;
+    HBITMAP hbm;
+    HBRUSH hbr = 0;
+
+    if (!name || !name[0] || ustricmp(name, "(None)") == 0) return 0;
+
+    GetProfileString("Patterns", name, "", (LPSTR)val, sizeof(val));
+    if (!val[0] || ustricmp(val, "(None)") == 0) return 0;
+
+    p = val;
+    for (i = 0; i < 8; i++) {
+        int v = 0;
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        while (*p >= '0' && *p <= '9') {
+            v = v * 10 + (*p - '0');
+            p++;
+        }
+        bits[i] = (WORD)(v & 0xFF);
+    }
+    if (i < 8) return 0;
+
+    hbm = CreateBitmap(8, 8, 1, 1, (LPVOID)bits);
+    if (hbm) {
+        hbr = CreatePatternBrush(hbm);
+        DeleteObject(hbm);
+    }
+    return hbr;
+}
+
+static void desktop_reload_settings(void)
+{
+    char pat[64], wp[128];
+
+    /* Przeladuj wzor */
+    if (g_hdesk_pat_brush) {
+        DeleteObject(g_hdesk_pat_brush);
+        g_hdesk_pat_brush = 0;
+    }
+    GetProfileString("Desktop", "Pattern", "(None)", (LPSTR)pat, sizeof(pat));
+    if (pat[0] && ustricmp(pat, "(None)") != 0) {
+        g_hdesk_pat_brush = load_pattern(pat);
+    }
+
+    /* Przeladuj tapete */
+    GetProfileString("Desktop", "Wallpaper", "(None)", (LPSTR)wp, sizeof(wp));
+    g_desk_tile = (GetProfileInt("Desktop", "TileWallpaper", 0) != 0);
+
+    if (g_hdesk_bmp) {
+        DeleteObject(g_hdesk_bmp);
+        g_hdesk_bmp = 0;
+        g_desk_bmp_w = 0;
+        g_desk_bmp_h = 0;
+    }
+    if (wp[0] && ustricmp(wp, "(None)") != 0) {
+        g_hdesk_bmp = load_bmp_file(wp, &g_desk_bmp_w, &g_desk_bmp_h);
+    }
+}
+
+/* ordinal 285 */
+BOOL API SetDeskWallpaper(LPCSTR filename)
+{
+    char buf[128];
+    if (filename == (LPCSTR)-1) {
+        GetProfileString("Desktop", "Wallpaper", "", (LPSTR)buf, sizeof(buf));
+        filename = (LPCSTR)buf;
+    }
+
+    if (g_hdesk_bmp) {
+        DeleteObject(g_hdesk_bmp);
+        g_hdesk_bmp = 0;
+        g_desk_bmp_w = 0;
+        g_desk_bmp_h = 0;
+    }
+
+    if (filename && filename[0] && ustricmp(filename, "(None)") != 0) {
+        g_hdesk_bmp = load_bmp_file(filename, &g_desk_bmp_w, &g_desk_bmp_h);
+        g_desk_tile = (GetProfileInt("Desktop", "TileWallpaper", 0) != 0);
+    }
+
+    InvalidateRect(HDESKTOP, 0, TRUE);
+    return TRUE;
+}
+
 static LRESULT __far __pascal DesktopProc(HWND h, WORD m, WORD wp, LONG lp)
 {
     if (m == WM_ERASEBKGND) {
+        HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(h, (LPRECT)&r);
-        FillRect((HDC)wp, (LPRECT)&r, sysbrush(COLOR_BACKGROUND));
+
+        /* 1. Tlo: wzor lub kolor */
+        if (g_hdesk_pat_brush) {
+            SetBkColor(dc, syscolor(COLOR_BACKGROUND));
+            SetTextColor(dc, RGB(0, 0, 0));
+            FillRect(dc, (LPRECT)&r, g_hdesk_pat_brush);
+        } else {
+            FillRect(dc, (LPRECT)&r, sysbrush(COLOR_BACKGROUND));
+        }
+
+        /* 2. Tapeta BMP */
+        if (g_hdesk_bmp && g_desk_bmp_w > 0 && g_desk_bmp_h > 0) {
+            HDC memdc = CreateCompatibleDC(dc);
+            if (memdc) {
+                HBITMAP old = SelectObject(memdc, g_hdesk_bmp);
+                if (g_desk_tile) {
+                    int x, y;
+                    for (y = 0; y < r.bottom; y += g_desk_bmp_h) {
+                        for (x = 0; x < r.right; x += g_desk_bmp_w) {
+                            BitBlt(dc, x, y, g_desk_bmp_w, g_desk_bmp_h, memdc, 0, 0, 0x00CC0020UL /*SRCCOPY*/);
+                        }
+                    }
+                } else {
+                    int x = (r.right - g_desk_bmp_w) / 2;
+                    int y = (r.bottom - g_desk_bmp_h) / 2;
+                    BitBlt(dc, x, y, g_desk_bmp_w, g_desk_bmp_h, memdc, 0, 0, 0x00CC0020UL /*SRCCOPY*/);
+                }
+                SelectObject(memdc, old);
+                DeleteDC(memdc);
+            }
+        }
         return 1;
     }
+
+    if (m == WM_WININICHANGE) {
+        LPCSTR sect = (LPCSTR)lp;
+        if (!sect || !sect[0] || ustricmp(sect, "Desktop") == 0 || ustricmp(sect, "windows") == 0) {
+            desktop_reload_settings();
+            InvalidateRect(h, 0, TRUE);
+        }
+        return 0;
+    }
+
     if (m == WM_NCHITTEST) return HTCLIENT;
     return DefWindowProc(h, m, wp, lp);
 }
@@ -1259,6 +1489,7 @@ void user_init(void)
     d->proc = (WNDPROC)DesktopProc;
     d->wr.right = SCR_W; d->wr.bottom = SCR_H;
     d->cr = d->wr;
+    desktop_reload_settings();
     wnd_invalidate(HDESKTOP, 0, TRUE, FALSE);
     GdiCursorDefault();
     GdiShowCursor(TRUE);

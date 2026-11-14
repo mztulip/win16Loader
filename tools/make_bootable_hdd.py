@@ -171,6 +171,11 @@ def main():
     for src, dst in win_files:
         run(["mcopy", "-oi", mpart, src, f"::WINDOWS/{dst}"])
 
+    # BMP Wallpapers
+    for bmp in glob.glob("windir/*.BMP") + glob.glob("windir/*.bmp"):
+        dst = os.path.basename(bmp).upper()
+        run(["mcopy", "-oi", mpart, bmp, f"::WINDOWS/{dst}"])
+
     # DLLs
     dlls = glob.glob("dlls/*.DLL") + glob.glob("dlls/*.DRV")
     for dll in dlls:

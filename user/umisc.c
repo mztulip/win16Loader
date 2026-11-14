@@ -330,6 +330,7 @@ BOOL API SystemParametersInfo(WORD act, WORD p, LPVOID pv, WORD win)
     switch (act) {
     case 1:  if (pv) *(WORD __far *)pv = 0; return TRUE;          /* SPI_GETBEEP */
     case 13: if (pv) *(int __far *)pv = 75; return TRUE;          /* SPI_ICONHORIZONTALSPACING */
+    case 20: if (pv) return SetDeskWallpaper((LPCSTR)pv); return TRUE; /* SPI_SETDESKWALLPAPER */
     case 24: if (pv) *(int __far *)pv = 75; return TRUE;          /* SPI_ICONVERTICALSPACING */
     case 25: if (pv) *(int __far *)pv = 1; return TRUE;           /* SPI_GETICONTITLEWRAP */
     case 27: if (pv) *(int __far *)pv = 0; return TRUE;           /* SPI_GETMENUDROPALIGNMENT */
