@@ -130,6 +130,8 @@ def main():
 
     if not os.path.exists("windir/FREEDOS.ICO") and os.path.exists("tools/make_freedos_ico.py"):
         run(["python3", "tools/make_freedos_ico.py"])
+    if (not os.path.exists("windir/LOADER16.ICO") or not os.path.exists("windir/I486.ICO")) and os.path.exists("tools/make_i486_ico.py"):
+        run(["python3", "tools/make_i486_ico.py"])
     if not os.path.exists("windir/DOSPRMPT.PIF") and os.path.exists("tools/make_pif.py"):
         run(["python3", "tools/make_pif.py"])
 
@@ -144,6 +146,8 @@ def main():
         ("windir/REG.TXT", "REG.TXT"),
         ("windir/DOSPRMPT.PIF", "DOSPRMPT.PIF"),
         ("windir/FREEDOS.ICO", "FREEDOS.ICO"),
+        ("windir/LOADER16.ICO", "LOADER16.ICO"),
+        ("windir/I486.ICO", "I486.ICO"),
         ("control.exe", "CONTROL.EXE"),
     ]
     notepad_candidates = [
@@ -206,9 +210,24 @@ def main():
     # 8. Copy Calmira files and subdirectories (e.g. TRAY with quicklaunch icons)
     print("Copying Calmira files to ::CALMIRA...")
     run(["mmd", "-i", mpart, "::CALMIRA"], check=False)
-    for cfile in glob.glob(f"{args.calmira_dir}/*"):
+    calmira_dir = args.calmira_dir
+    if not os.path.exists(calmira_dir) or not glob.glob(f"{calmira_dir}/*"):
+        if os.path.exists("calmira_dist") and glob.glob("calmira_dist/*"):
+            calmira_dir = "calmira_dist"
+    for cfile in glob.glob(f"{calmira_dir}/*"):
         if os.path.isfile(cfile):
-            run(["mcopy", "-oi", mpart, cfile, "::CALMIRA/"])
+            if os.path.basename(cfile).upper() == "CALMIRA.EXE" and os.path.exists("tools/patch_calmira_logo.py"):
+                with tempfile.NamedTemporaryFile("wb", delete=False) as tf:
+                    tmp_calmira = tf.name
+                try:
+                    shutil.copyfile(cfile, tmp_calmira)
+                    subprocess.run(["python3", "tools/patch_calmira_logo.py", tmp_calmira], check=True)
+                    run(["mcopy", "-oi", mpart, tmp_calmira, "::CALMIRA/CALMIRA.EXE"])
+                finally:
+                    if os.path.exists(tmp_calmira):
+                        os.unlink(tmp_calmira)
+            else:
+                run(["mcopy", "-oi", mpart, cfile, "::CALMIRA/"])
         elif os.path.isdir(cfile):
             subname = os.path.basename(cfile).upper()
             run(["mmd", "-i", mpart, f"::CALMIRA/{subname}"], check=False)
@@ -218,6 +237,10 @@ def main():
 
     run(["mcopy", "-oi", mpart, "windir/DOSPRMPT.PIF", "::CALMIRA/DOSPRMPT.PIF"])
     run(["mcopy", "-oi", mpart, "windir/FREEDOS.ICO", "::CALMIRA/FREEDOS.ICO"])
+    if os.path.exists("windir/LOADER16.ICO"):
+        run(["mcopy", "-oi", mpart, "windir/LOADER16.ICO", "::CALMIRA/LOADER16.ICO"])
+    if os.path.exists("windir/I486.ICO"):
+        run(["mcopy", "-oi", mpart, "windir/I486.ICO", "::CALMIRA/I486.ICO"])
     if os.path.exists("windir/CALMIRA.INI"):
         run(["mcopy", "-oi", mpart, "windir/CALMIRA.INI", "::CALMIRA/CALMIRA.INI"])
 

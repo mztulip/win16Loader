@@ -1767,7 +1767,7 @@ begin
         IDM_ABOUT:
           MessageBox(
             Wnd,
-            'PaintCraft Studio for Windows & DOS'#13#10 +
+            'PaintCraft Studio for Loader16 (i486) & DOS'#13#10 +
             'A modern pixel art & graphics editor.'#13#10#13#10 +
             'Features:'#13#10 +
             '- Double-buffered GDI canvas (flicker-free)'#13#10 +

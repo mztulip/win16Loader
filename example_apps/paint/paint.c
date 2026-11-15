@@ -2015,7 +2015,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         case IDM_ABOUT:
             MessageBox(
                 hwnd,
-                "PaintCraft Studio for Windows & DOS\r\n"
+                "PaintCraft Studio for Loader16 (i486) & DOS\r\n"
                 "A modern pixel art & graphics editor.\r\n\r\n"
                 "Features:\r\n"
                 "- Double-buffered GDI canvas with scrolling\r\n"

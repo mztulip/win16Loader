@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""patch_calmira_logo.py - podmienia logo Windows w przycisku Start w CALMIRA.EXE
+na ikone procesora i486 z nozkami (Loader16 i486).
+"""
+import sys, os, struct
+
+def create_i486_tile():
+    # 16x16 grid of 4-bit palette indices:
+    # 13: background (transparent)
+    # 0: black
+    # 7: dark gray
+    # 8: light gray / silver
+    # 11: gold / yellow
+    # 15: white
+    # 4: dark navy / ceramic
+    # 1: maroon
+    B = 13 # transparent background
+    G = 11 # gold
+    S = 8  # silver
+    K = 0  # black
+    D = 7  # dark gray
+    C = 4  # ceramic body (dark navy / ceramic)
+    W = 15 # white
+
+    # 16 rows, each 16 pixels (y=0 top to y=15 bottom)
+    # y=0: empty
+    # y=1..2: top pins
+    # y=3..12: chip body with left/right pins
+    # y=13..14: bottom pins
+    # y=15: empty
+
+    rows = [
+        # y=0
+        [B, B, B, B, B, B, B, B, B, B, B, B, B, B, B, B],
+        # y=1 (top pins)
+        [B, B, B, G, B, G, B, G, B, G, B, G, B, B, B, B],
+        # y=2 (top pins)
+        [B, B, B, G, B, G, B, G, B, G, B, G, B, B, B, B],
+        # y=3 (chip top border)
+        [B, B, G, D, D, D, D, D, D, D, D, D, D, G, B, B],
+        # y=4 (pin 1 marker)
+        [B, G, B, D, G, C, C, C, C, C, C, C, K, B, G, B],
+        # y=5
+        [B, G, B, D, C, C, C, C, C, C, C, C, K, B, G, B],
+        # y=6 (text '4 8 6' row 1)
+        # '4': x=4,6 ; '8': x=7,8,9 ; '6': x=10,11,12
+        [B, B, B, D, G, C, G, G, G, G, G, G, G, B, B, B],
+        # y=7 (text '4 8 6' row 2)
+        [B, G, B, D, G, C, G, G, C, G, G, C, C, B, G, B],
+        # y=8 (text '4 8 6' row 3)
+        [B, G, B, D, G, G, G, G, G, G, G, G, G, B, G, B],
+        # y=9 (text '4 8 6' row 4)
+        [B, B, B, D, C, C, G, G, C, G, G, C, G, B, B, B],
+        # y=10 (text '4 8 6' row 5)
+        [B, G, B, D, C, C, G, G, G, G, G, G, G, B, G, B],
+        # y=11
+        [B, G, B, D, C, C, C, C, C, C, C, C, K, B, G, B],
+        # y=12 (chip bottom border)
+        [B, B, G, K, K, K, K, K, K, K, K, K, K, G, B, B],
+        # y=13 (bottom pins)
+        [B, B, B, G, B, G, B, G, B, G, B, G, B, B, B, B],
+        # y=14 (bottom pins)
+        [B, B, B, G, B, G, B, G, B, G, B, G, B, B, B, B],
+        # y=15
+        [B, B, B, B, B, B, B, B, B, B, B, B, B, B, B, B],
+    ]
+    return rows
+
+def patch_calmira_exe(path):
+    with open(path, 'rb') as f:
+        data = bytearray(f.read())
+
+    # 1. Patch DFM StartButton Glyph embedded in Form definition (delphi TSpeedButton)
+    dfm_patched = False
+    pos = data.find(b'StartButton')
+    while pos != -1:
+        glyph = data.find(b'Glyph.Data', pos, pos + 500)
+        if glyph != -1:
+            bm = data.find(b'BM', glyph, glyph + 50)
+            if bm != -1:
+                sig, size, res1, res2, b_off = struct.unpack_from('<2sIIII', data, bm)
+                hdr_sz, w, h, pl, bpp = struct.unpack_from('<IIIHH', data, bm + 14)
+                if w == 16 and h == 16 and bpp == 4:
+                    print(f'Found StartButton DFM glyph BMP at {hex(bm)} ({w}x{h})')
+                    bits_start = bm + 54 + 64
+                    tile_rows = create_i486_tile()
+                    for y_screen in range(16):
+                        y_bmp = 15 - y_screen
+                        row_start = bits_start + y_bmp * 8
+                        pix = tile_rows[y_screen]
+                        for byte_idx in range(8):
+                            p1 = pix[byte_idx * 2]
+                            p2 = pix[byte_idx * 2 + 1]
+                            if p1 == 13: p1 = 7
+                            if p2 == 13: p2 = 7
+                            data[row_start + byte_idx] = ((p1 & 0x0f) << 4) | (p2 & 0x0f)
+                    dfm_patched = True
+        pos = data.find(b'StartButton', pos + 1)
+
+    if dfm_patched:
+        print('Successfully patched StartButton DFM Glyph!')
+    else:
+        print('Warning: StartButton DFM Glyph not found!')
+
+    # Find NE header
+    e_lfanew = struct.unpack_from('<I', data, 0x3c)[0]
+    ne = e_lfanew
+    rto = struct.unpack_from('<H', data, ne + 0x24)[0] + ne
+    align = struct.unpack_from('<H', data, rto)[0]
+
+    # Find resource STARTBMPS
+    p = rto + 2
+    target_off = None
+    target_len = None
+
+    while True:
+        type_id = struct.unpack_from('<H', data, p)[0]
+        if type_id == 0: break
+        count = struct.unpack_from('<H', data, p + 2)[0]
+        p += 8
+        for i in range(count):
+            off = struct.unpack_from('<H', data, p)[0] << align
+            length = struct.unpack_from('<H', data, p + 2)[0] << align
+            id_field = struct.unpack_from('<H', data, p + 6)[0]
+            if not (id_field & 0x8000):
+                str_off = rto + id_field
+                slen = data[str_off]
+                name = data[str_off+1:str_off+1+slen].decode('latin1', 'replace')
+                if (type_id & 0x7fff) == 2 and name.upper() == 'STARTBMPS':
+                    target_off = off
+                    target_len = length
+            p += 12
+
+    if target_off is None:
+        sys.exit('STARTBMPS resource not found in ' + path)
+
+    print(f'Found STARTBMPS at offset {hex(target_off)} (length {target_len})')
+    # Check DIB header: 40 bytes BITMAPINFOHEADER
+    w, h, bpp = struct.unpack_from('<II2xH', data, target_off + 4)
+    if w != 272 or h != 16 or bpp != 4:
+        sys.exit(f'Unexpected STARTBMPS geometry: {w}x{h} {bpp}bpp')
+
+    bits_off = target_off + 40 + 16 * 4 # header + 16 RGBQUAD palette entries
+    row_stride = ((w * bpp + 31) // 32) * 4 # 136 bytes
+
+    tile_rows = create_i486_tile() # y=0 (top) to y=15 (bottom)
+
+    # In BMP, rows are stored bottom-to-top:
+    # row 0 in BMP file is y=15 (bottom)
+    # row 15 in BMP file is y=0 (top)
+    for y_screen in range(16):
+        y_bmp = 15 - y_screen
+        row_start = bits_off + y_bmp * row_stride
+        # Tile 1 is at x=16..31 (bytes 8..15)
+        # Tile 15 is at x=240..255 (bytes 120..127) - this is the actual Start button flag!
+        pix = tile_rows[y_screen]
+        for byte_idx in range(8):
+            p1 = pix[byte_idx * 2] & 0x0f
+            p2 = pix[byte_idx * 2 + 1] & 0x0f
+            val = (p1 << 4) | p2
+            data[row_start + 8 + byte_idx] = val
+            data[row_start + 120 + byte_idx] = val
+
+    with open(path, 'wb') as f:
+        f.write(data)
+    print(f'Successfully patched i486 CPU logo into {path}!')
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print('Usage: patch_calmira_logo.py <path_to_CALMIRA.EXE>')
+        sys.exit(1)
+    patch_calmira_exe(sys.argv[1])

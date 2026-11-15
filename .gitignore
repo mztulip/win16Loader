@@ -2,6 +2,7 @@
 *.img
 FD14-FloppyEdition/
 FD14-FloppyEdition.zip
+calmira_dist/
 
 # Pliki kompilacji (możliwe do odtworzenia przez make)
 *.o
