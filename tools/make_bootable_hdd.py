@@ -166,6 +166,7 @@ def main():
     for c in paint_candidates:
         if c and os.path.exists(c):
             win_files.append((c, "PBRUSH.EXE"))
+            win_files.append((c, "PAINT.EXE"))
             break
 
     for src, dst in win_files:

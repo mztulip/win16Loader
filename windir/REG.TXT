@@ -8,5 +8,5 @@ inifile\shell\open\command=C:\WINDOWS\NOTEPAD.EXE %1
 inifile\DefaultIcon=C:\WINDOWS\NOTEPAD.EXE,0
 .bmp=paintfile
 paintfile=Rysunek
-paintfile\shell\open\command=C:\WINDOWS\PAINT.EXE %1
-paintfile\DefaultIcon=C:\WINDOWS\PAINT.EXE,0
+paintfile\shell\open\command=C:\WINDOWS\PBRUSH.EXE %1
+paintfile\DefaultIcon=C:\WINDOWS\PBRUSH.EXE,0
