@@ -2305,6 +2305,7 @@ var
   WndClass, DummyClass: TWndClass;
   Msg: TMsg;
   CurTask: Word;
+  PStr: ShortString;
 begin
   G_Instance := HInstance;
   if G_Instance = 0 then
@@ -2360,8 +2361,16 @@ begin
 
   if ParamCount > 0 then
   begin
-    StrPCopy(G_CurFile, ParamStr(1));
-    LoadCanvasFromBMP(G_CurFile);
+    PStr := ParamStr(1);
+    while (Length(PStr) > 0) and (PStr[1] <= ' ') do Delete(PStr, 1, 1);
+    while (Length(PStr) > 0) and (PStr[Length(PStr)] <= ' ') do Delete(PStr, Length(PStr), 1);
+    if (Length(PStr) >= 2) and (PStr[1] = '"') and (PStr[Length(PStr)] = '"') then
+      PStr := Copy(PStr, 2, Length(PStr) - 2);
+    if Length(PStr) > 0 then
+    begin
+      StrPCopy(G_CurFile, PStr);
+      LoadCanvasFromBMP(G_CurFile);
+    end;
   end;
 
   while GetMessage(Msg, 0, 0, 0) do

@@ -144,12 +144,12 @@ void inittask_c(void)
             psp[0x80] = (BYTE)(n + 1);
             psp[0x81] = ' ';
             kmemcpy(psp + 0x82, cmd, n);
-            psp[0x82 + n] = 0x0D;
-            psp[0x83 + n] = 0;
+            psp[0x82 + n] = 0;
+            psp[0x83 + n] = 0x0D;
         } else {
             psp[0x80] = 0;
-            psp[0x81] = 0x0D;
-            psp[0x82] = 0;
+            psp[0x81] = 0;
+            psp[0x82] = 0x0D;
         }
     } else {
         n = psp[0x80] ? psp[0x80] - 1 : 0;

@@ -1980,18 +1980,23 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev_inst, LPSTR cmdline, int show
     if (cmdline && cmdline[0]) {
         char path_buf[128];
         int pi = 0;
-        while (*cmdline == ' ' || *cmdline == '\t') cmdline++;
+        /* Pomiń spacje, tabulatory i znaki kontrolne (np. CR/LF z linii poleceń DOS/Win16) */
+        while (*cmdline && (unsigned char)*cmdline <= ' ') cmdline++;
         if (*cmdline == '"') {
             cmdline++;
-            while (*cmdline && *cmdline != '"' && pi < (int)sizeof(path_buf) - 1) {
+            while (*cmdline && *cmdline != '"' && (unsigned char)*cmdline >= ' ' && pi < (int)sizeof(path_buf) - 1) {
                 path_buf[pi++] = *cmdline++;
             }
+            if (*cmdline == '"') cmdline++;
         } else {
-            while (*cmdline && *cmdline != ' ' && *cmdline != '\t' && pi < (int)sizeof(path_buf) - 1) {
+            while (*cmdline && (unsigned char)*cmdline > ' ' && pi < (int)sizeof(path_buf) - 1) {
                 path_buf[pi++] = *cmdline++;
             }
         }
         path_buf[pi] = '\0';
+        while (pi > 0 && (unsigned char)path_buf[pi - 1] <= ' ') {
+            path_buf[--pi] = '\0';
+        }
         if (path_buf[0]) {
             OutputDebugString("PAINT: opening cmdline file\n");
             load_canvas_from_bmp(path_buf);

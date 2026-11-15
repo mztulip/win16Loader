@@ -526,12 +526,12 @@ WORD API WinExec(LPCSTR cmd, WORD show)
         psp[0x80] = (BYTE)(n + 1);
         psp[0x81] = ' ';
         kmemcpy(psp + 0x82, args, n);
-        psp[0x82 + n] = 0x0D;
-        psp[0x83 + n] = 0;
+        psp[0x82 + n] = 0;
+        psp[0x83 + n] = 0x0D;
     } else {
         psp[0x80] = 0;
-        psp[0x81] = 0x0D;
-        psp[0x82] = 0;
+        psp[0x81] = 0;
+        psp[0x82] = 0x0D;
     }
     /* Ramka jak po task_switch: GS FS ES DS DI SI BP FLAGS, adres powrotu = task_boot */
     t->ss = t->hinst;
