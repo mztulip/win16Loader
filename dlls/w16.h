@@ -244,6 +244,7 @@ typedef CHOOSECOLOR __far *LPCHOOSECOLOR;
 #define MB_OK                           0x0000
 #define MB_YESNO                        0x0004
 #define MB_ICONEXCLAMATION              0x0030
+#define MB_ICONINFORMATION              0x0040
 
 #define COLOR_BTNFACE                   15
 #define IDC_ARROW                       ((LPCSTR)32512)

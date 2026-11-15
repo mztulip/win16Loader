@@ -1870,6 +1870,24 @@ irq0_handler:
     xor  bx, bx
     add  word [bx + KCB_TICK_OFF],     55  ; low word += 55ms (18.2 Hz: 1000/18.2 ~ 55ms)
     adc  word [bx + KCB_TICK_OFF + 2],  0  ; carry do high word
+
+    ; Aktualizuj licznik tickow BIOS w BDA (0040:006C, adres fizyczny 0x0046C)
+    ; Dzieki temu DOS INT 21h AH=2Ch oraz INT 1Ah AH=00h prawidlowo odmierza czas
+    mov  ax, SEL_DATA32
+    mov  ds, ax
+    inc  word [0x046C]
+    jnz  .bda_done
+    inc  word [0x046E]
+.bda_done:
+    cmp  word [0x046E], 0x0018
+    jb   .bda_ok
+    cmp  word [0x046C], 0x00B0
+    jb   .bda_ok
+    mov  word [0x046C], 0
+    mov  word [0x046E], 0
+    mov  byte [0x0470], 1       ; midnight rollover flag
+.bda_ok:
+
     mov  al, 0x20               ; EOI do master PIC
     out  0x20, al
     pop  ds

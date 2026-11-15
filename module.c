@@ -807,9 +807,9 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
         int is_data = (s.ns_flags & NSDATA) != 0;
         if (fsz > alloc) alloc = fsz;
         if (ne.ne_autodata && i == ne.ne_autodata - 1u) {
+            if (is_app) alloc += ne.ne_stack;
             if (is_app) g_app_heapstart = (unsigned)alloc;
             alloc += ne.ne_heap;
-            if (is_app) alloc += ne.ne_stack;
             if (alloc > 0x10000UL) alloc = 0x10000UL;
             m->dgroup_sel = sel;
         }
@@ -895,7 +895,7 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
             fseek(f, mz.e_lfanew + ne.ne_segtab + (long)(ne.ne_autodata - 1) * 8, SEEK_SET);
             fread(&s, sizeof(s), 1, f);
             top = (unsigned long)(s.ns_minalloc ? s.ns_minalloc : s.ns_cbseg)
-                + ne.ne_heap + ne.ne_stack;
+                + ne.ne_stack;
             g_init_sp = top >= 0x10000UL ? 0xFFFE : (unsigned)(top & ~1UL);
         }
         mlog("  Wejscie apki: %04X:%04X DS=SS=%04X SP=%04X\n",

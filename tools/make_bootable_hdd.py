@@ -27,7 +27,8 @@ def main():
     parser.add_argument("--gdi-bin", default="gdi/GDI.EXE", help="GDI.EXE path")
     parser.add_argument("--notepad-exe", default="example_apps/notepad/NOTEPAD.exe", help="NOTEPAD.EXE path")
     parser.add_argument("--paint-exe", default="example_apps/paint/PAINT.EXE", help="PAINT.EXE path")
-    parser.add_argument("--mario-dir", default="../games/mario", help="Mario game directory")
+    parser.add_argument("--clock-exe", default="example_apps/clock/CLOCK.EXE", help="CLOCK.EXE path")
+    parser.add_argument("--mario-dir", default="games/mario", help="Mario game directory")
     args = parser.parse_args()
 
     out_img = args.out
@@ -146,6 +147,7 @@ def main():
         ("windir/REG.TXT", "REG.TXT"),
         ("windir/DOSPRMPT.PIF", "DOSPRMPT.PIF"),
         ("windir/FREEDOS.ICO", "FREEDOS.ICO"),
+        ("windir/CLOCK.ICO", "CLOCK.ICO"),
         ("windir/LOADER16.ICO", "LOADER16.ICO"),
         ("windir/I486.ICO", "I486.ICO"),
         ("control.exe", "CONTROL.EXE"),
@@ -170,6 +172,16 @@ def main():
     for c in paint_candidates:
         if c and os.path.exists(c):
             win_files.append((c, "PBRUSH.EXE"))
+            break
+
+    clock_candidates = [
+        args.clock_exe,
+        "example_apps/clock/CLOCK.EXE",
+        "example_apps/clock/CLOCK.exe",
+    ]
+    for c in clock_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "CLOCK.EXE"))
             break
 
     for src, dst in win_files:

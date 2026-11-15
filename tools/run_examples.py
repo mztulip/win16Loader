@@ -82,12 +82,13 @@ def main():
             subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, src), '::' + dst], check=True)
     bad = False
     summary = []
-    for n in names:
+    for idx, n in enumerate(names):
         d, exe, steps = APPS[n]
         out = os.path.join(a.out, n)
         steps = [s if not s.startswith('p') else 'p' + n for s in steps]
         subprocess.run([sys.executable, os.path.join(HERE, 'qemu_headless.py'), '--fd', fd,
-                        '--run', 'LOADER.EXE ' + exe, '--out', out, '--boot-wait', a.boot_wait] + steps,
+                        '--run', 'LOADER.EXE ' + exe, '--out', out, '--port', str(4500 + idx),
+                        '--boot-wait', a.boot_wait] + steps,
                        stdout=subprocess.DEVNULL)
         log = open(os.path.join(out, 'serial.log'), errors='replace').read()
         tests = re.findall(r'^TEST \S+ (.*?)\r?$', log, re.M)

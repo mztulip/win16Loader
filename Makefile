@@ -399,7 +399,7 @@ win16_example_app/Win1App.exe:
 	$(MAKE) -C win16_example_app
 
 # -------------------------------------------------------
-boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe fdauto.bat win.bat fdconfig.sys $(FDBOOT)
+boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe $(CLOCK_EXE) fdauto.bat win.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot.img
 	mcopy -i boot.img -o fdconfig.sys               ::fdconfig.sys
 	mdel  -i boot.img ::fdauto.bat 2>/dev/null || true
@@ -414,6 +414,7 @@ boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16
 	mcopy -i boot.img win.bat ::WIN.BAT
 	mcopy -i boot.img win16_example_app/Win1App.exe ::win1app.exe
 	mcopy -i boot.img $(SKIFREE_DIR)/SKI.EXE        ::ski.exe
+	mcopy -i boot.img $(CLOCK_EXE)                  ::clock.exe
 	@echo "[OK] boot.img gotowy"
 
 run-qemu: boot.img
@@ -538,6 +539,7 @@ HDD_MB      = 64
 
 NOTEPAD_EXE = example_apps/notepad/NOTEPAD.exe
 PAINT_EXE   = example_apps/paint/PAINT.EXE
+CLOCK_EXE   = example_apps/clock/CLOCK.EXE
 
 $(NOTEPAD_EXE): example_apps/notepad/NOTEPAD.PAS
 	$(MAKE) -C example_apps/notepad
@@ -545,8 +547,14 @@ $(NOTEPAD_EXE): example_apps/notepad/NOTEPAD.PAS
 $(PAINT_EXE): example_apps/paint/paint.c
 	$(MAKE) -C example_apps/paint
 
+$(CLOCK_EXE): example_apps/clock/main.c example_apps/clock/winclock.c
+	$(MAKE) -C example_apps/clock
+
 windir/FREEDOS.ICO: tools/make_freedos_ico.py
 	python3 tools/make_freedos_ico.py
+
+windir/CLOCK.ICO: example_apps/clock/gen_clock_ico.py
+	python3 example_apps/clock/gen_clock_ico.py $@
 
 windir/DOSPRMPT.PIF: tools/make_pif.py
 	python3 tools/make_pif.py
@@ -558,13 +566,14 @@ control.exe: control.c
 	$(WCL) -ms -zW -bt=windows -zq -l=windows -I$(WATCOM)/h -I$(WATCOM)/h/win control.c -fe=$@
 
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
-             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) \
-             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
-             $(wildcard windir/*.BMP) $(FDBOOT)
+             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) $(CLOCK_EXE) \
+             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
+             $(wildcard windir/*.BMP) $(wildcard games/mario/*.*) $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE) \
-	    --mario-dir=../games/mario
+	    --clock-exe=$(CLOCK_EXE) \
+	    --mario-dir=games/mario
 
 # Resetowanie obrazu dysku twardego Calmira do czystego stanu fabrycznego
 reset-calmira:

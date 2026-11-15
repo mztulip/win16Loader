@@ -453,6 +453,49 @@ void kdos_close_task(WORD task)
         if (g_fh[i].task == task) _lclose(g_fh[i].h);
 }
 
+/* ============================================================
+ * Sprzetowy zegar czasu rzeczywistego (RTC / CMOS)
+ * ============================================================ */
+static BYTE cmos_read(BYTE reg)
+{
+    io_outb(0x70, reg);
+    return io_inb(0x71);
+}
+
+static BYTE bcd_to_bin(BYTE val)
+{
+    return (BYTE)(((val >> 4) * 10) + (val & 0x0F));
+}
+
+static void rtc_get_time(BYTE __far *hour, BYTE __far *min, BYTE __far *sec)
+{
+    int timeout = 1000;
+    BYTE b, raw_hour;
+
+    /* Czekaj az zakonczy sie aktualizacja (bit 7 w Status A = 1 oznacza UIP) */
+    while ((cmos_read(0x0A) & 0x80) && --timeout > 0)
+        ;
+
+    *sec     = cmos_read(0x00);
+    *min     = cmos_read(0x02);
+    raw_hour = cmos_read(0x04);
+    b        = cmos_read(0x0B);
+
+    /* Rejestr B: bit 2 (0x04) = 1 to format binarny, 0 to BCD */
+    if (!(b & 0x04)) {
+        *sec  = bcd_to_bin(*sec);
+        *min  = bcd_to_bin(*min);
+        *hour = bcd_to_bin((BYTE)(raw_hour & 0x7F));
+    } else {
+        *hour = (BYTE)(raw_hour & 0x7F);
+    }
+
+    /* Rejestr B: bit 1 (0x02) = 1 to 24h, 0 to 12h (bit 7 w raw_hour = PM) */
+    if (!(b & 0x02) && (raw_hour & 0x80)) {
+        *hour = (BYTE)((*hour + 12) % 24);
+    }
+}
+
 void dos3call_c(void)
 {
     BYTE ah = (BYTE)(g_d3.ax >> 8);
@@ -585,7 +628,15 @@ static void dos3call_do(void)
     case 0x71:                                   /* LFN - brak */
         d3_fail(0x7100);
         break;
-    case 0x0E: case 0x19: case 0x2A: case 0x2B: case 0x2C: case 0x2D:
+    case 0x2C: {                                 /* Get Time z RTC (CMOS) */
+        BYTE h, m, s;
+        rtc_get_time(&h, &m, &s);
+        g_d3.cx = ((WORD)h << 8) | m;
+        g_d3.dx = ((WORD)s << 8) | (BYTE)((KCBD(KCB_TICK_MS) % 1000) / 10);
+        g_d3.ax = 0;
+        break;
+    }
+    case 0x0E: case 0x19: case 0x2A: case 0x2B: case 0x2D:
     case 0x30: case 0x33: case 0x36: case 0x3E: case 0x42: case 0x45:
     case 0x46: case 0x54: case 0x57: case 0x59: case 0x0D: case 0x68:
         d3_pass();
@@ -860,3 +911,7 @@ WORD API GetProfileInt(LPCSTR s, LPCSTR k, int d)
 { return GetPrivateProfileInt(s, k, d, "WIN.INI"); }
 BOOL API WriteProfileString(LPCSTR s, LPCSTR k, LPCSTR v)
 { return WritePrivateProfileString(s, k, v, "WIN.INI"); }
+
+/* ordinal 207: IsDBCSLeadByte */
+BOOL API IsDBCSLeadByte(BYTE c) { (void)c; return FALSE; }
+

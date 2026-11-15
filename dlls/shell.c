@@ -381,8 +381,46 @@ HINSTANCE API FindExecutable(LPCSTR file, LPCSTR dir, LPSTR res)
 
 int API ShellAbout(HWND h, LPCSTR app, LPCSTR other, HICON icon)
 {
-    (void)h; (void)app; (void)other; (void)icon;
-    return 0;
+    char title[128];
+    char text[256];
+    char app_name[64];
+    LPCSTR hash = NULL;
+    LPCSTR p;
+    (void)icon;
+
+    if (!app) app = "";
+    p = app;
+    while (*p) {
+        if (*p == '#') { hash = p; break; }
+        p++;
+    }
+
+    if (hash) {
+        int tlen = (int)(hash - app);
+        if (tlen > 60) tlen = 60;
+        w_strncpy(title, app, tlen + 1);
+        w_strncpy(app_name, hash + 1, sizeof(app_name));
+    } else {
+        w_strcpy(title, "About ");
+        w_strncpy(title + 6, app, sizeof(title) - 7);
+        w_strncpy(app_name, app, sizeof(app_name));
+    }
+
+    text[0] = 0;
+    w_strcpy(text, app_name);
+    if (other && other[0]) {
+        int len = w_strlen(text);
+        if (len + 4 < (int)sizeof(text)) {
+            text[len++] = '\r';
+            text[len++] = '\n';
+            text[len++] = '\r';
+            text[len++] = '\n';
+            text[len] = 0;
+            w_strncpy(text + len, other, (int)sizeof(text) - len);
+        }
+    }
+
+    return MessageBox(h, (LPCSTR)text, (LPCSTR)title, MB_OK | MB_ICONINFORMATION);
 }
 
 /* ---- ExtractIcon: ikony z pliku NE (.EXE/.DLL) lub .ICO ---- */

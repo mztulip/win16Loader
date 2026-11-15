@@ -1,0 +1,3 @@
+[submodule "example_apps/clock"]
+	path = example_apps/clock
+	url = https://github.com/osfree-project/clock
