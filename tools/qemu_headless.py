@@ -146,6 +146,7 @@ def main():
                         mon(sock, f'sendkey {ch.lower()}')
                     else:
                         mon(sock, 'sendkey spc')
+                    time.sleep(0.05)
         mon(sock, 'quit')
     finally:
         try:

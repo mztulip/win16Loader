@@ -148,6 +148,16 @@ static HBITMAP g_hbmp_old_clip = NULL;
 static int     g_clip_w = 0, g_clip_h = 0;
 static BOOL    g_has_clip = FALSE;
 
+/* Text Tool State */
+static HWND    g_hwnd_text_edit = NULL;
+static int     g_text_cx = 0;
+static int     g_text_cy = 0;
+static BOOL    g_text_active = FALSE;
+static FARPROC g_old_text_edit_proc = NULL;
+static void    commit_text(void);
+static void    cancel_text(void);
+static void    update_text_edit_pos(void);
+
 /* Tool States */
 static int      g_active_tool = TOOL_PENCIL;
 static int      g_brush_size = 2;
@@ -355,6 +365,7 @@ static void update_scrollbars(void)
             ShowWindow(g_hwnd_sb_horz, SW_HIDE);
         }
     }
+    update_text_edit_pos();
 }
 
 static void blit_canvas_viewport(HDC target_dc, HDC src_dc)
@@ -464,6 +475,79 @@ static void commit_selection(void)
     g_has_sel = FALSE;
     g_sel_dragging = FALSE;
     refresh_canvas();
+}
+
+static void commit_text(void)
+{
+    char buf[256];
+    int len;
+
+    if (!g_text_active || !g_hwnd_text_edit) return;
+
+    g_text_active = FALSE;
+    len = GetWindowText(g_hwnd_text_edit, buf, sizeof(buf));
+    ShowWindow(g_hwnd_text_edit, SW_HIDE);
+
+    if (len > 0) {
+        save_undo_state();
+        SetBkMode(g_hdc_canvas, TRANSPARENT);
+        SetTextColor(g_hdc_canvas, g_col_primary);
+        TextOut(g_hdc_canvas, g_text_cx, g_text_cy, buf, len);
+        refresh_canvas();
+        set_status("Text added to canvas.");
+    }
+}
+
+static void cancel_text(void)
+{
+    if (!g_text_active || !g_hwnd_text_edit) return;
+    g_text_active = FALSE;
+    ShowWindow(g_hwnd_text_edit, SW_HIDE);
+    set_status("Text input cancelled.");
+}
+
+static void update_text_edit_pos(void)
+{
+    int sx, sy, max_w, edit_w;
+
+    if (!g_text_active || !g_hwnd_text_edit) return;
+
+    sx = CANVAS_X + g_text_cx - g_scroll_x;
+    sy = CANVAS_Y + g_text_cy - g_scroll_y;
+    max_w = (CANVAS_X + g_view_w) - sx;
+    edit_w = 200;
+    if (edit_w > max_w) edit_w = max_w;
+    if (edit_w < 60) edit_w = 60;
+
+    if (sx >= CANVAS_X - 100 && sx < CANVAS_X + g_view_w &&
+        sy >= CANVAS_Y - 20 && sy < CANVAS_Y + g_view_h) {
+        MoveWindow(g_hwnd_text_edit, sx, sy, edit_w, 20, TRUE);
+        ShowWindow(g_hwnd_text_edit, SW_SHOW);
+    } else {
+        ShowWindow(g_hwnd_text_edit, SW_HIDE);
+    }
+}
+
+LRESULT CALLBACK _export TextEditProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_KEYDOWN) {
+        if (wp == VK_RETURN) {
+            commit_text();
+            if (g_mainwnd) SetFocus(g_mainwnd);
+            return 0;
+        }
+        if (wp == VK_ESCAPE) {
+            cancel_text();
+            if (g_mainwnd) SetFocus(g_mainwnd);
+            return 0;
+        }
+    }
+    if (msg == WM_CHAR && (wp == '\r' || wp == 0x0D)) {
+        commit_text();
+        if (g_mainwnd) SetFocus(g_mainwnd);
+        return 0;
+    }
+    return CallWindowProc((FARPROC)g_old_text_edit_proc, hwnd, msg, wp, lp);
 }
 
 static void do_copy(void)
@@ -610,6 +694,7 @@ static void do_select_all(void)
 
 static void do_undo(void)
 {
+    cancel_text();
     if (!g_can_undo) {
         MessageBox(g_mainwnd, "No action available to undo.", "Undo", MB_OK | MB_ICONINFORMATION);
         return;
@@ -1633,6 +1718,15 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             0, 0, 100, 16,
             hwnd, (HMENU)2002, g_instance, NULL
         );
+        g_hwnd_text_edit = CreateWindow(
+            "EDIT", "",
+            WS_CHILD | WS_BORDER | ES_AUTOHSCROLL,
+            0, 0, 100, 20,
+            hwnd, (HMENU)2003, g_instance, NULL
+        );
+        if (g_hwnd_text_edit) {
+            g_old_text_edit_proc = (FARPROC)SetWindowLong(g_hwnd_text_edit, -4 /* GWL_WNDPROC */, (LONG)TextEditProc);
+        }
         update_scrollbars();
         lstrcpy(g_statustext, "PaintCraft - Ready. LMB: Primary Color, RMB: Background Color.");
         return 0;
@@ -1671,6 +1765,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             if (pos != g_scroll_y) {
                 g_scroll_y = pos;
                 SetScrollPos(g_hwnd_sb_vert, SB_CTL, g_scroll_y, TRUE);
+                update_text_edit_pos();
                 refresh_canvas();
             }
         }
@@ -1698,10 +1793,21 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             if (pos != g_scroll_x) {
                 g_scroll_x = pos;
                 SetScrollPos(g_hwnd_sb_horz, SB_CTL, g_scroll_x, TRUE);
+                update_text_edit_pos();
                 refresh_canvas();
             }
         }
         return 0;
+
+    case WM_CTLCOLOR:
+        if (LOWORD(lparam) == (WORD)g_hwnd_text_edit) {
+            COLORREF tc = g_col_primary;
+            if (tc == RGB(255, 255, 255)) tc = RGB(0, 0, 0);
+            SetTextColor((HDC)wparam, tc);
+            SetBkColor((HDC)wparam, RGB(255, 255, 255));
+            return (LRESULT)GetStockObject(WHITE_BRUSH);
+        }
+        break;
 
     case WM_ERASEBKGND:
         return 1;
@@ -1750,6 +1856,13 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         break;
 
     case WM_COMMAND:
+        if (wparam == 2003) {
+            if (HIWORD(lparam) == 0x0200 /* EN_KILLFOCUS */) {
+                commit_text();
+            }
+            return 0;
+        }
+        commit_text();
         switch (wparam) {
         case IDM_NEW:
             commit_selection();
@@ -1804,19 +1917,24 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         for (i = 1; i <= TOOL_COUNT; i++) {
             if (x >= g_tools[i].r.left && x <= g_tools[i].r.right &&
                 y >= g_tools[i].r.top && y <= g_tools[i].r.bottom) {
+                commit_text();
                 if (i != TOOL_SELECT) {
                     commit_selection();
                 }
                 g_active_tool = i;
                 g_poly_count = 0;
                 InvalidateRect(hwnd, NULL, FALSE);
-                set_status("Active tool changed.");
+                if (i == TOOL_TEXT)
+                    set_status("Text tool: Click on canvas to type text. Press Enter to place.");
+                else
+                    set_status("Active tool changed.");
                 return 0;
             }
         }
 
         /* 2. Brush Size */
         if (y >= 26 && y <= 44 && x >= 52 && x <= 182) {
+            commit_text();
             if (!tool_supports_size(g_active_tool)) {
                 if (g_active_tool == TOOL_PENCIL)
                     set_status("Pencil is fixed at 1 px (hairline).");
@@ -1839,6 +1957,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
         /* 3. Shape Style */
         if (y >= 26 && y <= 44 && x >= 240 && x <= 372) {
+            commit_text();
             i = ((x - 240) / 44) + 1;
             if (i >= 1 && i <= 3) g_shape_style = i;
             InvalidateRect(hwnd, NULL, FALSE);
@@ -1848,6 +1967,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
         /* 4. Quick Actions */
         if (y >= 26 && y <= 44 && x >= 384 && x <= 604) {
+            commit_text();
             i = ((x - 384) / 44) + 1;
             switch (i) {
             case 1: do_undo(); break;
@@ -1866,12 +1986,17 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 if (y >= 66) swatch_idx += 14;
                 g_col_primary = g_palette[swatch_idx];
                 InvalidateRect(hwnd, NULL, FALSE);
+                if (g_text_active && g_hwnd_text_edit) {
+                    InvalidateRect(g_hwnd_text_edit, NULL, TRUE);
+                    SetFocus(g_hwnd_text_edit);
+                }
                 set_status("Primary color selected (LMB).");
                 return 0;
             }
         }
 
         /* 6. Canvas Area */
+        commit_text();
         if (screen_to_canvas(x, y, &cx, &cy)) {
             x = cx;
             y = cy;
@@ -1922,7 +2047,10 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 commit_selection();
             }
 
-            SetCapture(hwnd);
+            if (g_active_tool != TOOL_TEXT) {
+                commit_text();
+                SetCapture(hwnd);
+            }
 
             switch (g_active_tool) {
             case TOOL_PENCIL:
@@ -1978,15 +2106,26 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 break;
 
             case TOOL_TEXT:
-                save_undo_state();
-                SetBkMode(g_hdc_canvas, TRANSPARENT);
-                SetTextColor(g_hdc_canvas, g_col_primary);
-                TextOut(g_hdc_canvas, x, y, "PaintCraft", 10);
-                dc = GetDC(hwnd);
-                blit_canvas_viewport(dc, g_hdc_canvas);
-                ReleaseDC(hwnd, dc);
-                set_status("Text stamped onto canvas.");
-                break;
+                commit_text();
+                g_text_cx = x;
+                g_text_cy = y;
+                {
+                    int sx = CANVAS_X + x - g_scroll_x;
+                    int sy = CANVAS_Y + y - g_scroll_y;
+                    int max_w = (CANVAS_X + g_view_w) - sx;
+                    int edit_w = 200;
+                    if (edit_w > max_w) edit_w = max_w;
+                    if (edit_w < 60) edit_w = 60;
+                    if (g_hwnd_text_edit) {
+                        MoveWindow(g_hwnd_text_edit, sx, sy, edit_w, 20, TRUE);
+                        SetWindowText(g_hwnd_text_edit, "");
+                        ShowWindow(g_hwnd_text_edit, SW_SHOW);
+                        SetFocus(g_hwnd_text_edit);
+                        g_text_active = TRUE;
+                        set_status("Type text and press Enter to place on canvas (Esc to cancel).");
+                    }
+                }
+                return 0;
 
             case TOOL_POLYGON:
                 if (g_poly_count == 0) {
@@ -2046,6 +2185,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             }
         }
 
+        commit_text();
         if (screen_to_canvas(x, y, &cx, &cy)) {
             x = cx;
             y = cy;
@@ -2276,7 +2416,7 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev_inst, LPSTR cmdline, int show
     g_mainwnd = CreateWindow(
         "W16PaintCraftClass",
         "PaintCraft - [Untitled]",
-        WS_OVERLAPPEDWINDOW,
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT,
         624, 468,
         NULL, NULL, hinst, NULL
