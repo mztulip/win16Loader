@@ -314,8 +314,6 @@ static void mouse_msg(WORD cmsg, BOOL isdown)
             LRESULT r = send_msg(h, WM_MOUSEACTIVATE, top, MAKELONG(hit, cmsg));
             if (r != 3 && r != 4) activate_window(top, TRUE);    /* MA_NOACTIVATE(ANDEAT) */
             if (r == 2 || r == 4) return;                        /* MA_ACTIVATEANDEAT */
-        } else if (top == HDESKTOP && g_active) {
-            activate_window(0, TRUE);
         }
         if (w->style & WS_DISABLED) { MessageBeep(0); return; }
     }

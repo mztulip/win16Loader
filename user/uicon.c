@@ -126,6 +126,10 @@ static void title_paint(HWND t)
         SetTextColor(dc, fg);
         DrawText(dc, (LPCSTR)w->text, w->textlen, (LPRECT)&r,
                  (tx > r.right - r.left ? 0 : 0x0001) | 0x0004 | 0x0020 | 0x0800);     /* DT_CENTER VCENTER SINGLELINE NOPREFIX */
+        if (act) {
+            extern void API DrawFocusRect(HDC, LPRECT);
+            DrawFocusRect(dc, (LPRECT)&r);
+        }
         SelectObject(dc, of);
     }
     EndPaint(t, (PAINTSTRUCT __far *)&ps);
