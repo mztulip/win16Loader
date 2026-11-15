@@ -1,5 +1,7 @@
 # Obrazy dysków i duże binaria
 *.img
+*.zip
+dist/
 FD14-FloppyEdition/
 FD14-FloppyEdition.zip
 calmira_dist/

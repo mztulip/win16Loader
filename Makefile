@@ -15,7 +15,7 @@ FDBOOT  = FD14-FloppyEdition/144m/x86BOOT.img
 
 export WATCOM INCLUDE EDPATH WIPATH PATH
 
-.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira
+.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira release
 
 SKIFREE_DIR = SKIFREE
 
@@ -570,6 +570,10 @@ reset-calmira:
 	rm -f calmira.img floppy.img
 	$(MAKE) calmira.img floppy.img
 	@echo "=== Obraz calmira.img zresetowany do stanu surowego/fabrycznego ==="
+
+# Tworzenie paczki dystrybucyjnej release (.zip)
+release: calmira.img floppy.img
+	python3 tools/make_release.py --version=0.1
 
 # ExitWindows(EW_REBOOTSYSTEM) resetuje PC - domyslnie pozwalamy QEMU na reboot.
 # Diagnostyka crashy (zatrzymanie po triple fault): make run-calmira QEMU_REBOOT="-no-reboot -no-shutdown"
