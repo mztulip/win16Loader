@@ -66,6 +66,89 @@ def create_i486_tile():
     ]
     return rows
 
+def set_icon_pixel(data, off, x, y, color):
+    # color: None (transparent) or palette index 0..15
+    xor_start = off + 40 + 64
+    and_start = xor_start + 32 * 16
+    y_bmp = 31 - y
+    and_off = and_start + y_bmp * 4 + x // 8
+    xor_off = xor_start + y_bmp * 16 + x // 2
+    shift = 7 - (x % 8)
+    if color is None:
+        data[and_off] |= (1 << shift)
+        if x % 2 == 0: data[xor_off] &= 0x0f
+        else: data[xor_off] &= 0xf0
+    else:
+        data[and_off] &= ~(1 << shift)
+        if x % 2 == 0: data[xor_off] = (data[xor_off] & 0x0f) | ((color & 0x0f) << 4)
+        else: data[xor_off] = (data[xor_off] & 0xf0) | (color & 0x0f)
+
+def patch_fileicon(data, off):
+    # Clear center flag area to white (color 15)
+    for y in range(10, 24):
+        for x in range(5, 24):
+            set_icon_pixel(data, off, x, y, 15)
+
+    NAVY = 4
+    GOLD = 11
+    BLACK = 0
+
+    # Chip body: 12x10 from x=9..20, y=12..21
+    for cy in range(12, 22):
+        for cx in range(9, 21):
+            c = BLACK if (cx in (9, 20) or cy in (12, 21)) else NAVY
+            set_icon_pixel(data, off, cx, cy, c)
+
+    # Pins
+    for px in (11, 13, 15, 17, 19):
+        set_icon_pixel(data, off, px, 11, GOLD)
+        set_icon_pixel(data, off, px, 22, GOLD)
+    for py in (14, 16, 18, 20):
+        set_icon_pixel(data, off, 8, py, GOLD)
+        set_icon_pixel(data, off, 21, py, GOLD)
+
+    # Pin 1 marker
+    set_icon_pixel(data, off, 10, 13, GOLD)
+
+    # Text '486' in gold
+    for p in [(11,15),(11,16),(11,17),(12,17),(13,15),(13,16),(13,17),(13,18),(13,19)]:
+        set_icon_pixel(data, off, p[0], p[1], GOLD)
+    for p in [(14,15),(15,15),(16,15),(14,16),(16,16),(14,17),(15,17),(16,17),(14,18),(16,18),(14,19),(15,19),(16,19)]:
+        set_icon_pixel(data, off, p[0], p[1], GOLD)
+    for p in [(17,15),(18,15),(19,15),(17,16),(17,17),(18,17),(19,17),(17,18),(19,18),(17,19),(18,19),(19,19)]:
+        set_icon_pixel(data, off, p[0], p[1], GOLD)
+
+def patch_tinyfileicon(data, off):
+    # Clear center flag area to white (color 15)
+    for y in range(5, 12):
+        for x in range(2, 10):
+            set_icon_pixel(data, off, x, y, 15)
+
+    NAVY = 4
+    GOLD = 11
+    BLACK = 0
+
+    # Mini chip body at x=3..8, y=6..10
+    for cy in range(6, 11):
+        for cx in range(3, 9):
+            c = BLACK if (cx in (3, 8) or cy in (6, 10)) else NAVY
+            set_icon_pixel(data, off, cx, cy, c)
+
+    # Pins
+    for px in (4, 6):
+        set_icon_pixel(data, off, px, 5, GOLD)
+        set_icon_pixel(data, off, px, 11, GOLD)
+    for py in (7, 9):
+        set_icon_pixel(data, off, 2, py, GOLD)
+        set_icon_pixel(data, off, 9, py, GOLD)
+
+    # Pin 1 marker
+    set_icon_pixel(data, off, 4, 7, GOLD)
+
+    # Center mark
+    for p in [(5,8),(6,8),(7,8),(5,9),(7,9)]:
+        set_icon_pixel(data, off, p[0], p[1], GOLD)
+
 def patch_calmira_exe(path):
     with open(path, 'rb') as f:
         data = bytearray(f.read())
@@ -108,15 +191,17 @@ def patch_calmira_exe(path):
     rto = struct.unpack_from('<H', data, ne + 0x24)[0] + ne
     align = struct.unpack_from('<H', data, rto)[0]
 
-    # Find resource STARTBMPS
+    # Find resource STARTBMPS and ICONs
     p = rto + 2
     target_off = None
     target_len = None
+    icons_by_id = {}
 
     while True:
         type_id = struct.unpack_from('<H', data, p)[0]
         if type_id == 0: break
         count = struct.unpack_from('<H', data, p + 2)[0]
+        raw_type = type_id & 0x7fff
         p += 8
         for i in range(count):
             off = struct.unpack_from('<H', data, p)[0] << align
@@ -126,9 +211,11 @@ def patch_calmira_exe(path):
                 str_off = rto + id_field
                 slen = data[str_off]
                 name = data[str_off+1:str_off+1+slen].decode('latin1', 'replace')
-                if (type_id & 0x7fff) == 2 and name.upper() == 'STARTBMPS':
+                if raw_type == 2 and name.upper() == 'STARTBMPS':
                     target_off = off
                     target_len = length
+            elif raw_type == 3:
+                icons_by_id[id_field & 0x7fff] = off
             p += 12
 
     if target_off is None:
@@ -160,6 +247,14 @@ def patch_calmira_exe(path):
             val = (p1 << 4) | p2
             data[row_start + 8 + byte_idx] = val
             data[row_start + 120 + byte_idx] = val
+
+    # 3. Patch FILEICON (Icon #6) and TINYFILEICON (Icon #31)
+    if 6 in icons_by_id:
+        patch_fileicon(data, icons_by_id[6])
+        print(f'Successfully patched FILEICON (Icon #6) at {hex(icons_by_id[6])} with i486 document logo!')
+    if 31 in icons_by_id:
+        patch_tinyfileicon(data, icons_by_id[31])
+        print(f'Successfully patched TINYFILEICON (Icon #31) at {hex(icons_by_id[31])} with i486 mini document logo!')
 
     with open(path, 'wb') as f:
         f.write(data)
