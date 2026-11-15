@@ -17,6 +17,7 @@
 #include <commdlg.h>
 #include <string.h>
 #include <stdlib.h>
+#include "paint.h"
 
 #define TOOL_PENCIL       1
 #define TOOL_BRUSH        2
@@ -60,6 +61,7 @@
 #define IDM_FLIPH     1013
 #define IDM_FLIPV     1014
 #define IDM_SELECTALL 1015
+#define IDM_CANVASSIZE 1016
 
 #define IDM_ABOUT     1020
 
@@ -876,12 +878,18 @@ static void destroy_canvas_buffers(void)
     }
 }
 
-static BOOL resize_canvas_buffers(int new_w, int new_h)
+static BOOL change_canvas_size(int new_w, int new_h, BOOL preserve_content)
 {
-    HDC scr;
-    HBITMAP bmp_c, bmp_u, bmp_t;
+    HDC scr, hdc_mem;
+    HBITMAP bmp_c, bmp_u, bmp_t, old_mem_bmp;
     RECT r;
     HBRUSH br;
+    int copy_w, copy_h;
+
+    if (new_w < 16) new_w = 16;
+    if (new_h < 16) new_h = 16;
+    if (new_w > 1280) new_w = 1280;
+    if (new_h > 1024) new_h = 1024;
 
     if (!g_mainwnd || !g_hdc_canvas) return FALSE;
     scr = GetDC(g_mainwnd);
@@ -897,6 +905,30 @@ static BOOL resize_canvas_buffers(int new_w, int new_h)
         if (bmp_t) DeleteObject(bmp_t);
         ReleaseDC(g_mainwnd, scr);
         return FALSE;
+    }
+
+    hdc_mem = CreateCompatibleDC(scr);
+    if (hdc_mem) {
+        old_mem_bmp = (HBITMAP)SelectObject(hdc_mem, bmp_c);
+        br = CreateSolidBrush(RGB(255, 255, 255));
+        SetRect(&r, 0, 0, new_w, new_h);
+        FillRect(hdc_mem, &r, br);
+
+        if (preserve_content) {
+            copy_w = (g_canvas_w < new_w) ? g_canvas_w : new_w;
+            copy_h = (g_canvas_h < new_h) ? g_canvas_h : new_h;
+            BitBlt(hdc_mem, 0, 0, copy_w, copy_h, g_hdc_canvas, 0, 0, SRCCOPY);
+        }
+
+        SelectObject(hdc_mem, bmp_u);
+        FillRect(hdc_mem, &r, br);
+        if (preserve_content) {
+            BitBlt(hdc_mem, 0, 0, copy_w, copy_h, g_hdc_canvas, 0, 0, SRCCOPY);
+        }
+        DeleteObject(br);
+
+        SelectObject(hdc_mem, old_mem_bmp);
+        DeleteDC(hdc_mem);
     }
 
     SelectObject(g_hdc_canvas, bmp_c);
@@ -915,18 +947,16 @@ static BOOL resize_canvas_buffers(int new_w, int new_h)
 
     g_canvas_w = new_w;
     g_canvas_h = new_h;
-    g_scroll_x = 0;
-    g_scroll_y = 0;
-
-    br = CreateSolidBrush(RGB(255, 255, 255));
-    SetRect(&r, 0, 0, g_canvas_w, g_canvas_h);
-    FillRect(g_hdc_canvas, &r, br);
-    FillRect(g_hdc_undo, &r, br);
-    DeleteObject(br);
     g_can_undo = FALSE;
 
     update_scrollbars();
+    InvalidateRect(g_mainwnd, NULL, TRUE);
     return TRUE;
+}
+
+static BOOL resize_canvas_buffers(int new_w, int new_h)
+{
+    return change_canvas_size(new_w, new_h, FALSE);
 }
 
 static void apply_draw_shape(HDC target, int tool, int style, int x1, int y1, int x2, int y2,
@@ -1460,6 +1490,73 @@ static void do_file_save(void)
         do_file_save_as();
 }
 
+BOOL CALLBACK _export CanvasSizeDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+    (void)lp;
+    switch (msg) {
+    case WM_INITDIALOG:
+        SetDlgItemInt(dlg, IDC_CANVAS_W, g_canvas_w, FALSE);
+        SetDlgItemInt(dlg, IDC_CANVAS_H, g_canvas_h, FALSE);
+        SetFocus(GetDlgItem(dlg, IDC_CANVAS_W));
+        SendDlgItemMessage(dlg, IDC_CANVAS_W, EM_SETSEL, 0, MAKELONG(0, -1));
+        return FALSE;
+
+    case WM_COMMAND:
+        switch (LOWORD(wp)) {
+        case IDC_PRESET_320:
+            SetDlgItemInt(dlg, IDC_CANVAS_W, 320, FALSE);
+            SetDlgItemInt(dlg, IDC_CANVAS_H, 200, FALSE);
+            return TRUE;
+        case IDC_PRESET_640:
+            SetDlgItemInt(dlg, IDC_CANVAS_W, 640, FALSE);
+            SetDlgItemInt(dlg, IDC_CANVAS_H, 480, FALSE);
+            return TRUE;
+        case IDC_PRESET_800:
+            SetDlgItemInt(dlg, IDC_CANVAS_W, 800, FALSE);
+            SetDlgItemInt(dlg, IDC_CANVAS_H, 600, FALSE);
+            return TRUE;
+        case IDC_PRESET_DEF:
+            SetDlgItemInt(dlg, IDC_CANVAS_W, CANVAS_DEF_W, FALSE);
+            SetDlgItemInt(dlg, IDC_CANVAS_H, CANVAS_DEF_H, FALSE);
+            return TRUE;
+        case IDOK:
+            {
+                BOOL ok_w = FALSE, ok_h = FALSE;
+                int nw = GetDlgItemInt(dlg, IDC_CANVAS_W, &ok_w, FALSE);
+                int nh = GetDlgItemInt(dlg, IDC_CANVAS_H, &ok_h, FALSE);
+                if (!ok_w || !ok_h || nw < 16 || nh < 16 || nw > 1280 || nh > 1024) {
+                    MessageBox(dlg, "Please enter valid canvas dimensions between 16 and 1024 pixels.", "Canvas Size", MB_OK | MB_ICONEXCLAMATION);
+                    return TRUE;
+                }
+                if (nw != g_canvas_w || nh != g_canvas_h) {
+                    if (change_canvas_size(nw, nh, TRUE)) {
+                        char sz_msg[80];
+                        wsprintf(sz_msg, "Canvas resized to %d x %d px.", nw, nh);
+                        set_status(sz_msg);
+                    }
+                }
+                EndDialog(dlg, IDOK);
+                return TRUE;
+            }
+        case IDCANCEL:
+            EndDialog(dlg, IDCANCEL);
+            return TRUE;
+        }
+        break;
+    }
+    return FALSE;
+}
+
+static void do_canvas_size_dlg(void)
+{
+    FARPROC proc;
+    commit_selection();
+    commit_text();
+    proc = MakeProcInstance((FARPROC)CanvasSizeDlgProc, g_instance);
+    DialogBox(g_instance, MAKEINTRESOURCE(IDD_CANVAS_SIZE), g_mainwnd, (DLGPROC)proc);
+    FreeProcInstance(proc);
+}
+
 static void draw_modern_ui(HDC dc)
 {
     RECT client_rc, r;
@@ -1656,6 +1753,29 @@ static void draw_modern_ui(HDC dc)
         DeleteObject(hp);
     }
 
+    /* 5b. Canvas Size Button & Dimension Label */
+    SetRect(&r, 330, 52, 435, 76);
+    br = CreateSolidBrush(RGB(244, 245, 247));
+    FillRect(dc, &r, br);
+    DeleteObject(br);
+    hp = CreatePen(PS_SOLID, 1, RGB(180, 185, 195));
+    old_pen = (HPEN)SelectObject(dc, hp);
+    old_br = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
+    Rectangle(dc, r.left, r.top, r.right, r.bottom);
+    SelectObject(dc, old_br);
+    SelectObject(dc, old_pen);
+    DeleteObject(hp);
+    SetTextColor(dc, RGB(40, 44, 52));
+    DrawText(dc, "Canvas Size...", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    {
+        char sz_dim[40];
+        wsprintf(sz_dim, "Canvas: %d x %d", g_canvas_w, g_canvas_h);
+        SetRect(&r, 442, 55, 590, 75);
+        SetTextColor(dc, RGB(70, 75, 85));
+        DrawText(dc, sz_dim, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
     /* 6. Border around Viewport */
     hp = CreatePen(PS_SOLID, 1, RGB(160, 165, 175));
     old_pen = (HPEN)SelectObject(dc, hp);
@@ -1826,6 +1946,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 case 'C': case 'c': do_copy(); return 0;
                 case 'V': case 'v': do_paste(); return 0;
                 case 'A': case 'a': do_select_all(); return 0;
+                case 'E': case 'e': do_canvas_size_dlg(); return 0;
                 case 'N': case 'n':
                     commit_selection();
                     if (g_canvas_w != CANVAS_DEF_W || g_canvas_h != CANVAS_DEF_H) {
@@ -1885,6 +2006,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         case IDM_PASTE:     do_paste(); break;
         case IDM_DELETE:    do_delete(); break;
         case IDM_SELECTALL: do_select_all(); break;
+        case IDM_CANVASSIZE: do_canvas_size_dlg(); break;
         case IDM_CLEAR:     clear_canvas(); break;
         case IDM_INVERT:    invert_canvas(); break;
         case IDM_FLIPH:     flip_canvas_h(); break;
@@ -1993,6 +2115,12 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 set_status("Primary color selected (LMB).");
                 return 0;
             }
+        }
+
+        /* 5b. Canvas Size Button */
+        if (y >= 52 && y <= 76 && x >= 330 && x <= 435) {
+            do_canvas_size_dlg();
+            return 0;
         }
 
         /* 6. Canvas Area */
@@ -2355,7 +2483,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
 static void create_main_menu(HWND hwnd)
 {
-    HMENU hmenu, hfile, hedit, hhelp;
+    HMENU hmenu, hfile, hedit, himage, hhelp;
     hmenu = CreateMenu();
 
     hfile = CreatePopupMenu();
@@ -2368,19 +2496,29 @@ static void create_main_menu(HWND hwnd)
     AppendMenu(hmenu, MF_POPUP, hfile, "&File");
 
     hedit = CreatePopupMenu();
-    AppendMenu(hedit, MF_STRING, IDM_UNDO,      "&Undo\tCtrl+Z");
+    AppendMenu(hedit, MF_STRING, IDM_UNDO,       "&Undo\tCtrl+Z");
     AppendMenu(hedit, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hedit, MF_STRING, IDM_CUT,       "Cu&t\tCtrl+X");
-    AppendMenu(hedit, MF_STRING, IDM_COPY,      "&Copy\tCtrl+C");
-    AppendMenu(hedit, MF_STRING, IDM_PASTE,     "&Paste\tCtrl+V");
-    AppendMenu(hedit, MF_STRING, IDM_DELETE,    "&Delete\tDel");
-    AppendMenu(hedit, MF_STRING, IDM_SELECTALL, "Select &All\tCtrl+A");
+    AppendMenu(hedit, MF_STRING, IDM_CUT,        "Cu&t\tCtrl+X");
+    AppendMenu(hedit, MF_STRING, IDM_COPY,       "&Copy\tCtrl+C");
+    AppendMenu(hedit, MF_STRING, IDM_PASTE,      "&Paste\tCtrl+V");
+    AppendMenu(hedit, MF_STRING, IDM_DELETE,     "&Delete\tDel");
+    AppendMenu(hedit, MF_STRING, IDM_SELECTALL,  "Select &All\tCtrl+A");
     AppendMenu(hedit, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hedit, MF_STRING, IDM_CLEAR,     "&Clear Canvas");
-    AppendMenu(hedit, MF_STRING, IDM_INVERT,    "&Invert Colors");
-    AppendMenu(hedit, MF_STRING, IDM_FLIPH,     "Flip &Horizontal");
-    AppendMenu(hedit, MF_STRING, IDM_FLIPV,     "Flip &Vertical");
+    AppendMenu(hedit, MF_STRING, IDM_CANVASSIZE, "&Canvas Size...\tCtrl+E");
+    AppendMenu(hedit, MF_STRING, IDM_CLEAR,      "&Clear Canvas");
+    AppendMenu(hedit, MF_STRING, IDM_INVERT,     "&Invert Colors");
+    AppendMenu(hedit, MF_STRING, IDM_FLIPH,      "Flip &Horizontal");
+    AppendMenu(hedit, MF_STRING, IDM_FLIPV,      "Flip &Vertical");
     AppendMenu(hmenu, MF_POPUP, hedit, "&Edit");
+
+    himage = CreatePopupMenu();
+    AppendMenu(himage, MF_STRING, IDM_CANVASSIZE, "&Attributes / Canvas Size...\tCtrl+E");
+    AppendMenu(himage, MF_SEPARATOR, 0, NULL);
+    AppendMenu(himage, MF_STRING, IDM_INVERT,     "&Invert Colors");
+    AppendMenu(himage, MF_STRING, IDM_FLIPH,      "Flip &Horizontal");
+    AppendMenu(himage, MF_STRING, IDM_FLIPV,      "Flip &Vertical");
+    AppendMenu(himage, MF_STRING, IDM_CLEAR,      "&Clear Canvas");
+    AppendMenu(hmenu, MF_POPUP, himage, "&Image");
 
     hhelp = CreatePopupMenu();
     AppendMenu(hhelp, MF_STRING, IDM_ABOUT,  "&About PaintCraft...");

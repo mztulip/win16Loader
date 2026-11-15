@@ -48,6 +48,7 @@ Zamiast kopiować archaiczny, toporny interfejs z lat 80., **PaintCraft** zachow
 ## ⚡ Filtry i operacje na obrazie
 
 - **Cofnij (`Ctrl+Z`)**: Przywrócenie stanu sprzed ostatniej akcji.
+- **Rozmiar płótna (`Ctrl+E`)**: Zmiana wymiarów płótna przez dialog ze wsparciem dla własnych wymiarów oraz gotowych presetów (`320x200`, `640x480`, `800x600`, `Default`). Dostępne z menu `Image`, `Edit`, skrótem `Ctrl+E` oraz przyciskiem `Canvas Size...` na pasku. Zachowuje istniejącą zawartość rysunku.
 - **Wyczyść płótno**: Wypełnienie całego obszaru roboczego kolorem tła (lub wyczyszczenie zaznaczenia klawiszem `Del`).
 - **Negatyw (Odwróć kolory)**: Błyskawiczna inwersja barw `PatBlt(DSTINVERT)` (całego płótna lub aktywnego zaznaczenia).
 - **Odbicie w poziomie (Flip H)**: Lustrzane odbicie lewo-prawo (płótna lub zaznaczenia).
