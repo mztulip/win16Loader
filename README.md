@@ -54,9 +54,14 @@ Open Watcom is installed at `/opt/watcom`. The Makefile sets the required enviro
 ### Build steps
 
 ```bash
-make
+make            # build everything (compile + create boot.img)
 make run-qemu   # run under QEMU, serial output to stdout
 make run        # run under Bochs with GUI debugger
+
+# Calmira II Windows environment:
+make run-calmira           # launch Calmira II (calmira.img hard drive)
+make run-calmira-snapshot  # launch in transient/overlay mode (no disk changes saved)
+make reset-calmira         # reset calmira.img to clean/factory state
 ```
 
 ## Project structure

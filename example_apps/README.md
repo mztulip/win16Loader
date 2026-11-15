@@ -27,6 +27,8 @@ TEST CTLTEST DONE pass=36 fail=0
 | `tasks`    | TASKTEST.EXE | Zadania jak w Win16: WinExec, Yield, własny stos i PSP, koniec dziecka nie kończy rodzica (`taskchild` = program potomny) |
 | `libdemo`  | LIBDEMO.EXE  | LibEntry bibliotek ładowanych w trakcie pracy: import statyczny programu z `WinExec` i `LoadLibrary`, jedno wywołanie, sterta DLL, DLL zwracająca błąd. Wyniki pokazuje w oknie |
 | `nameimp`  | NAMEIMP.EXE  | Import po nazwie z KERNEL: stałe (`__AHIncr`, `__AHShift`, `__WinFlags`, selektory) oraz `Catch`/`Throw`, także przez zagnieżdżone `SendMessage` |
+| `paint`    | PBRUSH.EXE   | PaintCraft Studio (odpowiednik Windows Paintbrush): podwójne buforowanie GDI, interaktywne zaznaczanie, filtry, obsługa BMP (1/4/8/24/32 bpp) |
+| `notepad`  | NOTEPAD.EXE  | Klasyczny Notatnik Win16 (wieloliniowy edytor tekstu, menu, dialogi COMMDLG) |
 
 ## Budowanie i uruchamianie
 

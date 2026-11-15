@@ -16,7 +16,9 @@ do not develop there; new work is NOT split into new STEP directories). Work fro
 make            # build everything (compile + create boot.img)
 make run-qemu   # run under QEMU (fast, no GUI debugger)
 make run        # run under Bochs (with GUI debugger)
-make run-calmira  # Calmira II na drugim dysku (calmira.img = C:)
+make run-calmira  # Calmira II na dysku C: (calmira.img)
+make run-calmira-snapshot  # Calmira II w trybie nakladki/snapshot (brak zapisu zmian na dysku)
+make reset-calmira  # szybki reset calmira.img do stanu fabrycznego
 make OLDGUI=1 boot.img   # stare user.exe/gdi.exe (tylko SkiFree)
 make clean
 python3 tools/run_examples.py   # testy aplikacji przykladowych (example_apps/) w QEMU bez okna
