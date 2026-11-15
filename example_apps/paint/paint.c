@@ -881,7 +881,7 @@ static void destroy_canvas_buffers(void)
 static BOOL change_canvas_size(int new_w, int new_h, BOOL preserve_content)
 {
     HDC scr, hdc_mem;
-    HBITMAP bmp_c, bmp_u, bmp_t, old_mem_bmp;
+    HBITMAP bmp_c = NULL, bmp_u = NULL, bmp_t = NULL, old_mem_bmp;
     RECT r;
     HBRUSH br;
     int copy_w, copy_h;
@@ -895,53 +895,142 @@ static BOOL change_canvas_size(int new_w, int new_h, BOOL preserve_content)
     scr = GetDC(g_mainwnd);
     if (!scr) return FALSE;
 
-    bmp_c = CreateCompatibleBitmap(scr, new_w, new_h);
-    bmp_u = CreateCompatibleBitmap(scr, new_w, new_h);
-    bmp_t = CreateCompatibleBitmap(scr, new_w, new_h);
+    if (!preserve_content) {
+        /* Zwolnij stare bufory przed alokacją nowych, aby nie podwajać zużycia pamięci */
+        if (g_hbmp_canvas) {
+            SelectObject(g_hdc_canvas, g_hbmp_old_canvas);
+            DeleteObject(g_hbmp_canvas);
+            g_hbmp_canvas = NULL;
+        }
+        if (g_hbmp_undo) {
+            SelectObject(g_hdc_undo, g_hbmp_old_undo);
+            DeleteObject(g_hbmp_undo);
+            g_hbmp_undo = NULL;
+        }
+        if (g_hbmp_temp) {
+            SelectObject(g_hdc_temp, g_hbmp_old_temp);
+            DeleteObject(g_hbmp_temp);
+            g_hbmp_temp = NULL;
+        }
 
-    if (!bmp_c || !bmp_u || !bmp_t) {
-        if (bmp_c) DeleteObject(bmp_c);
-        if (bmp_u) DeleteObject(bmp_u);
-        if (bmp_t) DeleteObject(bmp_t);
-        ReleaseDC(g_mainwnd, scr);
-        return FALSE;
-    }
+        bmp_c = CreateCompatibleBitmap(scr, new_w, new_h);
+        bmp_u = CreateCompatibleBitmap(scr, new_w, new_h);
+        bmp_t = CreateCompatibleBitmap(scr, new_w, new_h);
 
-    hdc_mem = CreateCompatibleDC(scr);
-    if (hdc_mem) {
-        old_mem_bmp = (HBITMAP)SelectObject(hdc_mem, bmp_c);
-        br = CreateSolidBrush(RGB(255, 255, 255));
-        SetRect(&r, 0, 0, new_w, new_h);
-        FillRect(hdc_mem, &r, br);
+        if (!bmp_c || !bmp_u || !bmp_t) {
+            if (bmp_c) DeleteObject(bmp_c);
+            if (bmp_u) DeleteObject(bmp_u);
+            if (bmp_t) DeleteObject(bmp_t);
+            bmp_c = CreateCompatibleBitmap(scr, 16, 16);
+            bmp_u = CreateCompatibleBitmap(scr, 16, 16);
+            bmp_t = CreateCompatibleBitmap(scr, 16, 16);
+            if (bmp_c && bmp_u && bmp_t) {
+                SelectObject(g_hdc_canvas, bmp_c);
+                g_hbmp_canvas = bmp_c;
+                SelectObject(g_hdc_undo, bmp_u);
+                g_hbmp_undo = bmp_u;
+                SelectObject(g_hdc_temp, bmp_t);
+                g_hbmp_temp = bmp_t;
+                g_canvas_w = 16;
+                g_canvas_h = 16;
+            }
+            ReleaseDC(g_mainwnd, scr);
+            return FALSE;
+        }
 
-        if (preserve_content) {
+        hdc_mem = CreateCompatibleDC(scr);
+        if (hdc_mem) {
+            old_mem_bmp = (HBITMAP)SelectObject(hdc_mem, bmp_c);
+            br = CreateSolidBrush(RGB(255, 255, 255));
+            SetRect(&r, 0, 0, new_w, new_h);
+            FillRect(hdc_mem, &r, br);
+
+            SelectObject(hdc_mem, bmp_u);
+            FillRect(hdc_mem, &r, br);
+
+            SelectObject(hdc_mem, old_mem_bmp);
+            DeleteObject(br);
+            DeleteDC(hdc_mem);
+        }
+
+        SelectObject(g_hdc_canvas, bmp_c);
+        g_hbmp_canvas = bmp_c;
+
+        SelectObject(g_hdc_undo, bmp_u);
+        g_hbmp_undo = bmp_u;
+
+        SelectObject(g_hdc_temp, bmp_t);
+        g_hbmp_temp = bmp_t;
+    } else {
+        /* Preserve content: najpierw zwolnij bufor undo i temp (nie są potrzebne do kopiowania) */
+        if (g_hbmp_undo) {
+            SelectObject(g_hdc_undo, g_hbmp_old_undo);
+            DeleteObject(g_hbmp_undo);
+            g_hbmp_undo = NULL;
+        }
+        if (g_hbmp_temp) {
+            SelectObject(g_hdc_temp, g_hbmp_old_temp);
+            DeleteObject(g_hbmp_temp);
+            g_hbmp_temp = NULL;
+        }
+
+        bmp_c = CreateCompatibleBitmap(scr, new_w, new_h);
+        if (!bmp_c) {
+            bmp_u = CreateCompatibleBitmap(scr, g_canvas_w, g_canvas_h);
+            bmp_t = CreateCompatibleBitmap(scr, g_canvas_w, g_canvas_h);
+            if (bmp_u) { SelectObject(g_hdc_undo, bmp_u); g_hbmp_undo = bmp_u; }
+            if (bmp_t) { SelectObject(g_hdc_temp, bmp_t); g_hbmp_temp = bmp_t; }
+            ReleaseDC(g_mainwnd, scr);
+            return FALSE;
+        }
+
+        hdc_mem = CreateCompatibleDC(scr);
+        if (hdc_mem) {
+            old_mem_bmp = (HBITMAP)SelectObject(hdc_mem, bmp_c);
+            br = CreateSolidBrush(RGB(255, 255, 255));
+            SetRect(&r, 0, 0, new_w, new_h);
+            FillRect(hdc_mem, &r, br);
+            DeleteObject(br);
+
             copy_w = (g_canvas_w < new_w) ? g_canvas_w : new_w;
             copy_h = (g_canvas_h < new_h) ? g_canvas_h : new_h;
             BitBlt(hdc_mem, 0, 0, copy_w, copy_h, g_hdc_canvas, 0, 0, SRCCOPY);
+
+            SelectObject(hdc_mem, old_mem_bmp);
+            DeleteDC(hdc_mem);
         }
 
-        SelectObject(hdc_mem, bmp_u);
-        FillRect(hdc_mem, &r, br);
-        if (preserve_content) {
-            BitBlt(hdc_mem, 0, 0, copy_w, copy_h, g_hdc_canvas, 0, 0, SRCCOPY);
-        }
-        DeleteObject(br);
+        SelectObject(g_hdc_canvas, g_hbmp_old_canvas);
+        DeleteObject(g_hbmp_canvas);
+        g_hbmp_canvas = bmp_c;
+        SelectObject(g_hdc_canvas, bmp_c);
 
-        SelectObject(hdc_mem, old_mem_bmp);
-        DeleteDC(hdc_mem);
+        bmp_u = CreateCompatibleBitmap(scr, new_w, new_h);
+        bmp_t = CreateCompatibleBitmap(scr, new_w, new_h);
+        if (!bmp_u || !bmp_t) {
+            if (bmp_u) DeleteObject(bmp_u);
+            if (bmp_t) DeleteObject(bmp_t);
+            bmp_u = CreateCompatibleBitmap(scr, 16, 16);
+            bmp_t = CreateCompatibleBitmap(scr, 16, 16);
+        }
+        g_hbmp_undo = bmp_u;
+        SelectObject(g_hdc_undo, bmp_u);
+        g_hbmp_temp = bmp_t;
+        SelectObject(g_hdc_temp, bmp_t);
+
+        if (g_hbmp_undo) {
+            hdc_mem = CreateCompatibleDC(scr);
+            if (hdc_mem) {
+                old_mem_bmp = (HBITMAP)SelectObject(hdc_mem, g_hbmp_undo);
+                br = CreateSolidBrush(RGB(255, 255, 255));
+                SetRect(&r, 0, 0, new_w, new_h);
+                FillRect(hdc_mem, &r, br);
+                DeleteObject(br);
+                SelectObject(hdc_mem, old_mem_bmp);
+                DeleteDC(hdc_mem);
+            }
+        }
     }
-
-    SelectObject(g_hdc_canvas, bmp_c);
-    DeleteObject(g_hbmp_canvas);
-    g_hbmp_canvas = bmp_c;
-
-    SelectObject(g_hdc_undo, bmp_u);
-    DeleteObject(g_hbmp_undo);
-    g_hbmp_undo = bmp_u;
-
-    SelectObject(g_hdc_temp, bmp_t);
-    DeleteObject(g_hbmp_temp);
-    g_hbmp_temp = bmp_t;
 
     ReleaseDC(g_mainwnd, scr);
 
@@ -2549,6 +2638,49 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev_inst, LPSTR cmdline, int show
     wc.lpszClassName = "W16PaintCraftClass";
 
     if (!RegisterClass(&wc)) return 1;
+
+    /* Jeśli podano plik w linii poleceń, odczytaj jego wymiary z nagłówka BMP przed
+     * utworzeniem okna, aby init_canvas_buffers w WM_CREATE zaalokowało bufor od razu
+     * we właściwym rozmiarze, bez marnowania pamięci na tymczasowe płótno 580x310 */
+    if (cmdline && cmdline[0]) {
+        char init_path[128];
+        int pi = 0;
+        LPCSTR p = cmdline;
+        while (*p && (unsigned char)*p <= ' ') p++;
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"' && (unsigned char)*p >= ' ' && pi < (int)sizeof(init_path) - 1) {
+                init_path[pi++] = *p++;
+            }
+        } else {
+            while (*p && (unsigned char)*p > ' ' && pi < (int)sizeof(init_path) - 1) {
+                init_path[pi++] = *p++;
+            }
+        }
+        init_path[pi] = '\0';
+        while (pi > 0 && (unsigned char)init_path[pi - 1] <= ' ') init_path[--pi] = '\0';
+        if (init_path[0]) {
+            HFILE fh = _lopen(init_path, 0);
+            if (fh != HFILE_ERROR) {
+                BMPFILEHDR fhdr;
+                BMPINFOHDR ihdr;
+                if (_lread(fh, (LPSTR)&fhdr, sizeof(fhdr)) == sizeof(fhdr) &&
+                    fhdr.bfType == 0x4D42 &&
+                    _lread(fh, (LPSTR)&ihdr, sizeof(ihdr)) == sizeof(ihdr) &&
+                    ihdr.biWidth > 0 && ihdr.biHeight != 0) {
+                    int w = (int)ihdr.biWidth;
+                    int h = (int)(ihdr.biHeight < 0 ? -ihdr.biHeight : ihdr.biHeight);
+                    if (w >= 16 && w <= 1280 && h >= 16 && h <= 1024) {
+                        g_canvas_w = w;
+                        g_canvas_h = h;
+                        g_view_w = w;
+                        g_view_h = h;
+                    }
+                }
+                _lclose(fh);
+            }
+        }
+    }
 
     /* Fully resizable window with Maximize, Minimize, System Menu, Caption, Thick Frame */
     g_mainwnd = CreateWindow(
