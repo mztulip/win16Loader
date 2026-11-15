@@ -29,6 +29,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `nameimp`  | NAMEIMP.EXE  | Import po nazwie z KERNEL: stałe (`__AHIncr`, `__AHShift`, `__WinFlags`, selektory) oraz `Catch`/`Throw`, także przez zagnieżdżone `SendMessage` |
 | `paint`    | PBRUSH.EXE   | PaintCraft Studio (odpowiednik Windows Paintbrush): podwójne buforowanie GDI, interaktywne zaznaczanie, filtry, obsługa BMP (1/4/8/24/32 bpp) |
 | `notepad`  | NOTEPAD.EXE  | Klasyczny Notatnik Win16 (wieloliniowy edytor tekstu, menu, dialogi COMMDLG) |
+| `charmap`  | CHARMAP.EXE  | Klasyczna Tablica Znaków Win16 (siatka 16x14, podgląd, schowek CF_TEXT, wybór czcionki) |
 
 ## Budowanie i uruchamianie
 

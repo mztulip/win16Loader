@@ -36,15 +36,15 @@ static void font_tests(HWND hwnd, HINSTANCE hi)
 
     EnumFonts(dc, NULL, (FONTENUMPROC)p, 0);
     CHECK(g_nfaces >= 5, "EnumFonts: >= 5 krojow (.FON)");
-    for (i = 0, found = FALSE; i < g_nfaces && i < 16; i++) if (!lstrcmp(g_faces[i], "MS Sans Serif")) found = TRUE;
-    CHECK(found, "EnumFonts: jest MS Sans Serif");
+    for (i = 0, found = FALSE; i < g_nfaces && i < 16; i++) if (!lstrcmp(g_faces[i], "FreeSans")) found = TRUE;
+    CHECK(found, "EnumFonts: jest FreeSans");
 
-    f = make_font(-11, FW_NORMAL, "MS Sans Serif");          /* 8 pt */
+    f = make_font(-11, FW_NORMAL, "FreeSans");          /* 8 pt */
     old = SelectObject(dc, f);
     GetTextFace(dc, sizeof(face), face);
-    CHECK_STR(face, "MS Sans Serif", "GetTextFace po CreateFont");
+    CHECK_STR(face, "FreeSans", "GetTextFace po CreateFont FreeSans");
     GetTextMetrics(dc, &tm);
-    CHECK_INT(tm.tmHeight, 13, "MS Sans Serif 8pt: tmHeight");
+    CHECK_INT(tm.tmHeight, 13, "FreeSans 8pt: tmHeight");
     ext = GetTextExtent(dc, "Hello", 5);
     CHECK(LOWORD(ext) > 15 && LOWORD(ext) < 60, "GetTextExtent: rozsadna szerokosc");
     CHECK_INT(HIWORD(ext), tm.tmHeight, "GetTextExtent: wysokosc = tmHeight");
@@ -62,14 +62,14 @@ static void font_tests(HWND hwnd, HINSTANCE hi)
     GetTextMetrics(dc, &tmb);
     extb = GetTextExtent(dc, "Hello", 5);
     CHECK(tmb.tmWeight >= FW_BOLD, "pogrubienie: tmWeight");
-    /* MS Sans Serif ma prawdziwy font pogrubiony (fonts/sserifb.fon), bez syntezy */
-    CHECK_INT(tmb.tmOverhang, 0, "pogrubienie MS Sans Serif: prawdziwy font");
+    /* FreeSans ma prawdziwy font pogrubiony (fonts/sserifb.fon), bez syntezy */
+    CHECK_INT(tmb.tmOverhang, 0, "pogrubienie FreeSans (alias MS Sans Serif): prawdziwy font");
     {
         HDC d2 = GetDC(0);
         HFONT o2 = SelectObject(d2, fb);
         char face[32];
         GetTextFace(d2, sizeof(face), face);
-        CHECK_STR(face, "MS Sans Serif", "pogrubienie MS Sans Serif: nazwa");
+        CHECK_STR(face, "FreeSans", "alias MS Sans Serif -> FreeSans w GetTextFace");
         CHECK(LOWORD(GetTextExtent(d2, "Start", 5)) <= 22, "pogrubione Start miesci sie jak w Calmirze");
         SelectObject(d2, o2);
         {   /* font bez wersji pogrubionej: synteza jak dotad */
@@ -86,13 +86,13 @@ static void font_tests(HWND hwnd, HINSTANCE hi)
         ReleaseDC(0, d2);
     }
     {
-        /* Aliasy fontow: PT Sans Narrow mapuje sie na MS Sans Serif */
+        /* Aliasy fontow: PT Sans Narrow mapuje sie na FreeSans */
         HFONT fpt = make_font(-11, FW_BOLD, "PT Sans Narrow");
         HDC dpt = GetDC(0);
         HFONT opt = SelectObject(dpt, fpt);
         char fface[32];
         GetTextFace(dpt, sizeof(fface), fface);
-        CHECK_STR(fface, "MS Sans Serif", "alias PT Sans Narrow -> MS Sans Serif");
+        CHECK_STR(fface, "FreeSans", "alias PT Sans Narrow -> FreeSans");
         CHECK(LOWORD(GetTextExtent(dpt, "Start", 5)) <= 22, "PT Sans Narrow Bold: Start <= 22 px");
         SelectObject(dpt, opt);
         DeleteObject(fpt);
@@ -130,8 +130,8 @@ LRESULT FAR PASCAL __export WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_PAINT: {
         static const struct { const char *face; int h, w; } fl[] = {
-            { "MS Sans Serif", -11, FW_NORMAL }, { "MS Sans Serif", -11, FW_BOLD },
-            { "MS Sans Serif", -13, FW_NORMAL }, { "MS Sans Serif", -16, FW_NORMAL },
+            { "FreeSans", -11, FW_NORMAL }, { "FreeSans", -11, FW_BOLD },
+            { "FreeSans", -13, FW_NORMAL }, { "FreeSans", -16, FW_NORMAL },
             { "System", 0, FW_BOLD }, { "Fixedsys", 0, FW_NORMAL },
             { "Courier", 0, FW_NORMAL }, { "Small Fonts", 0, FW_NORMAL } };
         PAINTSTRUCT ps;

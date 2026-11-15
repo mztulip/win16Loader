@@ -80,6 +80,11 @@ static void load_fon(LPCSTR mod)
         faceoff = rd(p, 105);
         for (k = 0; k < 31 && p[(WORD)faceoff + k]; k++) f->face[k] = p[(WORD)faceoff + k];
         f->face[k] = 0;
+        if (!fstricmp((const char __far *)f->face, "MS Sans Serif")) {
+            f->face[0] = 'F'; f->face[1] = 'r'; f->face[2] = 'e'; f->face[3] = 'e';
+            f->face[4] = 'S'; f->face[5] = 'a'; f->face[6] = 'n'; f->face[7] = 's';
+            f->face[8] = 0;
+        }
         f->ctab = f->ver >= 0x300 ? 148 : 118;
         gdbg("GDI: font '"); gdbg((LPCSTR)(char __far *)f->face); gdbg("' h=");
         gdbg_hex(f->height, 2); gdbg(" w="); gdbg_hex(f->weight, 3); gdbg("\n");
@@ -101,16 +106,16 @@ void font_init(void)
 static const char __far *alias(const char __far *n, BYTE pitch)
 {
     static const char * const map[][2] = {
-        {"ARIAL", "MS Sans Serif"}, {"HELV", "MS Sans Serif"}, {"HELVETICA", "MS Sans Serif"},
-        {"MS SHELL DLG", "MS Sans Serif"}, {"TAHOMA", "MS Sans Serif"},
-        {"PT SANS NARROW", "MS Sans Serif"}, {"PT SANS NARROW BOLD", "MS Sans Serif"},
-        {"PT SANS", "MS Sans Serif"},
+        {"ARIAL", "FreeSans"}, {"HELV", "FreeSans"}, {"HELVETICA", "FreeSans"},
+        {"MS SANS SERIF", "FreeSans"}, {"MS SHELL DLG", "FreeSans"}, {"TAHOMA", "FreeSans"},
+        {"PT SANS NARROW", "FreeSans"}, {"PT SANS NARROW BOLD", "FreeSans"},
+        {"PT SANS", "FreeSans"}, {"FREE SANS", "FreeSans"}, {"FREESANS", "FreeSans"},
         {"TIMES NEW ROMAN", "MS Serif"}, {"TMS RMN", "MS Serif"}, {"TIMES", "MS Serif"},
         {"COURIER NEW", "Courier"}, {"TERMINAL", "Fixedsys"}, {"SMALL FONTS", "Small Fonts"},
         {0, 0}
     };
     int i;
-    if (!n || !n[0]) return (pitch & 3) == 1 ? "Courier" : "MS Sans Serif";
+    if (!n || !n[0]) return (pitch & 3) == 1 ? "Courier" : "FreeSans";
     for (i = 0; map[i][0]; i++) if (!fstricmp(n, map[i][0])) return map[i][1];
     return n;
 }
@@ -126,7 +131,7 @@ int font_match(LOGFONT __far *lf)
             int fh, d, score;
             if (pass == 0 && fstricmp((const char __far *)f->face, want)) continue;
             if (pass == 1 && fstricmp((const char __far *)f->face,
-                                      (lf->lfPitchAndFamily & 3) == 1 ? "Courier" : "MS Sans Serif"))
+                                      (lf->lfPitchAndFamily & 3) == 1 ? "Courier" : "FreeSans"))
                 continue;
             if (h < 0) fh = f->height - f->intlead;        /* wysokosc znaku (em) */
             else fh = f->height;                           /* wysokosc komorki */
@@ -441,7 +446,8 @@ int API EnumFonts(HDC hdc, LPCSTR face, FONTENUMPROC proc, DWORD data)
         FONTSEL fs;
         BYTE *p;
         if (face && HIWORD(face)) {
-            if (fstricmp((const char __far *)f->face, face)) continue;
+            const char __far *wface = alias(face, 0);
+            if (fstricmp((const char __far *)f->face, face) && fstricmp((const char __far *)f->face, wface)) continue;
         } else {
             for (j = 0; j < i; j++) if (!fstricmp((const char __far *)g_fnt[j].face, (const char __far *)f->face)) break;
             if (j < i) continue;

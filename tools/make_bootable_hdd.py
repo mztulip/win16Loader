@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--notepad-exe", default="example_apps/notepad/NOTEPAD.exe", help="NOTEPAD.EXE path")
     parser.add_argument("--paint-exe", default="example_apps/paint/PAINT.EXE", help="PAINT.EXE path")
     parser.add_argument("--clock-exe", default="example_apps/clock/CLOCK.EXE", help="CLOCK.EXE path")
+    parser.add_argument("--charmap-exe", default="example_apps/charmap/CHARMAP.EXE", help="CHARMAP.EXE path")
     parser.add_argument("--mario-dir", default="games/mario", help="Mario game directory")
     args = parser.parse_args()
 
@@ -183,6 +184,19 @@ def main():
         if c and os.path.exists(c):
             win_files.append((c, "CLOCK.EXE"))
             break
+
+    charmap_candidates = [
+        args.charmap_exe,
+        "example_apps/charmap/CHARMAP.EXE",
+        "example_apps/charmap/CHARMAP.exe",
+    ]
+    for c in charmap_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "CHARMAP.EXE"))
+            break
+
+    if os.path.exists("example_apps/charmap/CHARMAP.ICO"):
+        win_files.append(("example_apps/charmap/CHARMAP.ICO", "CHARMAP.ICO"))
 
     for src, dst in win_files:
         run(["mcopy", "-oi", mpart, src, f"::WINDOWS/{dst}"])

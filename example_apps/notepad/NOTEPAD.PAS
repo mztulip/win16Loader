@@ -15,6 +15,14 @@ const
   IDM_EXIT      = 1005;
   IDM_ABOUT     = 1010;
 
+  IDM_UNDO      = 1020;
+  IDM_CUT       = 1021;
+  IDM_COPY      = 1022;
+  IDM_PASTE     = 1023;
+  IDM_DELETE    = 1024;
+  IDM_SELECTALL = 1025;
+  IDM_DATETIME  = 1026;
+
 type
   TOpenFileName = record
     lStructSize: Longint;
@@ -238,6 +246,61 @@ begin
   end;
 end;
 
+procedure InsertDateTime;
+var
+  H, M, S, Y, Mo, D: Word;
+  Buf: array[0..32] of Char;
+  SStr: string[32];
+  procedure Format2(Val: Word);
+  begin
+    if Val < 10 then
+      SStr := SStr + '0' + Chr(Ord('0') + Val)
+    else
+      SStr := SStr + Chr(Ord('0') + (Val div 10)) + Chr(Ord('0') + (Val mod 10));
+  end;
+begin
+  asm
+    mov ah, $2c
+    int $21
+    mov al, ch
+    xor ah, ah
+    mov H, ax
+    mov al, cl
+    xor ah, ah
+    mov M, ax
+    mov al, dh
+    xor ah, ah
+    mov S, ax
+    mov ah, $2a
+    int $21
+    mov Y, cx
+    mov al, dh
+    xor ah, ah
+    mov Mo, ax
+    mov al, dl
+    xor ah, ah
+    mov D, ax
+  end;
+  SStr := '';
+  Format2(H);
+  SStr := SStr + ':';
+  Format2(M);
+  SStr := SStr + ' ';
+  Format2(D);
+  SStr := SStr + '.';
+  Format2(Mo);
+  SStr := SStr + '.';
+  SStr := SStr + Chr(Ord('0') + (Y div 1000));
+  Y := Y mod 1000;
+  SStr := SStr + Chr(Ord('0') + (Y div 100));
+  Y := Y mod 100;
+  SStr := SStr + Chr(Ord('0') + (Y div 10));
+  SStr := SStr + Chr(Ord('0') + (Y mod 10));
+
+  StrPCopy(Buf, SStr);
+  SendMessage(G_EditWnd, $0400 + 18 { EM_REPLACESEL }, 0, LongInt(@Buf[0]));
+end;
+
 function WndProc(Wnd: HWND; Msg: UINT; WParam: WPARAM; LParam: LPARAM): LRESULT; export;
 var
   Rc: TRect;
@@ -296,6 +359,22 @@ begin
           DoFileSaveAs;
         IDM_EXIT:
           SendMessage(Wnd, WM_CLOSE, 0, 0);
+
+        IDM_UNDO:
+          SendMessage(G_EditWnd, $0304 { WM_UNDO }, 0, 0);
+        IDM_CUT:
+          SendMessage(G_EditWnd, $0300 { WM_CUT }, 0, 0);
+        IDM_COPY:
+          SendMessage(G_EditWnd, $0301 { WM_COPY }, 0, 0);
+        IDM_PASTE:
+          SendMessage(G_EditWnd, $0302 { WM_PASTE }, 0, 0);
+        IDM_DELETE:
+          SendMessage(G_EditWnd, $0303 { WM_CLEAR }, 0, 0);
+        IDM_SELECTALL:
+          SendMessage(G_EditWnd, $0400 + 1 { EM_SETSEL }, 0, LongInt($7FFF0000));
+        IDM_DATETIME:
+          InsertDateTime;
+
         IDM_ABOUT:
           MessageBox(
             Wnd,
@@ -332,18 +411,30 @@ end;
 
 procedure CreateMainMenu(Wnd: HWND);
 var
-  HMenu, HSubMenu, HHelpMenu: WinTypes.HMENU;
+  HMenu, HFileMenu, HEditMenu, HHelpMenu: WinTypes.HMENU;
 begin
   HMenu := CreateMenu;
-  HSubMenu := CreatePopupMenu;
 
-  AppendMenu(HSubMenu, MF_STRING, IDM_NEW,    '&Nowy');
-  AppendMenu(HSubMenu, MF_STRING, IDM_OPEN,   '&Otworz...');
-  AppendMenu(HSubMenu, MF_STRING, IDM_SAVE,   '&Zapisz');
-  AppendMenu(HSubMenu, MF_STRING, IDM_SAVEAS, 'Zapisz &jako...');
-  AppendMenu(HSubMenu, MF_SEPARATOR, 0, nil);
-  AppendMenu(HSubMenu, MF_STRING, IDM_EXIT,   '&Zakoncz');
-  AppendMenu(HMenu, MF_POPUP, HSubMenu, '&Plik');
+  HFileMenu := CreatePopupMenu;
+  AppendMenu(HFileMenu, MF_STRING, IDM_NEW,    '&Nowy');
+  AppendMenu(HFileMenu, MF_STRING, IDM_OPEN,   '&Otworz...');
+  AppendMenu(HFileMenu, MF_STRING, IDM_SAVE,   '&Zapisz');
+  AppendMenu(HFileMenu, MF_STRING, IDM_SAVEAS, 'Zapisz &jako...');
+  AppendMenu(HFileMenu, MF_SEPARATOR, 0, nil);
+  AppendMenu(HFileMenu, MF_STRING, IDM_EXIT,   '&Zakoncz');
+  AppendMenu(HMenu, MF_POPUP, HFileMenu, '&Plik');
+
+  HEditMenu := CreatePopupMenu;
+  AppendMenu(HEditMenu, MF_STRING, IDM_UNDO,      '&Cofnij'#9'Ctrl+Z');
+  AppendMenu(HEditMenu, MF_SEPARATOR, 0, nil);
+  AppendMenu(HEditMenu, MF_STRING, IDM_CUT,       '&Wytnij'#9'Ctrl+X');
+  AppendMenu(HEditMenu, MF_STRING, IDM_COPY,      '&Kopiuj'#9'Ctrl+C');
+  AppendMenu(HEditMenu, MF_STRING, IDM_PASTE,     'W&klej'#9'Ctrl+V');
+  AppendMenu(HEditMenu, MF_STRING, IDM_DELETE,    '&Usun'#9'Del');
+  AppendMenu(HEditMenu, MF_SEPARATOR, 0, nil);
+  AppendMenu(HEditMenu, MF_STRING, IDM_SELECTALL, 'Zaznacz &wszystko');
+  AppendMenu(HEditMenu, MF_STRING, IDM_DATETIME,  '&Godzina/data'#9'F5');
+  AppendMenu(HMenu, MF_POPUP, HEditMenu, '&Edycja');
 
   HHelpMenu := CreatePopupMenu;
   AppendMenu(HHelpMenu, MF_STRING, IDM_ABOUT, '&O programie...');

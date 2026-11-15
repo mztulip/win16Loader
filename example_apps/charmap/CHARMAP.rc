@@ -1,0 +1,4 @@
+#include <windows.h>
+#include "charmap.h"
+
+IDI_CHARMAP ICON "CHARMAP.ICO"
