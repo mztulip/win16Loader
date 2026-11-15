@@ -9,7 +9,7 @@ void API SetRect(LPRECT, int, int, int, int);
 BOOL API PtInRect(const RECT __far *, POINT);
 int  API GetKeyState(int);
 
-#define MAX_MENUS  128
+#define MAX_MENUS  256
 #define MAX_ITEMS  40
 #define MENUBASE   0x0400
 
@@ -33,6 +33,7 @@ typedef struct { WORD used, n; MITEM it[MAX_ITEMS]; } MENU;
 
 static WORD g_menutask[MAX_MENUS];
 static WORD g_menusel[MAX_MENUS];              /* kazde menu we wlasnym bloku GlobalAlloc */
+static HMENU g_wnd_sysmenu[MAX_WND];           /* wlasne menu systemowe okna (GetSystemMenu) */
 static HWND g_mowner;                          /* wlasciciel menu (WM_MEASUREITEM/WM_DRAWITEM) */
 
 static MENU __far *mptr(HMENU h)
@@ -94,6 +95,7 @@ BOOL API DestroyMenu(HMENU h)
     MENU __far *m = mptr(h);
     WORD i;
     if (!m) return FALSE;
+    for (i = 0; i < MAX_WND; i++) if (g_wnd_sysmenu[i] == h) g_wnd_sysmenu[i] = 0;
     for (i = 0; i < m->n; i++) if (m->it[i].flags & MF_POPUP) DestroyMenu(m->it[i].id);
     m->used = 0;
     i = (h - MENUBASE) >> 2;
@@ -328,29 +330,55 @@ HMENU API LoadMenu(WORD hinst, LPCSTR name)
 /* ============================================================
  * Menu systemowe
  * ============================================================ */
-static HMENU g_sysmenu;
+void sysmenu_destroy(HWND h)
+{
+    WORD i;
+    if (h < WNDBASE || ((h - WNDBASE) & 3)) return;
+    i = (h - WNDBASE) >> 2;
+    if (i < MAX_WND && g_wnd_sysmenu[i]) {
+        DestroyMenu(g_wnd_sysmenu[i]);
+        g_wnd_sysmenu[i] = 0;
+    }
+}
 
 HMENU API GetSystemMenu(HWND h, BOOL revert)
 {
     WND __far *w = WP(h);
-    (void)revert;
+    WORD i;
+    HMENU m;
     if (!w) return 0;
-    if (!g_sysmenu) {
-        g_sysmenu = CreatePopupMenu();
-        AppendMenu(g_sysmenu, 0, SC_RESTORE, "&Restore");
-        AppendMenu(g_sysmenu, 0, SC_MOVE, "&Move");
-        AppendMenu(g_sysmenu, 0, SC_SIZE, "&Size");
-        AppendMenu(g_sysmenu, 0, SC_MINIMIZE, "Mi&nimize");
-        AppendMenu(g_sysmenu, 0, SC_MAXIMIZE, "Ma&ximize");
-        AppendMenu(g_sysmenu, MF_SEPARATOR, 0, 0);
-        AppendMenu(g_sysmenu, 0, SC_CLOSE, "&Close\tAlt+F4");
+    if (h < WNDBASE || ((h - WNDBASE) & 3)) return 0;
+    i = (h - WNDBASE) >> 2;
+    if (i >= MAX_WND) return 0;
+
+    if (revert) {
+        if (g_wnd_sysmenu[i]) {
+            DestroyMenu(g_wnd_sysmenu[i]);
+            g_wnd_sysmenu[i] = 0;
+        }
+        return 0;
     }
-    EnableMenuItem(g_sysmenu, SC_RESTORE, (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) ? 0 : MF_GRAYED);
-    EnableMenuItem(g_sysmenu, SC_MAXIMIZE, ((w->style & WS_MAXIMIZEBOX) && !(w->flags & WF_MAXIMIZED)) ? 0 : MF_GRAYED);
-    EnableMenuItem(g_sysmenu, SC_MINIMIZE, ((w->style & WS_MINIMIZEBOX) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
-    EnableMenuItem(g_sysmenu, SC_SIZE, ((w->style & WS_THICKFRAME) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
-    EnableMenuItem(g_sysmenu, SC_MOVE, MF_GRAYED);
-    return g_sysmenu;
+
+    if (!g_wnd_sysmenu[i]) {
+        m = CreatePopupMenu();
+        if (!m) return 0;
+        AppendMenu(m, 0, SC_RESTORE, "&Restore");
+        AppendMenu(m, 0, SC_MOVE, "&Move");
+        AppendMenu(m, 0, SC_SIZE, "&Size");
+        AppendMenu(m, 0, SC_MINIMIZE, "Mi&nimize");
+        AppendMenu(m, 0, SC_MAXIMIZE, "Ma&ximize");
+        AppendMenu(m, MF_SEPARATOR, 0, 0);
+        AppendMenu(m, 0, SC_CLOSE, "&Close\tAlt+F4");
+        g_wnd_sysmenu[i] = m;
+    }
+
+    m = g_wnd_sysmenu[i];
+    EnableMenuItem(m, SC_RESTORE, (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) ? 0 : MF_GRAYED);
+    EnableMenuItem(m, SC_MAXIMIZE, ((w->style & WS_MAXIMIZEBOX) && !(w->flags & WF_MAXIMIZED)) ? 0 : MF_GRAYED);
+    EnableMenuItem(m, SC_MINIMIZE, ((w->style & WS_MINIMIZEBOX) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
+    EnableMenuItem(m, SC_SIZE, ((w->style & WS_THICKFRAME) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
+    EnableMenuItem(m, SC_MOVE, MF_GRAYED);
+    return m;
 }
 
 /* ============================================================

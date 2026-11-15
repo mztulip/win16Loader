@@ -69,6 +69,7 @@ typedef MSG __far *LPMSG;
 #define SEL_KCB 0x98
 
 /* ---- Okna ---- */
+#define WNDBASE        0x1000      /* HWND = WNDBASE + 4*indeks */
 #define MAX_WND        300         /* WND * MAX_WND <= 64KB (jeden segment) */
 #define MAX_EXTRA      64          /* cbWndExtra */
 #define MAX_TITLE      64
@@ -460,6 +461,8 @@ WORD   paint_msg(HWND h);                  /* WM_PAINT albo WM_PAINTICON (ikona 
 #define POPUP_FRAME   RGB(0x00, 0x40, 0x48)
 #define POPUP_SEP     RGB(0x40, 0x90, 0x98)
 void   sb_paint(HDC dc, LPRECT r, BOOL vert, int pos, int mn, int mx);
+void   sysmenu_destroy(HWND h);
+HMENU  API GetSystemMenu(HWND, BOOL);
 LRESULT API DefWindowProc(HWND, WORD, WORD, LONG);
 LRESULT API SendMessage(HWND, WORD, WORD, LONG);
 BOOL   API PostMessage(HWND, WORD, WORD, LONG);

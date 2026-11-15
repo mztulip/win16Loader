@@ -5,8 +5,6 @@
 WORD  g_wndmem;
 CLASS g_cls[MAX_CLASS];
 
-#define WNDBASE 0x1000                     /* HWND = WNDBASE + 4*indeks */
-
 WND __far *wnd_ptr(HWND h)
 {
     WORD i;
@@ -512,6 +510,7 @@ static void destroy_tree(HWND h)
         extern void props_remove_all(HWND h);
         props_remove_all(h);
     }
+    sysmenu_destroy(h);
     if (w->upd) { DeleteObject(w->upd); w->upd = 0; }
     unlink_wnd(h);
     w->used = 0;
