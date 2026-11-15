@@ -85,6 +85,19 @@ static void font_tests(HWND hwnd, HINSTANCE hi)
         }
         ReleaseDC(0, d2);
     }
+    {
+        /* Aliasy fontow: PT Sans Narrow mapuje sie na MS Sans Serif */
+        HFONT fpt = make_font(-11, FW_BOLD, "PT Sans Narrow");
+        HDC dpt = GetDC(0);
+        HFONT opt = SelectObject(dpt, fpt);
+        char fface[32];
+        GetTextFace(dpt, sizeof(fface), fface);
+        CHECK_STR(fface, "MS Sans Serif", "alias PT Sans Narrow -> MS Sans Serif");
+        CHECK(LOWORD(GetTextExtent(dpt, "Start", 5)) <= 22, "PT Sans Narrow Bold: Start <= 22 px");
+        SelectObject(dpt, opt);
+        DeleteObject(fpt);
+        ReleaseDC(0, dpt);
+    }
     SelectObject(dc, old);
     DeleteObject(fb);
     DeleteObject(f);

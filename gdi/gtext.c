@@ -103,6 +103,8 @@ static const char __far *alias(const char __far *n, BYTE pitch)
     static const char * const map[][2] = {
         {"ARIAL", "MS Sans Serif"}, {"HELV", "MS Sans Serif"}, {"HELVETICA", "MS Sans Serif"},
         {"MS SHELL DLG", "MS Sans Serif"}, {"TAHOMA", "MS Sans Serif"},
+        {"PT SANS NARROW", "MS Sans Serif"}, {"PT SANS NARROW BOLD", "MS Sans Serif"},
+        {"PT SANS", "MS Sans Serif"},
         {"TIMES NEW ROMAN", "MS Serif"}, {"TMS RMN", "MS Serif"}, {"TIMES", "MS Serif"},
         {"COURIER NEW", "Courier"}, {"TERMINAL", "Fixedsys"}, {"SMALL FONTS", "Small Fonts"},
         {0, 0}
