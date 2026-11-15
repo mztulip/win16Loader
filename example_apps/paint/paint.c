@@ -900,7 +900,8 @@ static BOOL save_canvas_to_bmp(const char *path)
     _lclose(fh);
 
     lstrcpy(g_curfile, path);
-    wsprintf(g_titlebuf, "PaintCraft - %s", g_curfile);
+    lstrcpy(g_titlebuf, "PaintCraft - ");
+    lstrcat(g_titlebuf, g_curfile);
     SetWindowText(g_mainwnd, g_titlebuf);
     set_status("File saved successfully.");
     return TRUE;
@@ -920,32 +921,38 @@ static BOOL load_canvas_from_bmp(const char *path)
     HBRUSH br;
     RECT r;
 
+    OutputDebugString("PAINT: load_canvas_from_bmp\n");
     fh = _lopen(path, 0);
     if (fh == HFILE_ERROR) {
+        OutputDebugString("PAINT: _lopen failed\n");
         MessageBox(g_mainwnd, "Unable to open selected file.", "Open Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
     if (_lread(fh, (LPSTR)&fhdr, sizeof(fhdr)) != sizeof(fhdr)) {
         _lclose(fh);
+        OutputDebugString("PAINT: read fhdr failed\n");
         MessageBox(g_mainwnd, "Failed reading BMP file header.", "Format Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
     if (fhdr.bfType != 0x4D42) {
         _lclose(fh);
+        OutputDebugString("PAINT: not BM\n");
         MessageBox(g_mainwnd, "Selected file is not a valid BMP bitmap.", "Format Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
     if (_lread(fh, (LPSTR)&ihdr, sizeof(ihdr)) != sizeof(ihdr)) {
         _lclose(fh);
+        OutputDebugString("PAINT: read ihdr failed\n");
         MessageBox(g_mainwnd, "Failed reading BMP info header.", "Format Error", MB_OK | MB_ICONSTOP);
         return FALSE;
     }
 
     if (ihdr.biCompression != 0) {
         _lclose(fh);
+        OutputDebugString("PAINT: compressed BMP\n");
         MessageBox(g_mainwnd, "Compressed BMP files (RLE) are not supported.", "File Format", MB_OK | MB_ICONINFORMATION);
         return FALSE;
     }
@@ -953,6 +960,7 @@ static BOOL load_canvas_from_bmp(const char *path)
     bpp = (int)ihdr.biBitCount;
     if (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 24 && bpp != 32) {
         _lclose(fh);
+        OutputDebugString("PAINT: unsupported bpp\n");
         MessageBox(g_mainwnd, "Unsupported bit depth. Supported: 1, 4, 8, 24, 32 bpp.", "File Format", MB_OK | MB_ICONINFORMATION);
         return FALSE;
     }
@@ -1016,9 +1024,10 @@ static BOOL load_canvas_from_bmp(const char *path)
     dh = img_h;
     if (dh > g_canvas_h) dh = g_canvas_h;
 
-    /* Seek to pixel data */
+    OutputDebugString("PAINT: seeking to bits\n");
     _llseek(fh, (LONG)fhdr.bfOffBits, 0);
 
+    OutputDebugString("PAINT: reading rows\n");
     for (y = 0; y < img_h; y++) {
         screen_y = top_down ? y : (img_h - 1 - y);
 
@@ -1083,13 +1092,16 @@ static BOOL load_canvas_from_bmp(const char *path)
         }
     }
     _lclose(fh);
+    OutputDebugString("PAINT: rows read OK, refreshing canvas\n");
 
     refresh_canvas();
 
     lstrcpy(g_curfile, path);
-    wsprintf(g_titlebuf, "PaintCraft - %s", g_curfile);
+    lstrcpy(g_titlebuf, "PaintCraft - ");
+    lstrcat(g_titlebuf, g_curfile);
     SetWindowText(g_mainwnd, g_titlebuf);
     set_status("Loaded BMP image.");
+    OutputDebugString("PAINT: load_canvas_from_bmp complete\n");
     return TRUE;
 }
 
@@ -1964,6 +1976,27 @@ int PASCAL WinMain(HINSTANCE hinst, HINSTANCE prev_inst, LPSTR cmdline, int show
     create_main_menu(g_mainwnd);
     ShowWindow(g_mainwnd, show);
     UpdateWindow(g_mainwnd);
+
+    if (cmdline && cmdline[0]) {
+        char path_buf[128];
+        int pi = 0;
+        while (*cmdline == ' ' || *cmdline == '\t') cmdline++;
+        if (*cmdline == '"') {
+            cmdline++;
+            while (*cmdline && *cmdline != '"' && pi < (int)sizeof(path_buf) - 1) {
+                path_buf[pi++] = *cmdline++;
+            }
+        } else {
+            while (*cmdline && *cmdline != ' ' && *cmdline != '\t' && pi < (int)sizeof(path_buf) - 1) {
+                path_buf[pi++] = *cmdline++;
+            }
+        }
+        path_buf[pi] = '\0';
+        if (path_buf[0]) {
+            OutputDebugString("PAINT: opening cmdline file\n");
+            load_canvas_from_bmp(path_buf);
+        }
+    }
 
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);

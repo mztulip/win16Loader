@@ -2358,6 +2358,12 @@ begin
   ShowWindow(G_MainWnd, SW_SHOW);
   UpdateWindow(G_MainWnd);
 
+  if ParamCount > 0 then
+  begin
+    StrPCopy(G_CurFile, ParamStr(1));
+    LoadCanvasFromBMP(G_CurFile);
+  end;
+
   while GetMessage(Msg, 0, 0, 0) do
   begin
     TranslateMessage(Msg);
