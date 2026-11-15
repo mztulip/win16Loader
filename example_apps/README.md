@@ -30,6 +30,7 @@ TEST CTLTEST DONE pass=36 fail=0
 | `paint`    | PBRUSH.EXE   | PaintCraft Studio (odpowiednik Windows Paintbrush): podwójne buforowanie GDI, interaktywne zaznaczanie, filtry, obsługa BMP (1/4/8/24/32 bpp) |
 | `notepad`  | NOTEPAD.EXE  | Klasyczny Notatnik Win16 (wieloliniowy edytor tekstu, menu, dialogi COMMDLG) |
 | `charmap`  | CHARMAP.EXE  | Klasyczna Tablica Znaków Win16 (siatka 16x14, podgląd, schowek CF_TEXT, wybór czcionki) |
+| `hexview`  | HEXVIEW.EXE  | Przeglądarka plików binarnych (offset, bajty hex, zdekodowany ASCII, skok do adresu, podświetlanie, skojarzenia .sys/.bin/.dat) |
 
 ## Budowanie i uruchamianie
 

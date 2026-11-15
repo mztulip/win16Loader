@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--paint-exe", default="example_apps/paint/PAINT.EXE", help="PAINT.EXE path")
     parser.add_argument("--clock-exe", default="example_apps/clock/CLOCK.EXE", help="CLOCK.EXE path")
     parser.add_argument("--charmap-exe", default="example_apps/charmap/CHARMAP.EXE", help="CHARMAP.EXE path")
+    parser.add_argument("--hexview-exe", default="example_apps/hexview/HEXVIEW.EXE", help="HEXVIEW.EXE path")
     parser.add_argument("--mario-dir", default="games/mario", help="Mario game directory")
     args = parser.parse_args()
 
@@ -198,6 +199,19 @@ def main():
     if os.path.exists("example_apps/charmap/CHARMAP.ICO"):
         win_files.append(("example_apps/charmap/CHARMAP.ICO", "CHARMAP.ICO"))
 
+    hexview_candidates = [
+        args.hexview_exe,
+        "example_apps/hexview/HEXVIEW.EXE",
+        "example_apps/hexview/HEXVIEW.exe",
+    ]
+    for c in hexview_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "HEXVIEW.EXE"))
+            break
+
+    if os.path.exists("example_apps/hexview/HEXVIEW.ICO"):
+        win_files.append(("example_apps/hexview/HEXVIEW.ICO", "HEXVIEW.ICO"))
+
     for src, dst in win_files:
         run(["mcopy", "-oi", mpart, src, f"::WINDOWS/{dst}"])
 
@@ -267,6 +281,8 @@ def main():
         run(["mcopy", "-oi", mpart, "windir/LOADER16.ICO", "::CALMIRA/LOADER16.ICO"])
     if os.path.exists("windir/I486.ICO"):
         run(["mcopy", "-oi", mpart, "windir/I486.ICO", "::CALMIRA/I486.ICO"])
+    if os.path.exists("windir/HEXVIEW.ICO"):
+        run(["mcopy", "-oi", mpart, "windir/HEXVIEW.ICO", "::CALMIRA/HEXVIEW.ICO"])
     if os.path.exists("windir/CALMIRA.INI"):
         run(["mcopy", "-oi", mpart, "windir/CALMIRA.INI", "::CALMIRA/CALMIRA.INI"])
     if os.path.exists("windir/START.INI"):

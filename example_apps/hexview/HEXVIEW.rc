@@ -1,0 +1,43 @@
+#include <windows.h>
+#include "hexview.h"
+
+HEXVIEW_ICON ICON "HEXVIEW.ICO"
+
+HEXVIEW_MENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Open...\tCtrl+O", IDM_FILE_OPEN
+        MENUITEM "&Close",           IDM_FILE_CLOSE
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit\tAlt+F4",    IDM_FILE_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Go to Offset...\tCtrl+G", IDM_EDIT_GOTO
+        MENUITEM SEPARATOR
+        MENUITEM "&Copy Line\tCtrl+C",       IDM_EDIT_COPY
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Hex Viewer...",     IDM_HELP_ABOUT
+    END
+END
+
+HEXVIEW_ACCEL ACCELERATORS
+BEGIN
+    "^O", IDM_FILE_OPEN
+    "^G", IDM_EDIT_GOTO
+    "^C", IDM_EDIT_COPY
+END
+
+IDD_GOTO DIALOG 20, 20, 160, 65
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Go to Offset"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT "Enter offset (hex, e.g. 1A0):", -1, 10, 8, 140, 10
+    EDITTEXT IDC_GOTO_EDIT, 10, 22, 140, 12, ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP
+    DEFPUSHBUTTON "OK", IDOK, 30, 42, 40, 14, WS_TABSTOP
+    PUSHBUTTON "Cancel", IDCANCEL, 90, 42, 40, 14, WS_TABSTOP
+END

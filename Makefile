@@ -416,6 +416,7 @@ boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16
 	mcopy -i boot.img $(SKIFREE_DIR)/SKI.EXE        ::ski.exe
 	mcopy -i boot.img $(CLOCK_EXE)                  ::clock.exe
 	mcopy -i boot.img $(CHARMAP_EXE)                ::charmap.exe
+	mcopy -i boot.img $(HEXVIEW_EXE)                ::hexview.exe
 	@echo "[OK] boot.img gotowy"
 
 run-qemu: boot.img
@@ -542,6 +543,7 @@ NOTEPAD_EXE = example_apps/notepad/NOTEPAD.exe
 PAINT_EXE   = example_apps/paint/PAINT.EXE
 CLOCK_EXE   = example_apps/clock/CLOCK.EXE
 CHARMAP_EXE = example_apps/charmap/CHARMAP.EXE
+HEXVIEW_EXE = example_apps/hexview/HEXVIEW.EXE
 
 $(NOTEPAD_EXE): example_apps/notepad/NOTEPAD.PAS
 	$(MAKE) -C example_apps/notepad
@@ -554,6 +556,12 @@ $(CLOCK_EXE): example_apps/clock/main.c example_apps/clock/winclock.c
 
 $(CHARMAP_EXE): example_apps/charmap/charmap.c example_apps/charmap/CHARMAP.rc example_apps/charmap/CHARMAP.ICO
 	$(MAKE) -C example_apps/charmap
+
+$(HEXVIEW_EXE): example_apps/hexview/hexview.c example_apps/hexview/HEXVIEW.rc example_apps/hexview/HEXVIEW.ICO
+	$(MAKE) -C example_apps/hexview
+
+windir/HEXVIEW.ICO: example_apps/hexview/gen_hexview_ico.py
+	python3 example_apps/hexview/gen_hexview_ico.py $@
 
 windir/FREEDOS.ICO: tools/make_freedos_ico.py
 	python3 tools/make_freedos_ico.py
@@ -571,13 +579,13 @@ control.exe: control.c
 	$(WCL) -ms -zW -bt=windows -zq -l=windows -I$(WATCOM)/h -I$(WATCOM)/h/win control.c -fe=$@
 
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
-             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) $(CLOCK_EXE) $(CHARMAP_EXE) \
-             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
+             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) $(CLOCK_EXE) $(CHARMAP_EXE) $(HEXVIEW_EXE) \
+             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/HEXVIEW.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
              $(wildcard windir/*.BMP) $(wildcard games/mario/*.*) $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE) \
-	    --clock-exe=$(CLOCK_EXE) --charmap-exe=$(CHARMAP_EXE) \
+	    --clock-exe=$(CLOCK_EXE) --charmap-exe=$(CHARMAP_EXE) --hexview-exe=$(HEXVIEW_EXE) \
 	    --mario-dir=games/mario
 
 # Resetowanie obrazu dysku twardego Calmira do czystego stanu fabrycznego
