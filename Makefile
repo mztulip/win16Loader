@@ -15,7 +15,7 @@ FDBOOT  = FD14-FloppyEdition/144m/x86BOOT.img
 
 export WATCOM INCLUDE EDPATH WIPATH PATH
 
-.PHONY: all run run-qemu clean
+.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira
 
 SKIFREE_DIR = SKIFREE
 
@@ -565,16 +565,29 @@ calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE)
 
+# Resetowanie obrazu dysku twardego Calmira do czystego stanu fabrycznego
+reset-calmira:
+	rm -f calmira.img floppy.img
+	$(MAKE) calmira.img floppy.img
+	@echo "=== Obraz calmira.img zresetowany do stanu surowego/fabrycznego ==="
+
 # ExitWindows(EW_REBOOTSYSTEM) resetuje PC - domyslnie pozwalamy QEMU na reboot.
 # Diagnostyka crashy (zatrzymanie po triple fault): make run-calmira QEMU_REBOOT="-no-reboot -no-shutdown"
 QEMU_REBOOT ?=
+SNAPSHOT ?=
+QEMU_SNAPSHOT = $(if $(SNAPSHOT),-snapshot,)
 run-calmira: calmira.img floppy.img
 	qemu-system-i386 -vga std,retrace=precise \
 	    -drive file=floppy.img,if=floppy,format=raw \
 	    -drive file=calmira.img,if=ide,format=raw -boot c -m 16 \
+	    $(QEMU_SNAPSHOT) \
 	    $(QEMU_REBOOT) \
 	    -serial stdio \
 	    -d cpu_reset,guest_errors -D qemu.log
+
+# Uruchomienie w trybie tymczasowym (read-only overlay) - zadne zmiany nie sa zapisywane na dysku
+run-calmira-snapshot:
+	$(MAKE) run-calmira SNAPSHOT=1
 
 clean:
 	rm -f kernel.exe kernel.obj
