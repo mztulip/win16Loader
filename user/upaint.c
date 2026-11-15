@@ -159,8 +159,12 @@ HDC API BeginPaint(HWND h, PAINTSTRUCT __far *ps)
         ps->rc.top = b.top - w->cr.top;    ps->rc.bottom = b.bottom - w->cr.top;
         DeleteObject(w->upd);
         w->upd = 0;
+        GdiIntersectVis(dc, (LPRECT)ur, n);
+    } else {
+        ps->rc.left = 0; ps->rc.top = 0;
+        ps->rc.right = w->cr.right - w->cr.left;
+        ps->rc.bottom = w->cr.bottom - w->cr.top;
     }
-    GdiIntersectVis(dc, (LPRECT)ur, n);
     if (w->flags & WF_ERASE) {
         w->flags &= ~WF_ERASE;
         ps->fErase = !send_msg(h, class_icon_paint(w) ? WM_ICONERASEBKGND : WM_ERASEBKGND, dc, 0);

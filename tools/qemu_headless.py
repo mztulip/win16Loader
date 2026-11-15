@@ -125,6 +125,8 @@ def main():
                     pass
             elif k == 'c':
                 mon(sock, 'mouse_button 1'); time.sleep(0.1); mon(sock, 'mouse_button 0')
+            elif k == 'r':
+                mon(sock, 'mouse_button 4'); time.sleep(0.1); mon(sock, 'mouse_button 0')
             elif k == 'u':
                 key_map = {
                     ':': 'shift-semicolon',

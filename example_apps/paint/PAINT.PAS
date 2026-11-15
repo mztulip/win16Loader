@@ -224,12 +224,37 @@ end;
 
 procedure SetStatus(S: PChar);
 var
-  Rc: TRect;
+  Rc, ClientRc: TRect;
+  Dc: HDC;
+  Br: HBRUSH;
+  Hp, OldPen: HPEN;
 begin
   StrCopy(G_StatusText, S);
-  GetClientRect(G_MainWnd, Rc);
-  Rc.top := Rc.bottom - 22;
-  InvalidateRect(G_MainWnd, @Rc, True);
+  if G_MainWnd = 0 then Exit;
+  GetClientRect(G_MainWnd, ClientRc);
+  Rc.left := 0;
+  Rc.top := ClientRc.bottom - 22;
+  Rc.right := ClientRc.right;
+  Rc.bottom := ClientRc.bottom;
+  Dc := GetDC(G_MainWnd);
+  if Dc <> 0 then
+  begin
+    Br := CreateSolidBrush(RGB(240, 242, 245));
+    FillRect(Dc, Rc, Br);
+    DeleteObject(Br);
+
+    Hp := CreatePen(PS_SOLID, 1, RGB(190, 195, 205));
+    OldPen := SelectObject(Dc, Hp);
+    MoveTo(Dc, 0, Rc.top);
+    LineTo(Dc, ClientRc.right, Rc.top);
+    SelectObject(Dc, OldPen);
+    DeleteObject(Hp);
+
+    SetBkMode(Dc, TRANSPARENT);
+    SetTextColor(Dc, RGB(40, 44, 52));
+    TextOut(Dc, 8, Rc.top + 3, G_StatusText, StrLen(G_StatusText));
+    ReleaseDC(G_MainWnd, Dc);
+  end;
 end;
 
 procedure InitPalette;

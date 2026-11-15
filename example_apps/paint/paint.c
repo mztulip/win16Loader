@@ -122,6 +122,14 @@ static HDC     g_hdc_temp = NULL;
 static HBITMAP g_hbmp_temp = NULL;
 static HBITMAP g_hbmp_old_temp = NULL;
 
+/* Viewport and Scrolling */
+static int     g_view_w = CANVAS_DEF_W;
+static int     g_view_h = CANVAS_DEF_H;
+static int     g_scroll_x = 0;
+static int     g_scroll_y = 0;
+static HWND    g_hwnd_sb_vert = NULL;
+static HWND    g_hwnd_sb_horz = NULL;
+
 /* Selection State */
 static BOOL    g_has_sel = FALSE;
 static RECT    g_sel_rc;
@@ -170,11 +178,33 @@ static unsigned simple_rand(void)
 
 static void set_status(const char *text)
 {
-    RECT r;
+    RECT r, client_rc;
+    HDC dc;
+    HBRUSH br;
+    HPEN hp, old_pen;
+
     lstrcpy(g_statustext, text);
-    GetClientRect(g_mainwnd, &r);
-    r.top = r.bottom - 22;
-    InvalidateRect(g_mainwnd, &r, TRUE);
+    if (!g_mainwnd) return;
+    GetClientRect(g_mainwnd, &client_rc);
+    SetRect(&r, 0, client_rc.bottom - 22, client_rc.right, client_rc.bottom);
+    dc = GetDC(g_mainwnd);
+    if (dc) {
+        br = CreateSolidBrush(RGB(240, 242, 245));
+        FillRect(dc, &r, br);
+        DeleteObject(br);
+
+        hp = CreatePen(PS_SOLID, 1, RGB(190, 195, 205));
+        old_pen = (HPEN)SelectObject(dc, hp);
+        MoveTo(dc, 0, r.top);
+        LineTo(dc, client_rc.right, r.top);
+        SelectObject(dc, old_pen);
+        DeleteObject(hp);
+
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(40, 44, 52));
+        TextOut(dc, 8, r.top + 3, g_statustext, lstrlen(g_statustext));
+        ReleaseDC(g_mainwnd, dc);
+    }
 }
 
 static void init_palette(void)
@@ -259,12 +289,118 @@ static void save_undo_state(void)
     }
 }
 
+static void update_scrollbars(void)
+{
+    RECT client_rc;
+    int max_view_w, max_view_h;
+    int view_w, view_h;
+    BOOL need_h = FALSE, need_v = FALSE;
+    int max_scroll_x, max_scroll_y;
+
+    if (!g_mainwnd) return;
+    GetClientRect(g_mainwnd, &client_rc);
+
+    max_view_w = client_rc.right - CANVAS_X - 10;
+    max_view_h = client_rc.bottom - 22 - 4 - CANVAS_Y;
+    if (max_view_w < 50) max_view_w = 50;
+    if (max_view_h < 50) max_view_h = 50;
+
+    view_w = max_view_w;
+    view_h = max_view_h;
+
+    if (g_canvas_w > view_w) {
+        need_h = TRUE;
+        view_h -= 16;
+    }
+    if (g_canvas_h > view_h) {
+        need_v = TRUE;
+        view_w -= 16;
+        if (!need_h && g_canvas_w > view_w) {
+            need_h = TRUE;
+            view_h -= 16;
+        }
+    }
+    if (view_w < 50) view_w = 50;
+    if (view_h < 50) view_h = 50;
+
+    g_view_w = view_w;
+    g_view_h = view_h;
+
+    max_scroll_x = (g_canvas_w > g_view_w) ? (g_canvas_w - g_view_w) : 0;
+    max_scroll_y = (g_canvas_h > g_view_h) ? (g_canvas_h - g_view_h) : 0;
+
+    if (g_scroll_x > max_scroll_x) g_scroll_x = max_scroll_x;
+    if (g_scroll_y > max_scroll_y) g_scroll_y = max_scroll_y;
+    if (g_scroll_x < 0) g_scroll_x = 0;
+    if (g_scroll_y < 0) g_scroll_y = 0;
+
+    if (g_hwnd_sb_vert) {
+        if (need_v) {
+            MoveWindow(g_hwnd_sb_vert, CANVAS_X + g_view_w, CANVAS_Y, 16, g_view_h, TRUE);
+            SetScrollRange(g_hwnd_sb_vert, SB_CTL, 0, max_scroll_y, FALSE);
+            SetScrollPos(g_hwnd_sb_vert, SB_CTL, g_scroll_y, TRUE);
+            ShowWindow(g_hwnd_sb_vert, SW_SHOW);
+        } else {
+            ShowWindow(g_hwnd_sb_vert, SW_HIDE);
+        }
+    }
+
+    if (g_hwnd_sb_horz) {
+        if (need_h) {
+            MoveWindow(g_hwnd_sb_horz, CANVAS_X, CANVAS_Y + g_view_h, g_view_w, 16, TRUE);
+            SetScrollRange(g_hwnd_sb_horz, SB_CTL, 0, max_scroll_x, FALSE);
+            SetScrollPos(g_hwnd_sb_horz, SB_CTL, g_scroll_x, TRUE);
+            ShowWindow(g_hwnd_sb_horz, SW_SHOW);
+        } else {
+            ShowWindow(g_hwnd_sb_horz, SW_HIDE);
+        }
+    }
+}
+
+static void blit_canvas_viewport(HDC target_dc, HDC src_dc)
+{
+    int disp_w, disp_h;
+    if (!target_dc || !src_dc) return;
+
+    disp_w = (g_canvas_w - g_scroll_x < g_view_w) ? (g_canvas_w - g_scroll_x) : g_view_w;
+    disp_h = (g_canvas_h - g_scroll_y < g_view_h) ? (g_canvas_h - g_scroll_y) : g_view_h;
+
+    if (disp_w > 0 && disp_h > 0) {
+        BitBlt(target_dc, CANVAS_X, CANVAS_Y, disp_w, disp_h, src_dc, g_scroll_x, g_scroll_y, SRCCOPY);
+    }
+}
+
+static BOOL screen_to_canvas(int sx, int sy, int *cx, int *cy)
+{
+    int disp_w = (g_canvas_w - g_scroll_x < g_view_w) ? (g_canvas_w - g_scroll_x) : g_view_w;
+    int disp_h = (g_canvas_h - g_scroll_y < g_view_h) ? (g_canvas_h - g_scroll_y) : g_view_h;
+
+    if (sx >= CANVAS_X && sx < CANVAS_X + disp_w &&
+        sy >= CANVAS_Y && sy < CANVAS_Y + disp_h) {
+        int x = sx - CANVAS_X + g_scroll_x;
+        int y = sy - CANVAS_Y + g_scroll_y;
+        if (x < 0) x = 0;
+        if (x >= g_canvas_w) x = g_canvas_w - 1;
+        if (y < 0) y = 0;
+        if (y >= g_canvas_h) y = g_canvas_h - 1;
+        *cx = x;
+        *cy = y;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static void render_canvas_to_dc(HDC target_dc)
 {
     HPEN hp, old_pen;
-    HBRUSH old_br;
+    HBRUSH old_br, br;
+    RECT r;
+    int disp_w, disp_h;
 
     if (!g_hdc_canvas || !g_hdc_temp) return;
+
+    disp_w = (g_canvas_w - g_scroll_x < g_view_w) ? (g_canvas_w - g_scroll_x) : g_view_w;
+    disp_h = (g_canvas_h - g_scroll_y < g_view_h) ? (g_canvas_h - g_scroll_y) : g_view_h;
 
     /* Copy base canvas to temp composite buffer */
     BitBlt(g_hdc_temp, 0, 0, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
@@ -285,8 +421,22 @@ static void render_canvas_to_dc(HDC target_dc)
         DeleteObject(hp);
     }
 
-    /* Blit composite temp buffer to screen window */
-    BitBlt(target_dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_temp, 0, 0, SRCCOPY);
+    /* Blit composite temp buffer to screen window inside viewport bounds */
+    if (disp_w > 0 && disp_h > 0) {
+        BitBlt(target_dc, CANVAS_X, CANVAS_Y, disp_w, disp_h, g_hdc_temp, g_scroll_x, g_scroll_y, SRCCOPY);
+    }
+
+    /* If canvas is smaller than viewport, clear margins */
+    if (disp_w < g_view_w) {
+        SetRect(&r, CANVAS_X + disp_w, CANVAS_Y, CANVAS_X + g_view_w, CANVAS_Y + g_view_h);
+        br = (HBRUSH)(COLOR_BTNFACE + 1);
+        FillRect(target_dc, &r, br);
+    }
+    if (disp_h < g_view_h) {
+        SetRect(&r, CANVAS_X, CANVAS_Y + disp_h, CANVAS_X + g_view_w, CANVAS_Y + g_view_h);
+        br = (HBRUSH)(COLOR_BTNFACE + 1);
+        FillRect(target_dc, &r, br);
+    }
 }
 
 static void refresh_canvas(void)
@@ -639,6 +789,59 @@ static void destroy_canvas_buffers(void)
         DeleteDC(g_hdc_clip);
         g_hdc_clip = NULL;
     }
+}
+
+static BOOL resize_canvas_buffers(int new_w, int new_h)
+{
+    HDC scr;
+    HBITMAP bmp_c, bmp_u, bmp_t;
+    RECT r;
+    HBRUSH br;
+
+    if (!g_mainwnd || !g_hdc_canvas) return FALSE;
+    scr = GetDC(g_mainwnd);
+    if (!scr) return FALSE;
+
+    bmp_c = CreateCompatibleBitmap(scr, new_w, new_h);
+    bmp_u = CreateCompatibleBitmap(scr, new_w, new_h);
+    bmp_t = CreateCompatibleBitmap(scr, new_w, new_h);
+
+    if (!bmp_c || !bmp_u || !bmp_t) {
+        if (bmp_c) DeleteObject(bmp_c);
+        if (bmp_u) DeleteObject(bmp_u);
+        if (bmp_t) DeleteObject(bmp_t);
+        ReleaseDC(g_mainwnd, scr);
+        return FALSE;
+    }
+
+    SelectObject(g_hdc_canvas, bmp_c);
+    DeleteObject(g_hbmp_canvas);
+    g_hbmp_canvas = bmp_c;
+
+    SelectObject(g_hdc_undo, bmp_u);
+    DeleteObject(g_hbmp_undo);
+    g_hbmp_undo = bmp_u;
+
+    SelectObject(g_hdc_temp, bmp_t);
+    DeleteObject(g_hbmp_temp);
+    g_hbmp_temp = bmp_t;
+
+    ReleaseDC(g_mainwnd, scr);
+
+    g_canvas_w = new_w;
+    g_canvas_h = new_h;
+    g_scroll_x = 0;
+    g_scroll_y = 0;
+
+    br = CreateSolidBrush(RGB(255, 255, 255));
+    SetRect(&r, 0, 0, g_canvas_w, g_canvas_h);
+    FillRect(g_hdc_canvas, &r, br);
+    FillRect(g_hdc_undo, &r, br);
+    DeleteObject(br);
+    g_can_undo = FALSE;
+
+    update_scrollbars();
+    return TRUE;
 }
 
 static void apply_draw_shape(HDC target, int tool, int style, int x1, int y1, int x2, int y2,
@@ -1003,6 +1206,15 @@ static BOOL load_canvas_from_bmp(const char *path)
     commit_selection();
     save_undo_state();
 
+    /* Resize canvas buffers if image dimensions differ from current canvas */
+    if (img_w != g_canvas_w || img_h != g_canvas_h) {
+        if (!resize_canvas_buffers(img_w, img_h)) {
+            _lclose(fh);
+            MessageBox(g_mainwnd, "Not enough memory for image dimensions.", "Memory Error", MB_OK | MB_ICONSTOP);
+            return FALSE;
+        }
+    }
+
     /* Clear canvas to clean white before drawing loaded pixels */
     br = CreateSolidBrush(RGB(255, 255, 255));
     SetRect(&r, 0, 0, g_canvas_w, g_canvas_h);
@@ -1020,9 +1232,7 @@ static BOOL load_canvas_from_bmp(const char *path)
     }
 
     dw = img_w;
-    if (dw > g_canvas_w) dw = g_canvas_w;
     dh = img_h;
-    if (dh > g_canvas_h) dh = g_canvas_h;
 
     OutputDebugString("PAINT: seeking to bits\n");
     _llseek(fh, (LONG)fhdr.bfOffBits, 0);
@@ -1092,15 +1302,20 @@ static BOOL load_canvas_from_bmp(const char *path)
         }
     }
     _lclose(fh);
-    OutputDebugString("PAINT: rows read OK, refreshing canvas\n");
+    OutputDebugString("PAINT: rows read OK, updating viewport\n");
 
-    refresh_canvas();
+    update_scrollbars();
+    InvalidateRect(g_mainwnd, NULL, TRUE);
 
     lstrcpy(g_curfile, path);
     lstrcpy(g_titlebuf, "PaintCraft - ");
     lstrcat(g_titlebuf, g_curfile);
     SetWindowText(g_mainwnd, g_titlebuf);
-    set_status("Loaded BMP image.");
+    {
+        char load_msg[80];
+        wsprintf(load_msg, "Loaded BMP image (%d x %d px).", g_canvas_w, g_canvas_h);
+        set_status(load_msg);
+    }
     OutputDebugString("PAINT: load_canvas_from_bmp complete\n");
     return TRUE;
 }
@@ -1356,23 +1571,24 @@ static void draw_modern_ui(HDC dc)
         DeleteObject(hp);
     }
 
-    /* 6. Border around Canvas */
+    /* 6. Border around Viewport */
     hp = CreatePen(PS_SOLID, 1, RGB(160, 165, 175));
     old_pen = (HPEN)SelectObject(dc, hp);
     old_br = (HBRUSH)SelectObject(dc, GetStockObject(NULL_BRUSH));
-    Rectangle(dc, CANVAS_X - 1, CANVAS_Y - 1, CANVAS_X + g_canvas_w + 1, CANVAS_Y + g_canvas_h + 1);
+    Rectangle(dc, CANVAS_X - 1, CANVAS_Y - 1, CANVAS_X + g_view_w + 1, CANVAS_Y + g_view_h + 1);
     SelectObject(dc, old_br);
     SelectObject(dc, old_pen);
     DeleteObject(hp);
 
-    /* Canvas Drop Shadow */
-    hp = CreatePen(PS_SOLID, 1, RGB(200, 205, 212));
-    old_pen = (HPEN)SelectObject(dc, hp);
-    MoveTo(dc, CANVAS_X + g_canvas_w + 1, CANVAS_Y);
-    LineTo(dc, CANVAS_X + g_canvas_w + 1, CANVAS_Y + g_canvas_h + 2);
-    LineTo(dc, CANVAS_X, CANVAS_Y + g_canvas_h + 1);
-    SelectObject(dc, old_pen);
-    DeleteObject(hp);
+    /* Corner filler between scrollbars if both are active */
+    if (g_hwnd_sb_vert && g_hwnd_sb_horz &&
+        IsWindowVisible(g_hwnd_sb_vert) && IsWindowVisible(g_hwnd_sb_horz)) {
+        RECT corner_rc;
+        SetRect(&corner_rc, CANVAS_X + g_view_w, CANVAS_Y + g_view_h,
+                CANVAS_X + g_view_w + 16, CANVAS_Y + g_view_h + 16);
+        br = (HBRUSH)(COLOR_BTNFACE + 1);
+        FillRect(dc, &corner_rc, br);
+    }
 
     /* 7. Bottom Status Bar */
     SetRect(&r, 0, client_rc.bottom - 22, client_rc.right, client_rc.bottom);
@@ -1396,14 +1612,28 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 {
     PAINTSTRUCT ps;
     HDC dc;
-    int x, y, i, swatch_idx;
+    int x, y, i, swatch_idx, cx, cy;
     char coord_buf[80];
     COLORREF target_col;
     HBRUSH fill_br, old_fill_br;
 
     switch (msg) {
     case WM_CREATE:
+        g_mainwnd = hwnd;
         init_canvas_buffers(hwnd);
+        g_hwnd_sb_vert = CreateWindow(
+            "SCROLLBAR", "",
+            WS_CHILD | SBS_VERT,
+            0, 0, 16, 100,
+            hwnd, (HMENU)2001, g_instance, NULL
+        );
+        g_hwnd_sb_horz = CreateWindow(
+            "SCROLLBAR", "",
+            WS_CHILD | SBS_HORZ,
+            0, 0, 100, 16,
+            hwnd, (HMENU)2002, g_instance, NULL
+        );
+        update_scrollbars();
         lstrcpy(g_statustext, "PaintCraft - Ready. LMB: Primary Color, RMB: Background Color.");
         return 0;
 
@@ -1415,7 +1645,62 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         return 0;
 
     case WM_SIZE:
+        update_scrollbars();
         InvalidateRect(hwnd, NULL, TRUE);
+        return 0;
+
+    case WM_VSCROLL:
+        {
+            int code = (int)wparam;
+            int pos = g_scroll_y;
+            int max_scroll = (g_canvas_h > g_view_h) ? (g_canvas_h - g_view_h) : 0;
+            switch (code) {
+            case SB_LINEUP:     pos -= 16; break;
+            case SB_LINEDOWN:   pos += 16; break;
+            case SB_PAGEUP:     pos -= g_view_h / 2; break;
+            case SB_PAGEDOWN:   pos += g_view_h / 2; break;
+            case SB_THUMBPOSITION:
+            case SB_THUMBTRACK:
+                pos = (int)LOWORD(lparam);
+                break;
+            default:
+                return 0;
+            }
+            if (pos < 0) pos = 0;
+            if (pos > max_scroll) pos = max_scroll;
+            if (pos != g_scroll_y) {
+                g_scroll_y = pos;
+                SetScrollPos(g_hwnd_sb_vert, SB_CTL, g_scroll_y, TRUE);
+                refresh_canvas();
+            }
+        }
+        return 0;
+
+    case WM_HSCROLL:
+        {
+            int code = (int)wparam;
+            int pos = g_scroll_x;
+            int max_scroll = (g_canvas_w > g_view_w) ? (g_canvas_w - g_view_w) : 0;
+            switch (code) {
+            case SB_LINEUP:     pos -= 16; break;
+            case SB_LINEDOWN:   pos += 16; break;
+            case SB_PAGEUP:     pos -= g_view_w / 2; break;
+            case SB_PAGEDOWN:   pos += g_view_w / 2; break;
+            case SB_THUMBPOSITION:
+            case SB_THUMBTRACK:
+                pos = (int)LOWORD(lparam);
+                break;
+            default:
+                return 0;
+            }
+            if (pos < 0) pos = 0;
+            if (pos > max_scroll) pos = max_scroll;
+            if (pos != g_scroll_x) {
+                g_scroll_x = pos;
+                SetScrollPos(g_hwnd_sb_horz, SB_CTL, g_scroll_x, TRUE);
+                refresh_canvas();
+            }
+        }
         return 0;
 
     case WM_ERASEBKGND:
@@ -1435,9 +1720,30 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 case 'C': case 'c': do_copy(); return 0;
                 case 'V': case 'v': do_paste(); return 0;
                 case 'A': case 'a': do_select_all(); return 0;
-                case 'N': case 'n': commit_selection(); clear_canvas(); return 0;
+                case 'N': case 'n':
+                    commit_selection();
+                    if (g_canvas_w != CANVAS_DEF_W || g_canvas_h != CANVAS_DEF_H) {
+                        resize_canvas_buffers(CANVAS_DEF_W, CANVAS_DEF_H);
+                    }
+                    clear_canvas();
+                    g_curfile[0] = '\0';
+                    SetWindowText(hwnd, "PaintCraft - [Untitled]");
+                    update_scrollbars();
+                    InvalidateRect(hwnd, NULL, TRUE);
+                    set_status("New canvas created.");
+                    return 0;
                 case 'O': case 'o': commit_selection(); do_file_open(); return 0;
                 case 'S': case 's': commit_selection(); do_file_save(); return 0;
+                }
+            } else {
+                switch (wparam) {
+                case VK_UP:    SendMessage(hwnd, WM_VSCROLL, SB_LINEUP, 0); return 0;
+                case VK_DOWN:  SendMessage(hwnd, WM_VSCROLL, SB_LINEDOWN, 0); return 0;
+                case VK_LEFT:  SendMessage(hwnd, WM_HSCROLL, SB_LINEUP, 0); return 0;
+                case VK_RIGHT: SendMessage(hwnd, WM_HSCROLL, SB_LINEDOWN, 0); return 0;
+                case VK_PRIOR: SendMessage(hwnd, WM_VSCROLL, SB_PAGEUP, 0); return 0;
+                case VK_NEXT:  SendMessage(hwnd, WM_VSCROLL, SB_PAGEDOWN, 0); return 0;
+                case VK_HOME:  SendMessage(hwnd, WM_HSCROLL, SB_THUMBPOSITION, 0); return 0;
                 }
             }
         }
@@ -1445,7 +1751,18 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
 
     case WM_COMMAND:
         switch (wparam) {
-        case IDM_NEW:       commit_selection(); clear_canvas(); break;
+        case IDM_NEW:
+            commit_selection();
+            if (g_canvas_w != CANVAS_DEF_W || g_canvas_h != CANVAS_DEF_H) {
+                resize_canvas_buffers(CANVAS_DEF_W, CANVAS_DEF_H);
+            }
+            clear_canvas();
+            g_curfile[0] = '\0';
+            SetWindowText(hwnd, "PaintCraft - [Untitled]");
+            update_scrollbars();
+            InvalidateRect(hwnd, NULL, TRUE);
+            set_status("New canvas created.");
+            break;
         case IDM_OPEN:      commit_selection(); do_file_open(); break;
         case IDM_SAVE:      commit_selection(); do_file_save(); break;
         case IDM_SAVEAS:    commit_selection(); do_file_save_as(); break;
@@ -1466,7 +1783,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 "PaintCraft Studio for Windows & DOS\r\n"
                 "A modern pixel art & graphics editor.\r\n\r\n"
                 "Features:\r\n"
-                "- Double-buffered GDI canvas\r\n"
+                "- Double-buffered GDI canvas with scrolling\r\n"
                 "- Real-time interactive shape preview\r\n"
                 "- 14 drawing tools & 28-color palette\r\n"
                 "- Direct 24-bit BMP loading and saving\r\n"
@@ -1555,10 +1872,9 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         }
 
         /* 6. Canvas Area */
-        if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
-            y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
-            x -= CANVAS_X;
-            y -= CANVAS_Y;
+        if (screen_to_canvas(x, y, &cx, &cy)) {
+            x = cx;
+            y = cy;
 
             if (g_active_tool == TOOL_SELECT) {
                 POINT pt;
@@ -1622,21 +1938,19 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 dc = GetDC(hwnd);
                 if (g_active_tool == TOOL_PENCIL) {
                     SetPixel(g_hdc_canvas, x, y, g_col_primary);
-                    BitBlt(dc, CANVAS_X + x, CANVAS_Y + y, 1, 1, g_hdc_canvas, x, y, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                 } else if (g_active_tool == TOOL_BRUSH) {
                     paint_brush_disc(g_hdc_canvas, x, y, g_brush_size / 2, g_col_primary);
-                    BitBlt(dc, CANVAS_X + x - g_brush_size, CANVAS_Y + y - g_brush_size,
-                           g_brush_size * 2 + 1, g_brush_size * 2 + 1,
-                           g_hdc_canvas, x - g_brush_size, y - g_brush_size, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                 } else if (g_active_tool == TOOL_AIRBRUSH) {
                     draw_spray(g_hdc_canvas, x, y, g_brush_size * 3 + 4, g_col_primary);
-                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                 } else if (g_active_tool == TOOL_ERASER) {
                     draw_normal_eraser(g_hdc_canvas, x, y, g_brush_size * 2, g_col_secondary);
-                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                 } else if (g_active_tool == TOOL_COLOR_ERASER) {
                     draw_color_eraser(g_hdc_canvas, x, y, g_brush_size * 2, g_col_primary, g_col_secondary);
-                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                 }
                 ReleaseDC(hwnd, dc);
                 break;
@@ -1651,7 +1965,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                     SelectObject(g_hdc_canvas, old_fill_br);
                     DeleteObject(fill_br);
                     dc = GetDC(hwnd);
-                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                     ReleaseDC(hwnd, dc);
                     set_status("Surface filled with primary color.");
                 }
@@ -1669,7 +1983,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                 SetTextColor(g_hdc_canvas, g_col_primary);
                 TextOut(g_hdc_canvas, x, y, "PaintCraft", 10);
                 dc = GetDC(hwnd);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                blit_canvas_viewport(dc, g_hdc_canvas);
                 ReleaseDC(hwnd, dc);
                 set_status("Text stamped onto canvas.");
                 break;
@@ -1687,7 +2001,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                         Polygon(g_hdc_canvas, g_poly_pts, g_poly_count);
                         g_poly_count = 0;
                         dc = GetDC(hwnd);
-                        BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                        blit_canvas_viewport(dc, g_hdc_canvas);
                         ReleaseDC(hwnd, dc);
                         set_status("Polygon closed and filled.");
                     } else {
@@ -1697,7 +2011,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                         apply_draw_shape(g_hdc_canvas, TOOL_LINE, 0, g_last_x, g_last_y, x, y, g_col_primary, 0, g_brush_size);
                         g_last_x = x; g_last_y = y;
                         dc = GetDC(hwnd);
-                        BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                        blit_canvas_viewport(dc, g_hdc_canvas);
                         ReleaseDC(hwnd, dc);
                     }
                 }
@@ -1732,10 +2046,9 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             }
         }
 
-        if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
-            y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
-            x -= CANVAS_X;
-            y -= CANVAS_Y;
+        if (screen_to_canvas(x, y, &cx, &cy)) {
+            x = cx;
+            y = cy;
             if (g_active_tool == TOOL_EYEDROPPER) {
                 g_col_secondary = GetPixel(g_hdc_canvas, x, y);
                 InvalidateRect(hwnd, NULL, FALSE);
@@ -1751,7 +2064,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                     SelectObject(g_hdc_canvas, old_fill_br);
                     DeleteObject(fill_br);
                     dc = GetDC(hwnd);
-                    BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                    blit_canvas_viewport(dc, g_hdc_canvas);
                     ReleaseDC(hwnd, dc);
                     set_status("Surface filled with background color (RMB).");
                 }
@@ -1764,15 +2077,14 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         x = LOWORD(lparam);
         y = HIWORD(lparam);
 
-        if (x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
-            y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
-            wsprintf(coord_buf, "Cursor: X=%d Y=%d px  |  Canvas: 580 x 310", x - CANVAS_X, y - CANVAS_Y);
+        if (screen_to_canvas(x, y, &cx, &cy)) {
+            wsprintf(coord_buf, "Cursor: X=%d Y=%d px  |  Canvas: %d x %d px", cx, cy, g_canvas_w, g_canvas_h);
             set_status(coord_buf);
         }
 
         if (g_sel_dragging) {
-            int cx_pt = x - CANVAS_X;
-            int cy_pt = y - CANVAS_Y;
+            int cx_pt = x - CANVAS_X + g_scroll_x;
+            int cy_pt = y - CANVAS_Y + g_scroll_y;
             g_sel_rc.left = cx_pt - g_sel_anchor_x;
             g_sel_rc.top  = cy_pt - g_sel_anchor_y;
             g_sel_rc.right = g_sel_rc.left + g_sel_w;
@@ -1781,32 +2093,31 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             return 0;
         }
 
-        if (g_is_drawing && x >= CANVAS_X && x < CANVAS_X + g_canvas_w &&
-            y >= CANVAS_Y && y < CANVAS_Y + g_canvas_h) {
-            x -= CANVAS_X;
-            y -= CANVAS_Y;
+        if (g_is_drawing && screen_to_canvas(x, y, &cx, &cy)) {
+            x = cx;
+            y = cy;
             dc = GetDC(hwnd);
 
             switch (g_active_tool) {
             case TOOL_PENCIL:
                 apply_draw_shape(g_hdc_canvas, TOOL_LINE, 0, g_last_x, g_last_y, x, y, g_col_primary, 0, 1);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                blit_canvas_viewport(dc, g_hdc_canvas);
                 break;
             case TOOL_BRUSH:
                 draw_continuous_brush(g_hdc_canvas, g_last_x, g_last_y, x, y, g_brush_size, g_col_primary);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                blit_canvas_viewport(dc, g_hdc_canvas);
                 break;
             case TOOL_AIRBRUSH:
                 draw_spray(g_hdc_canvas, x, y, g_brush_size * 3 + 4, g_col_primary);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                blit_canvas_viewport(dc, g_hdc_canvas);
                 break;
             case TOOL_ERASER:
                 draw_normal_eraser(g_hdc_canvas, x, y, g_brush_size * 2, g_col_secondary);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                blit_canvas_viewport(dc, g_hdc_canvas);
                 break;
             case TOOL_COLOR_ERASER:
                 draw_color_eraser(g_hdc_canvas, x, y, g_brush_size * 2, g_col_primary, g_col_secondary);
-                BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+                blit_canvas_viewport(dc, g_hdc_canvas);
                 break;
             }
             g_last_x = x;
@@ -1815,14 +2126,14 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
         }
 
         if (g_is_dragging) {
-            x -= CANVAS_X;
-            y -= CANVAS_Y;
-            if (x < 0) x = 0;
-            if (x >= g_canvas_w) x = g_canvas_w - 1;
-            if (y < 0) y = 0;
-            if (y >= g_canvas_h) y = g_canvas_h - 1;
-            g_cur_x = x;
-            g_cur_y = y;
+            cx = x - CANVAS_X + g_scroll_x;
+            cy = y - CANVAS_Y + g_scroll_y;
+            if (cx < 0) cx = 0;
+            if (cx >= g_canvas_w) cx = g_canvas_w - 1;
+            if (cy < 0) cy = 0;
+            if (cy >= g_canvas_h) cy = g_canvas_h - 1;
+            g_cur_x = cx;
+            g_cur_y = cy;
 
             BitBlt(g_hdc_temp, 0, 0, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
             apply_draw_shape(g_hdc_temp, g_active_tool, g_shape_style,
@@ -1830,7 +2141,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
                              g_col_primary, g_col_secondary, g_brush_size);
 
             dc = GetDC(hwnd);
-            BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_temp, 0, 0, SRCCOPY);
+            blit_canvas_viewport(dc, g_hdc_temp);
             ReleaseDC(hwnd, dc);
         }
         return 0;
@@ -1884,7 +2195,7 @@ LRESULT CALLBACK _export WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
             Polygon(g_hdc_canvas, g_poly_pts, g_poly_count);
             g_poly_count = 0;
             dc = GetDC(hwnd);
-            BitBlt(dc, CANVAS_X, CANVAS_Y, g_canvas_w, g_canvas_h, g_hdc_canvas, 0, 0, SRCCOPY);
+            blit_canvas_viewport(dc, g_hdc_canvas);
             ReleaseDC(hwnd, dc);
             set_status("Polygon completed.");
         }
