@@ -9,6 +9,7 @@
 #include <ver.h>
 #include <mmsystem.h>
 #include <commdlg.h>
+#include <dos.h>
 #include "testlog.h"
 
 static char g_line[3][80];
@@ -108,6 +109,30 @@ static void misc_tests(HINSTANCE hi)
     /* USER: drobne funkcje */
     CHECK_INT(GetSystemDebugState(), 0, "GetSystemDebugState");
     CHECK(GetFreeSystemResources(0) > 0, "GetFreeSystemResources");
+
+    /* KERNEL: IsDBCSLeadByte (ordinal 207) */
+    {
+        typedef BOOL (WINAPI *ISDBCSLEADBYTE)(BYTE);
+        FARPROC p = GetProcAddress(GetModuleHandle("KERNEL"), (LPCSTR)207);
+        CHECK(p != NULL, "IsDBCSLeadByte export (ord 207)");
+        if (p) {
+            CHECK_INT(((ISDBCSLEADBYTE)p)('A'), 0, "IsDBCSLeadByte('A') == FALSE");
+            CHECK_INT(((ISDBCSLEADBYTE)p)(0), 0, "IsDBCSLeadByte(0) == FALSE");
+        }
+    }
+
+    /* SHELL: ShellAbout (ordinal 22) */
+    {
+        FARPROC p = GetProcAddress(GetModuleHandle("SHELL"), (LPCSTR)22);
+        CHECK(p != NULL, "ShellAbout export (ord 22)");
+    }
+
+    /* DOS Time / RTC (INT 21h AH=2Ch) */
+    {
+        struct dostime_t t;
+        _dos_gettime(&t);
+        CHECK(t.hour <= 23 && t.minute <= 59 && t.second <= 59, "RTC/_dos_gettime valid range");
+    }
 }
 
 LRESULT FAR PASCAL __export WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)

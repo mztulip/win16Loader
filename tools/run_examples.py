@@ -19,7 +19,7 @@ EXTRA = {'shell': [('example_apps/app.ico', 'SHELLTST.ICO')],
          'libdemo': [('example_apps/libdemo/' + f, 'LIBDEMO/' + f)
                      for f in ('LIBCHLD.EXE', 'DEMODLL.DLL', 'DEMODYN.DLL', 'DEMOBAD.DLL')]}
 # programy zamykane Alt+F4 jako jedyne zadanie: loader musi wrocic do DOS
-BACK_TO_DOS = ('shell', 'sysdll', 'fonts')
+BACK_TO_DOS = ('shell', 'sysdll', 'fonts', 'clock')
 APPS = {
     'controls': ('example_apps/controls', 'CTLTEST.EXE', ['w4', 'pshot', 'kesc', 'w1']),
     'odmenu':   ('example_apps/odmenu', 'ODMENU.EXE', ['w4', 'pshot', 'kesc', 'w1', 'kesc', 'w1']),
@@ -55,6 +55,7 @@ APPS = {
     # testy dymne (aplikacje juz na boot.img, bez linii TEST): wystarczy brak wyjatku
     'ski':      (None, 'SKI.EXE', ['w4', 'kdown', 'w0.5', 'kdown', 'w2', 'kleft', 'w1', 'pshot']),
     'win1app':  (None, 'WIN1APP.EXE', ['w3', 'a66,32', 'w0.5', 'c', 'w1', 'a66,52', 'w0.3', 'c', 'w2', 'pshot']),
+    'clock':    (None, 'CLOCK.EXE', ['w3', 'pshot1', 'w3', 'pshot2', 'kalt-f4', 'w1']),
 }
 
 
@@ -85,7 +86,7 @@ def main():
     for idx, n in enumerate(names):
         d, exe, steps = APPS[n]
         out = os.path.join(a.out, n)
-        steps = [s if not s.startswith('p') else 'p' + n for s in steps]
+        steps = [s if not s.startswith('p') else ('p' + n if s == 'pshot' or s == 'p' else s) for s in steps]
         subprocess.run([sys.executable, os.path.join(HERE, 'qemu_headless.py'), '--fd', fd,
                         '--run', 'LOADER.EXE ' + exe, '--out', out, '--port', str(4500 + idx),
                         '--boot-wait', a.boot_wait] + steps,
@@ -93,6 +94,16 @@ def main():
         log = open(os.path.join(out, 'serial.log'), errors='replace').read()
         tests = re.findall(r'^TEST \S+ (.*?)\r?$', log, re.M)
         fails = [t for t in tests if ': FAIL' in t]
+        if n == 'clock':
+            p1 = os.path.join(out, 'shot1.png')
+            p2 = os.path.join(out, 'shot2.png')
+            if os.path.exists(p1) and os.path.exists(p2):
+                from PIL import Image, ImageChops
+                diff = ImageChops.difference(Image.open(p1), Image.open(p2)).getbbox()
+                if not diff:
+                    fails.append('sekundnik zegara nie porusza sie')
+            else:
+                fails.append('brak zrzutow ekranu zegara')
         done = [t for t in tests if t.startswith('DONE')]
         exc = re.findall(r'\*\*\* EXCEPTION.*', log)
         for t in fails:
