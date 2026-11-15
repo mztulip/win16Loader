@@ -243,6 +243,8 @@ def main():
         run(["mcopy", "-oi", mpart, "windir/I486.ICO", "::CALMIRA/I486.ICO"])
     if os.path.exists("windir/CALMIRA.INI"):
         run(["mcopy", "-oi", mpart, "windir/CALMIRA.INI", "::CALMIRA/CALMIRA.INI"])
+    if os.path.exists("windir/START.INI"):
+        run(["mcopy", "-oi", mpart, "windir/START.INI", "::CALMIRA/START.INI"])
 
     # 9. Create C:\SKIFREE with SKI.EXE and README.TXT
     print("Setting up C:\\SKIFREE and documentation...")
@@ -295,10 +297,16 @@ def main():
     run(["mmd", "-i", mpart, "::MARIO"], check=False)
     mario_dir = args.mario_dir
     if not os.path.isdir(mario_dir):
-        mario_dir = "/home/tulip/Dokumenty/Projekty_moje/osproject/games/mario"
+        for cand in ["../games/mario", "games/mario", "MARIO", "/home/tulip/Dokumenty/Projekty_moje/osproject/games/mario"]:
+            if os.path.isdir(cand):
+                mario_dir = cand
+                break
 
     if os.path.exists(f"{mario_dir}/MARIO.EXE"):
         run(["mcopy", "-oi", mpart, f"{mario_dir}/MARIO.EXE", "::MARIO/MARIO.EXE"])
+        print(f"Copied {mario_dir}/MARIO.EXE to ::MARIO/MARIO.EXE")
+    else:
+        print(f"WARNING: MARIO.EXE not found in {mario_dir}!")
     if os.path.exists(f"{mario_dir}/MARIO.CFG"):
         run(["mcopy", "-oi", mpart, f"{mario_dir}/MARIO.CFG", "::MARIO/MARIO.CFG"])
 

@@ -32,7 +32,9 @@ __pycache__/
 # Lokalne ustawienia Claude Code
 .claude/
 
-# Wyniki budowania nowych modulow i aplikacji przykladowych (make / make example_apps)
+# Lokalne aplikacje i gry nielicencjonowane (pobierane osobno)
+games/
+
 gdi/GDI.EXE
 user/USER.EXE
 dlls/*.DLL
