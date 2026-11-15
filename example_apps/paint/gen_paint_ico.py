@@ -3,7 +3,7 @@
 gen_paint_ico.py - Generates a 32x32 16-color Windows icon (PAINT.ICO)
 representing an artist palette and paint brush.
 """
-import struct
+import struct, os
 
 # Standard 16-color VGA Palette (R, G, B)
 VGA = [
@@ -156,6 +156,7 @@ pal = b''.join(struct.pack('<BBBB', b, g, r, 0) for r, g, b in VGA)
 img = hdr + pal + xor_mask + and_mask
 ico = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', 32, 32, 16, 0, 1, 4, len(img), 22) + img
 
-with open('example_apps/paint/PAINT.ICO', 'wb') as f:
+out_path = 'example_apps/paint/PAINT.ICO' if os.path.exists('example_apps/paint') else 'PAINT.ICO'
+with open(out_path, 'wb') as f:
     f.write(ico)
-print("Generated example_apps/paint/PAINT.ICO successfully.")
+print(f"Generated {out_path} successfully.")
