@@ -29,6 +29,10 @@ Every feature has a test app in `example_apps/` (`python3 tools/run_examples.py`
 
 ## Screenshots
 
+| Calmira II 3.3 shell (Start menu, Tip of the Day, Explorer) |
+|---|
+| ![Calmira II](docs/screenshots/calmira.png) |
+
 | SkiFree (original Win16 binary) | Graphical shell with NE icons |
 |---|---|
 | ![SkiFree](docs/screenshots/skifree.png) | ![Shell](docs/screenshots/shell.png) |
