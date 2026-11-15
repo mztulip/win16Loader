@@ -114,12 +114,16 @@ static void title_paint(HWND t)
         RECT r;
         WORD of = SelectObject(dc, title_font());
         int tx = LOWORD(GetTextExtent(dc, (LPCSTR)w->text, w->textlen));
+        COLORREF bg = act ? syscolor(COLOR_ACTIVECAPTION) :
+                            (w->parent == HDESKTOP ? syscolor(COLOR_BACKGROUND) : syscolor(COLOR_APPWORKSPACE));
+        COLORREF fg = act ? syscolor(COLOR_CAPTIONTEXT) :
+                            (w->parent == HDESKTOP ? RGB(255, 255, 255) : syscolor(COLOR_WINDOWTEXT));
         GetClientRect(t, (LPRECT)&r);
-        fill_color(dc, r.left, r.top, r.right, r.bottom, syscolor(act ? COLOR_ACTIVECAPTION : COLOR_INACTIVECAPTION));
+        fill_color(dc, r.left, r.top, r.right, r.bottom, bg);
         InflateRect((LPRECT)&r, -3, 0);
         /* za dlugi tytul (nieaktywna ikona) - poczatek tytulu od lewej, reszta obcieta */
         SetBkMode(dc, 1);
-        SetTextColor(dc, syscolor(act ? COLOR_CAPTIONTEXT : COLOR_INACTIVECAPTIONTEXT));
+        SetTextColor(dc, fg);
         DrawText(dc, (LPCSTR)w->text, w->textlen, (LPRECT)&r,
                  (tx > r.right - r.left ? 0 : 0x0001) | 0x0004 | 0x0020 | 0x0800);     /* DT_CENTER VCENTER SINGLELINE NOPREFIX */
         SelectObject(dc, of);

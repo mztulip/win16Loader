@@ -314,6 +314,8 @@ static void mouse_msg(WORD cmsg, BOOL isdown)
             LRESULT r = send_msg(h, WM_MOUSEACTIVATE, top, MAKELONG(hit, cmsg));
             if (r != 3 && r != 4) activate_window(top, TRUE);    /* MA_NOACTIVATE(ANDEAT) */
             if (r == 2 || r == 4) return;                        /* MA_ACTIVATEANDEAT */
+        } else if (top == HDESKTOP && g_active) {
+            activate_window(0, TRUE);
         }
         if (w->style & WS_DISABLED) { MessageBeep(0); return; }
     }
@@ -426,7 +428,17 @@ HWND API GetFocus(void) { return (g_focus && WP(g_focus)) ? g_focus : 0; }
 void activate_window(HWND h, BOOL mouse)
 {
     HWND old = g_active;
-    WND __far *w = WP(h);
+    WND __far *w;
+    if (!h) {
+        if (old && WP(old)) {
+            WP(old)->flags &= ~WF_ACTIVE;
+            send_msg(old, WM_NCACTIVATE, FALSE, 0);
+            send_msg(old, WM_ACTIVATE, 0, MAKELONG(0, IsIconic(old)));
+        }
+        g_active = 0;
+        return;
+    }
+    w = WP(h);
     if (!w || h == HDESKTOP) return;
     if (w->style & WS_CHILD) h = wnd_toplevel(h);
     if (h == old) return;

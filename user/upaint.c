@@ -864,6 +864,51 @@ static void track_frame(HWND h, int hit, int x0, int y0)
     }
 }
 
+static void track_move(HWND h)
+{
+    WND __far *w = WP(h);
+    RECT r, o;
+    MSG m;
+    int x0 = mouse_x(), y0 = mouse_y();
+    BOOL cancelled = FALSE;
+    if (!w || (w->flags & WF_MAXIMIZED)) return;
+    r = w->wr; o = r;
+    xor_frame((LPRECT)&r);
+    while (modal_next((LPMSG)&m)) {
+        if (m.message == WM_LBUTTONDOWN || m.message == WM_NCLBUTTONDOWN) break;
+        if (m.message == WM_RBUTTONDOWN || m.message == WM_NCRBUTTONDOWN) { cancelled = TRUE; break; }
+        if (m.message == WM_KEYDOWN) {
+            if (m.wParam == 0x1B) { cancelled = TRUE; break; }
+            if (m.wParam == 0x0D) break;
+            if (m.wParam >= 0x25 && m.wParam <= 0x28) {
+                int step = (GetKeyState(0x11) < 0) ? 1 : 8;
+                xor_frame((LPRECT)&r);
+                if (m.wParam == 0x25) OffsetRect((LPRECT)&r, -step, 0);
+                if (m.wParam == 0x26) OffsetRect((LPRECT)&r, 0, -step);
+                if (m.wParam == 0x27) OffsetRect((LPRECT)&r, step, 0);
+                if (m.wParam == 0x28) OffsetRect((LPRECT)&r, 0, step);
+                xor_frame((LPRECT)&r);
+                continue;
+            }
+        }
+        if (m.message == WM_MOUSEMOVE || m.message == WM_NCMOUSEMOVE) {
+            int dx = mouse_x() - x0, dy = mouse_y() - y0;
+            if (dx || dy) {
+                xor_frame((LPRECT)&r);
+                r = o;
+                OffsetRect((LPRECT)&r, dx, dy);
+                xor_frame((LPRECT)&r);
+            }
+        }
+    }
+    xor_frame((LPRECT)&r);
+    if (!cancelled && (w = WP(h)) && (r.left != o.left || r.top != o.top)) {
+        if (w->style & WS_CHILD) OffsetRect((LPRECT)&r, -WP(w->parent)->cr.left, -WP(w->parent)->cr.top);
+        SetWindowPos(h, 0, r.left, r.top, 0, 0,
+                     0x0001 | 0x0004 | 0x0010 | ((w->flags & WF_MINIMIZED) ? 0 : 0x0020));
+    }
+}
+
 static BOOL track_button(HWND h, LPRECT rr, char glyph)
 {
     MSG m;
@@ -1249,6 +1294,7 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
         case SC_MINIMIZE: ShowWindow(h, 6); break;
         case SC_MAXIMIZE: ShowWindow(h, 3); break;
         case SC_RESTORE:  ShowWindow(h, 9); break;
+        case SC_MOVE:     track_move(h); break;
         case SC_KEYMENU:  if (w->id && !(w->style & WS_CHILD)) menu_track_bar(h, -1, -1, (WORD)LOWORD(lp)); break;
         }
         return 0;
