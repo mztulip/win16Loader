@@ -438,6 +438,7 @@ void   ustrcpy(LPSTR d, LPCSTR s);
 void   ustrncpy(LPSTR d, LPCSTR s, int n);
 int    ustricmp(LPCSTR a, LPCSTR b);
 BOOL   API SetDeskWallpaper(LPCSTR filename);
+void   paint_desktop_bg(HDC dc, const RECT __far *rc, int sx, int sy);
 void   umemset(LPVOID d, BYTE v, WORD n);
 void   umemcpy(LPVOID d, const void __far *s, WORD n);
 BOOL   rect_and(LPRECT o, const RECT __far *a, const RECT __far *b);

@@ -288,7 +288,10 @@ BOOL API DrawIcon(HDC dc, int x, int y, HICON h)
     ICONOBJ __far *o = icon_ptr(h);
     HDC m;
     WORD ob;
+    COLORREF old_bk, old_tx;
     if (!o) return FALSE;
+    old_bk = SetBkColor(dc, RGB(255, 255, 255));
+    old_tx = SetTextColor(dc, RGB(0, 0, 0));
     m = CreateCompatibleDC(dc);
     ob = SelectObject(m, o->andbm);
     BitBlt(dc, x, y, o->w, o->h, m, 0, 0, 0x008800C6UL);   /* SRCAND */
@@ -298,6 +301,8 @@ BOOL API DrawIcon(HDC dc, int x, int y, HICON h)
     }
     SelectObject(m, ob);
     DeleteDC(m);
+    SetBkColor(dc, old_bk);
+    SetTextColor(dc, old_tx);
     return TRUE;
 }
 

@@ -1049,6 +1049,83 @@ void API ShowScrollBar(HWND h, int bar, BOOL show)
 
 BOOL API EnableScrollBar(HWND h, int bar, WORD fl) { (void)h; (void)bar; (void)fl; return TRUE; }
 
+
+static HBITMAP g_hdesk_bmp = 0;
+static int g_desk_bmp_w = 0, g_desk_bmp_h = 0;
+static BOOL g_desk_tile = FALSE;
+static HBRUSH g_hdesk_pat_brush = 0;
+
+void paint_desktop_bg(HDC dc, const RECT __far *rc, int sx, int sy)
+{
+    RECT r;
+    r = *rc;
+    /* 1. Tlo: wzor lub kolor */
+    if (g_hdesk_pat_brush) {
+        COLORREF old_bk = SetBkColor(dc, syscolor(COLOR_BACKGROUND));
+        COLORREF old_tx = SetTextColor(dc, RGB(0, 0, 0));
+        FillRect(dc, (LPRECT)&r, g_hdesk_pat_brush);
+        SetBkColor(dc, old_bk);
+        SetTextColor(dc, old_tx);
+    } else {
+        FillRect(dc, (LPRECT)&r, sysbrush(COLOR_BACKGROUND));
+    }
+
+    /* 2. Tapeta BMP */
+    if (g_hdesk_bmp && g_desk_bmp_w > 0 && g_desk_bmp_h > 0) {
+        HDC memdc = CreateCompatibleDC(dc);
+        if (memdc) {
+            HBITMAP old = SelectObject(memdc, g_hdesk_bmp);
+            if (g_desk_tile) {
+                int dst_y = r.top;
+                int cur_sy = sy;
+                while (dst_y < r.bottom) {
+                    int tile_y = cur_sy % g_desk_bmp_h;
+                    int chunk_h, dst_x, cur_sx;
+                    if (tile_y < 0) tile_y += g_desk_bmp_h;
+                    chunk_h = g_desk_bmp_h - tile_y;
+                    if (dst_y + chunk_h > r.bottom) chunk_h = r.bottom - dst_y;
+
+                    dst_x = r.left;
+                    cur_sx = sx;
+                    while (dst_x < r.right) {
+                        int tile_x = cur_sx % g_desk_bmp_w;
+                        int chunk_w;
+                        if (tile_x < 0) tile_x += g_desk_bmp_w;
+                        chunk_w = g_desk_bmp_w - tile_x;
+                        if (dst_x + chunk_w > r.right) chunk_w = r.right - dst_x;
+
+                        BitBlt(dc, dst_x, dst_y, chunk_w, chunk_h, memdc, tile_x, tile_y, 0x00CC0020UL /*SRCCOPY*/);
+
+                        dst_x += chunk_w;
+                        cur_sx += chunk_w;
+                    }
+                    dst_y += chunk_h;
+                    cur_sy += chunk_h;
+                }
+            } else {
+                int bx = (SCR_W - g_desk_bmp_w) / 2;
+                int by = (SCR_H - g_desk_bmp_h) / 2;
+                RECT bmp_rc, chunk_rc, intersect;
+                bmp_rc.left = bx; bmp_rc.top = by;
+                bmp_rc.right = bx + g_desk_bmp_w; bmp_rc.bottom = by + g_desk_bmp_h;
+                chunk_rc.left = sx; chunk_rc.top = sy;
+                chunk_rc.right = sx + (r.right - r.left); chunk_rc.bottom = sy + (r.bottom - r.top);
+                if (rect_and((LPRECT)&intersect, (const RECT __far *)&bmp_rc, (const RECT __far *)&chunk_rc)) {
+                    int src_x = intersect.left - bx;
+                    int src_y = intersect.top - by;
+                    int dst_x = r.left + (intersect.left - sx);
+                    int dst_y = r.top + (intersect.top - sy);
+                    int blt_w = intersect.right - intersect.left;
+                    int blt_h = intersect.bottom - intersect.top;
+                    BitBlt(dc, dst_x, dst_y, blt_w, blt_h, memdc, src_x, src_y, 0x00CC0020UL /*SRCCOPY*/);
+                }
+            }
+            SelectObject(memdc, old);
+            DeleteDC(memdc);
+        }
+    }
+}
+
 /* ============================================================
  * DefWindowProc (ordinal 107)
  * ============================================================ */
@@ -1112,11 +1189,16 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
     }
     case WM_ICONERASEBKGND: {                                /* tlo ikony = tlo rodzica */
         RECT r;
-        HBRUSH b = icon_bg_brush(w);
-        if (!b) return 0;
         GetClientRect(h, (LPRECT)&r);
-        FillRect((HDC)wp, (LPRECT)&r, b);
-        return 1;
+        if (w->parent == HDESKTOP || !(w->style & WS_CHILD)) {
+            paint_desktop_bg((HDC)wp, (const RECT __far *)&r, w->wr.left, w->wr.top);
+            return 1;
+        } else {
+            HBRUSH b = icon_bg_brush(w);
+            if (!b) return 0;
+            FillRect((HDC)wp, (LPRECT)&r, b);
+            return 1;
+        }
     }
     case WM_PAINTICON:
     case WM_PAINT: {                                          /* ikona: ikona klasy na srodku */
@@ -1131,8 +1213,12 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
             if (!ic) {
                 /* Klasa bez ikony i bez wlasnego WM_PAINT: w Windows zostalby pusty kwadrat
                  * w kolorze klasy. Aplikacje malujace wlasna ikone tu nie trafiaja. */
-                HBRUSH b = icon_bg_brush(w);
-                if (b) FillRect(dc, (LPRECT)&r, b);
+                if (w->parent == HDESKTOP || !(w->style & WS_CHILD))
+                    paint_desktop_bg(dc, (const RECT __far *)&r, w->wr.left, w->wr.top);
+                else {
+                    HBRUSH b = icon_bg_brush(w);
+                    if (b) FillRect(dc, (LPRECT)&r, b);
+                }
                 ic = LoadIcon(0, (LPCSTR)MAKELONG(32512, 0));   /* IDI_APPLICATION */
             }
             DrawIcon(dc, (r.right - sysmetric(11)) / 2, (r.bottom - sysmetric(12)) / 2, ic);
@@ -1227,10 +1313,6 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
 /* ============================================================
  * Pulpit i inicjalizacja
  * ============================================================ */
-static HBITMAP g_hdesk_bmp = 0;
-static int g_desk_bmp_w = 0, g_desk_bmp_h = 0;
-static BOOL g_desk_tile = FALSE;
-static HBRUSH g_hdesk_pat_brush = 0;
 
 static BOOL has_path_sep(LPCSTR s)
 {
@@ -1422,37 +1504,7 @@ static LRESULT __far __pascal DesktopProc(HWND h, WORD m, WORD wp, LONG lp)
         HDC dc = (HDC)wp;
         RECT r;
         GetClientRect(h, (LPRECT)&r);
-
-        /* 1. Tlo: wzor lub kolor */
-        if (g_hdesk_pat_brush) {
-            SetBkColor(dc, syscolor(COLOR_BACKGROUND));
-            SetTextColor(dc, RGB(0, 0, 0));
-            FillRect(dc, (LPRECT)&r, g_hdesk_pat_brush);
-        } else {
-            FillRect(dc, (LPRECT)&r, sysbrush(COLOR_BACKGROUND));
-        }
-
-        /* 2. Tapeta BMP */
-        if (g_hdesk_bmp && g_desk_bmp_w > 0 && g_desk_bmp_h > 0) {
-            HDC memdc = CreateCompatibleDC(dc);
-            if (memdc) {
-                HBITMAP old = SelectObject(memdc, g_hdesk_bmp);
-                if (g_desk_tile) {
-                    int x, y;
-                    for (y = 0; y < r.bottom; y += g_desk_bmp_h) {
-                        for (x = 0; x < r.right; x += g_desk_bmp_w) {
-                            BitBlt(dc, x, y, g_desk_bmp_w, g_desk_bmp_h, memdc, 0, 0, 0x00CC0020UL /*SRCCOPY*/);
-                        }
-                    }
-                } else {
-                    int x = (r.right - g_desk_bmp_w) / 2;
-                    int y = (r.bottom - g_desk_bmp_h) / 2;
-                    BitBlt(dc, x, y, g_desk_bmp_w, g_desk_bmp_h, memdc, 0, 0, 0x00CC0020UL /*SRCCOPY*/);
-                }
-                SelectObject(memdc, old);
-                DeleteDC(memdc);
-            }
-        }
+        paint_desktop_bg(dc, (const RECT __far *)&r, 0, 0);
         return 1;
     }
 
