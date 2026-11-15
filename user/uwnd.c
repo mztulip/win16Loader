@@ -510,7 +510,10 @@ static void destroy_tree(HWND h)
         extern void props_remove_all(HWND h);
         props_remove_all(h);
     }
-    sysmenu_destroy(h);
+    if (w->sysmenu) {
+        DestroyMenu(w->sysmenu);
+        w->sysmenu = 0;
+    }
     if (w->upd) { DeleteObject(w->upd); w->upd = 0; }
     unlink_wnd(h);
     w->used = 0;

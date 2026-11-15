@@ -90,6 +90,7 @@ typedef struct {
     POINT   iconpos;               /* polozenie ikony (wsp. klienta rodzica), wazne gdy WF_ICONPOS */
     HWND    title;                 /* okno tytulu ikony; w oknie tytulu: jego ikona */
     int     sbpos[2], sbmin[2], sbmax[2];   /* paski przewijania: 0 = poziomy, 1 = pionowy */
+    HMENU   sysmenu;               /* wlasne menu systemowe okna (GetSystemMenu), 0 = brak */
     WORD    textlen;
     char    text[MAX_TITLE];
     BYTE    extra[MAX_EXTRA];
@@ -461,8 +462,8 @@ WORD   paint_msg(HWND h);                  /* WM_PAINT albo WM_PAINTICON (ikona 
 #define POPUP_FRAME   RGB(0x00, 0x40, 0x48)
 #define POPUP_SEP     RGB(0x40, 0x90, 0x98)
 void   sb_paint(HDC dc, LPRECT r, BOOL vert, int pos, int mn, int mx);
-void   sysmenu_destroy(HWND h);
 HMENU  API GetSystemMenu(HWND, BOOL);
+BOOL   API DestroyMenu(HMENU);
 LRESULT API DefWindowProc(HWND, WORD, WORD, LONG);
 LRESULT API SendMessage(HWND, WORD, WORD, LONG);
 BOOL   API PostMessage(HWND, WORD, WORD, LONG);

@@ -33,7 +33,6 @@ typedef struct { WORD used, n; MITEM it[MAX_ITEMS]; } MENU;
 
 static WORD g_menutask[MAX_MENUS];
 static WORD g_menusel[MAX_MENUS];              /* kazde menu we wlasnym bloku GlobalAlloc */
-static HMENU g_wnd_sysmenu[MAX_WND];           /* wlasne menu systemowe okna (GetSystemMenu) */
 static HWND g_mowner;                          /* wlasciciel menu (WM_MEASUREITEM/WM_DRAWITEM) */
 
 static MENU __far *mptr(HMENU h)
@@ -95,7 +94,12 @@ BOOL API DestroyMenu(HMENU h)
     MENU __far *m = mptr(h);
     WORD i;
     if (!m) return FALSE;
-    for (i = 0; i < MAX_WND; i++) if (g_wnd_sysmenu[i] == h) g_wnd_sysmenu[i] = 0;
+    if (g_wndmem) {
+        for (i = 1; i < MAX_WND; i++) {
+            WND __far *w = (WND __far *)MK_FP(g_wndmem, 0) + i;
+            if (w->used && w->sysmenu == h) w->sysmenu = 0;
+        }
+    }
     for (i = 0; i < m->n; i++) if (m->it[i].flags & MF_POPUP) DestroyMenu(m->it[i].id);
     m->used = 0;
     i = (h - MENUBASE) >> 2;
@@ -330,36 +334,21 @@ HMENU API LoadMenu(WORD hinst, LPCSTR name)
 /* ============================================================
  * Menu systemowe
  * ============================================================ */
-void sysmenu_destroy(HWND h)
-{
-    WORD i;
-    if (h < WNDBASE || ((h - WNDBASE) & 3)) return;
-    i = (h - WNDBASE) >> 2;
-    if (i < MAX_WND && g_wnd_sysmenu[i]) {
-        DestroyMenu(g_wnd_sysmenu[i]);
-        g_wnd_sysmenu[i] = 0;
-    }
-}
-
 HMENU API GetSystemMenu(HWND h, BOOL revert)
 {
     WND __far *w = WP(h);
-    WORD i;
     HMENU m;
     if (!w) return 0;
-    if (h < WNDBASE || ((h - WNDBASE) & 3)) return 0;
-    i = (h - WNDBASE) >> 2;
-    if (i >= MAX_WND) return 0;
 
     if (revert) {
-        if (g_wnd_sysmenu[i]) {
-            DestroyMenu(g_wnd_sysmenu[i]);
-            g_wnd_sysmenu[i] = 0;
+        if (w->sysmenu) {
+            DestroyMenu(w->sysmenu);
+            w->sysmenu = 0;
         }
         return 0;
     }
 
-    if (!g_wnd_sysmenu[i]) {
+    if (!w->sysmenu) {
         m = CreatePopupMenu();
         if (!m) return 0;
         AppendMenu(m, 0, SC_RESTORE, "&Restore");
@@ -369,10 +358,10 @@ HMENU API GetSystemMenu(HWND h, BOOL revert)
         AppendMenu(m, 0, SC_MAXIMIZE, "Ma&ximize");
         AppendMenu(m, MF_SEPARATOR, 0, 0);
         AppendMenu(m, 0, SC_CLOSE, "&Close\tAlt+F4");
-        g_wnd_sysmenu[i] = m;
+        w->sysmenu = m;
     }
 
-    m = g_wnd_sysmenu[i];
+    m = w->sysmenu;
     EnableMenuItem(m, SC_RESTORE, (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) ? 0 : MF_GRAYED);
     EnableMenuItem(m, SC_MAXIMIZE, ((w->style & WS_MAXIMIZEBOX) && !(w->flags & WF_MAXIMIZED)) ? 0 : MF_GRAYED);
     EnableMenuItem(m, SC_MINIMIZE, ((w->style & WS_MINIMIZEBOX) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
