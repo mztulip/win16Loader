@@ -1154,6 +1154,58 @@ static void dos_chdir(const char *dir)
     int86x(0x21, &r, &r, &s);
 }
 
+static void dump_dos_mcbs(void)
+{
+    union REGS r;
+    struct SREGS s;
+    unsigned mcb_seg;
+    r.h.ah = 0x52;
+    int86x(0x21, &r, &r, &s);
+    mcb_seg = *(unsigned short __far *)MK_FP(s.es, r.x.bx - 2);
+    mlog("--- DOS MCB MAP ---\n");
+    while (mcb_seg) {
+        unsigned char type = *(unsigned char __far *)MK_FP(mcb_seg, 0);
+        unsigned short owner = *(unsigned short __far *)MK_FP(mcb_seg, 1);
+        unsigned short size = *(unsigned short __far *)MK_FP(mcb_seg, 3);
+        char name[9];
+        int i;
+        for (i = 0; i < 8; i++) {
+            unsigned char c = *(unsigned char __far *)MK_FP(mcb_seg, 8 + i);
+            name[i] = (c >= 32 && c < 127) ? c : ' ';
+        }
+        name[8] = 0;
+        mlog("  MCB %04X: type=%c owner=%04X size=%5u para (%4lu KB) [%s]\n",
+             mcb_seg, type, owner, size, (unsigned long)size * 16 / 1024,
+             owner == 0 ? "FREE" : owner == 8 ? "DOS" : name);
+        if (type == 0x5A || (type != 0x4D && type != 0x5A)) break;
+        mcb_seg += size + 1;
+    }
+    mlog("-------------------\n");
+}
+
+static void dump_text_screen(void)
+{
+    unsigned char __far *v = (unsigned char __far *)MK_FP(0xB800, 0);
+    int y, x;
+    char line[81];
+    mlog("--- DOS SCREEN CAPTURE ---\n");
+    for (y = 0; y < 25; y++) {
+        int nonblank = 0;
+        for (x = 0; x < 80; x++) {
+            unsigned char c = v[(y * 80 + x) * 2];
+            line[x] = (c >= 32 && c < 127) ? c : ' ';
+            if (c > 32 && c < 127) nonblank = 1;
+        }
+        line[80] = 0;
+        x = 80;
+        while (x > 0 && line[x - 1] == ' ') line[--x] = 0;
+        if (nonblank && line[0]) {
+            mlog("  [%02d]: %s\n", y, line);
+        }
+    }
+    mlog("--------------------------\n");
+}
+
 static int dos_exec(const char *prog, const char *args)
 {
     static unsigned char tail[128];
@@ -1329,6 +1381,7 @@ void mod_exec_rm(void)
                 _dos_freemem(g_chunk_seg);
                 _dos_allocmem(0xFFFF, &maxpara);
                 mlog("DOS free mem: %u para (%lu KB)\n", maxpara, (unsigned long)maxpara * 16 / 1024);
+                dump_dos_mcbs();
                 old_pic_mask = (unsigned char)inp(0x21);
                 outp(0x21, old_pic_mask & ~0x02);
                 err = dos_exec(cmd, pargs);
@@ -1340,6 +1393,7 @@ void mod_exec_rm(void)
                     int86(0x21, &r, &r);
                     mlog("DOS exit code: type=%02X code=%u\n", r.h.ah, r.h.al);
                 }
+                dump_text_screen();
                 alloc_top_buffers();
                 g_rmbuf_seg = g_tmp_seg;
                 kcb[KCB_RMBUF_SEG / 2] = g_rmbuf_seg;
