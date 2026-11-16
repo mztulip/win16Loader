@@ -91,6 +91,12 @@ Current code lives in the repository root. Historical step-by-step snapshots are
 | `steps/STEP16`..`STEP20` | Keyboard/mouse, GDI blits, NE resource loader, example app, shell + WM |
 | `SKIFREE` | SKI.EXE binary + NE format analysis scripts |
 
+## Documentation
+
+- [Architektura pamięci i mapa MCB](docs/pamiec.md) – szczegółowy opis dwupoziomowego modelu pamięci (konwencjonalna <640 KB vs XMS >1 MB), mapa MCB, zwalnianie zasobów, alokatory oraz porównanie z Windows 3.1.
+- [Obsługa wyjątków CPU i ochrona pamięci](docs/debugging_i_wyjatki.md) – sprzętowe limity segmentów x86 (#GP/#SS), izolacja procesów w trybie wielozadaniowym, ekran paniki VESA (Panic Screen) oraz zrzuty rejestrów i stosu (Crash Dump).
+- [Wydajność GDI i podział stron](docs/wydajnosc_gdi.md) – analiza optymalizacji stronicowania pamięci dla emulatora QEMU.
+
 ## License
 
 win16Loader is free software; you can redistribute it and/or modify it under the terms of
@@ -106,6 +112,7 @@ the same license as Wine. See [`LICENSE`](LICENSE).
 | Wine `.spec` files (`dlls/*16/*.spec`) | read at build/analysis time from `../wine` (not in the repo) | LGPL-2.1+ | `tools/imports.py`, `gen_lnk.py`, `check_args.py`, `gen_apidb.py` take Win16 ordinals, names and argument sizes from them |
 | Wine behaviour references | comments in the sources | LGPL-2.1+ | No Wine code is copied; some semantics were matched against Wine (NE export prolog patching `NE_FixupSegmentPrologs`, 3.1 registry, `WM_SIZE` on first `ShowWindow`, owner-draw menu sizes, dialog placement) |
 | Win1App example | `win16_example_app/` | Unlicense (public domain) | by Transmission Zero, <https://github.com/TransmissionZero/Windows-1-Example-Application>; local changes in [`win16_example_app/UPSTREAM.md`](win16_example_app/UPSTREAM.md) |
+| Win31SS Screensaver (`WIN31SS.SCR`) | `example_apps/win31-screensaver/` | MIT | by Tim Shaw, <https://github.com/tdshaw2000/win31-screensaver>; minimal Win16 screensaver skeleton with bouncing shapes, fading trails, and configuration dialog |
 | FreeDOS floppy | `FD14-FloppyEdition/` (not in the repo) | GPL and others | download from <https://www.freedos.org> |
 | SkiFree | not in the repo (`SKIFREE/SKI.EXE`) | freeware | test application, <https://ski.ihoc.net/> |
 | Calmira II 3.3 (English) | not in the repo (`../win31_apps/english_calmira/calmii33`, sources `../win31_apps/english_calmira/cal33src`) | GPL-2.0-or-later | test application, <http://www.calmira.org/downloads/> |
