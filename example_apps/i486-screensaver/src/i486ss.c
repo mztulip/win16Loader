@@ -35,9 +35,9 @@
 #define MAX_SPEED           10
 
 #define KEY_STARS           "Stars"
-#define DEFAULT_STARS       50
-#define MIN_STARS           10
-#define MAX_STARS           100
+#define DEFAULT_STARS       0       /* 0 = czyste czarne tlo (ochrona kineskopu CRT) */
+#define MIN_STARS           0
+#define MAX_STARS           80
 
 #define KEY_WAVE            "Wave"
 #define DEFAULT_WAVE        2
@@ -67,6 +67,7 @@ typedef enum {
 typedef struct {
     int x;
     int y;
+    int speed;                      /* 1..3 px/tick - dynamic movement prevents CRT burn-in */
     int type;                       /* 0: faint, 1: bright, 2: cyan, 3: golden star */
 } STAR;
 
@@ -285,15 +286,28 @@ LONG FAR PASCAL WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             gWavePhase = (gWavePhase + 1) % NUM_PHASES;
 
-            /* Invalidate dirty rect covering old and new flag positions */
-            GetFlagRect(gOldX, gOldY, &rcOld);
-            GetFlagRect(gX, gY, &rcNew);
-            UnionRect(&rcDirty, &rcOld, &rcNew);
+            if (gNumStars > 0) {
+                int i;
+                for (i = 0; i < gNumStars; i++) {
+                    gStars[i].x -= gStars[i].speed;
+                    if (gStars[i].x < 0) {
+                        gStars[i].x = width + (rand() % 16);
+                        gStars[i].y = rand() % height;
+                        gStars[i].speed = (rand() % 3) + 1;
+                    }
+                }
+                InvalidateRect(hwnd, NULL, FALSE);
+            } else {
+                /* Invalidate dirty rect covering old and new flag positions */
+                GetFlagRect(gOldX, gOldY, &rcOld);
+                GetFlagRect(gX, gY, &rcNew);
+                UnionRect(&rcDirty, &rcOld, &rcNew);
 
-            gOldX = gX;
-            gOldY = gY;
+                gOldX = gX;
+                gOldY = gY;
 
-            InvalidateRect(hwnd, &rcDirty, FALSE);
+                InvalidateRect(hwnd, &rcDirty, FALSE);
+            }
         }
         return 0;
 
@@ -302,44 +316,42 @@ LONG FAR PASCAL WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         GetClientRect(hwnd, &rc);
 
         if (gHdcMem != NULL && gHdcFlag != NULL) {
-            int i;
             HBRUSH hbrBlack = (HBRUSH)GetStockObject(BLACK_BRUSH);
 
-            /* 1. Clear only the dirty region in backbuffer */
-            FillRect(gHdcMem, &ps.rcPaint, hbrBlack);
+            if (gNumStars == 0) {
+                /* Pure black void - zero CRT phosphor burn-in */
+                FillRect(gHdcMem, &ps.rcPaint, hbrBlack);
+                DrawFlagAt(gHdcMem, gX, gY);
+                BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top,
+                       ps.rcPaint.right - ps.rcPaint.left,
+                       ps.rcPaint.bottom - ps.rcPaint.top,
+                       gHdcMem, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+            } else {
+                /* Dynamic moving stars: all stars move continuously, preventing burn-in */
+                int i;
+                FillRect(gHdcMem, &rc, hbrBlack);
 
-            /* 2. Redraw stars that fall within the dirty region */
-            for (i = 0; i < gNumStars; i++) {
-                int sx = gStars[i].x;
-                int sy = gStars[i].y;
-                if (sx >= ps.rcPaint.left && sx <= ps.rcPaint.right &&
-                    sy >= ps.rcPaint.top && sy <= ps.rcPaint.bottom) {
+                for (i = 0; i < gNumStars; i++) {
+                    int sx = gStars[i].x;
+                    int sy = gStars[i].y;
                     COLORREF clr;
                     switch (gStars[i].type) {
-                    case 1:  clr = RGB(240, 245, 255); break; /* bright white */
-                    case 2:  clr = RGB(140, 200, 255); break; /* cyber cyan */
-                    case 3:  clr = RGB(255, 220, 110); break; /* golden */
-                    default: clr = RGB(100, 110, 130); break; /* faint */
+                    case 1:  clr = RGB(240, 245, 255); break;
+                    case 2:  clr = RGB(140, 200, 255); break;
+                    case 3:  clr = RGB(255, 220, 110); break;
+                    default: clr = RGB(110, 120, 140); break;
                     }
                     SetPixel(gHdcMem, sx, sy, clr);
-                    if (gStars[i].type == 3) {
-                        /* 4-point sparkle cross */
-                        SetPixel(gHdcMem, sx - 1, sy, RGB(160, 130, 60));
-                        SetPixel(gHdcMem, sx + 1, sy, RGB(160, 130, 60));
-                        SetPixel(gHdcMem, sx, sy - 1, RGB(160, 130, 60));
-                        SetPixel(gHdcMem, sx, sy + 1, RGB(160, 130, 60));
+                    if (gStars[i].speed >= 2) {
+                        /* Motion blur tail */
+                        SetPixel(gHdcMem, sx + 1, sy, RGB(70, 80, 95));
                     }
                 }
+
+                DrawFlagAt(gHdcMem, gX, gY);
+                BitBlt(hdc, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                       gHdcMem, 0, 0, SRCCOPY);
             }
-
-            /* 3. Draw waving flag at current position */
-            DrawFlagAt(gHdcMem, gX, gY);
-
-            /* 4. Blit the dirty region atomically to screen */
-            BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top,
-                   ps.rcPaint.right - ps.rcPaint.left,
-                   ps.rcPaint.bottom - ps.rcPaint.top,
-                   gHdcMem, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
         }
         EndPaint(hwnd, &ps);
         return 0;
@@ -441,6 +453,7 @@ static void InitStars(int width, int height)
     for (i = 0; i < MAX_STARS; i++) {
         gStars[i].x = rand() % width;
         gStars[i].y = rand() % height;
+        gStars[i].speed = (rand() % 3) + 1; /* 1..3 px/tick dynamic speed */
         if (i % 8 == 0) {
             gStars[i].type = 3; /* golden sparkle */
         } else if (i % 4 == 0) {
@@ -943,6 +956,17 @@ static void SaveSettings(void)
     WritePrivateProfileString(INI_SECTION, KEY_WAVE, buf, INI_FILE);
 }
 
+static void UpdateStarsLabel(HWND hDlg, int stars)
+{
+    char buf[24];
+    if (stars <= 0) {
+        SetDlgItemText(hDlg, IDC_STARS_VAL, "Brak");
+    } else {
+        sprintf(buf, "%d (ruch)", stars);
+        SetDlgItemText(hDlg, IDC_STARS_VAL, buf);
+    }
+}
+
 BOOL FAR PASCAL ConfigDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
@@ -953,7 +977,7 @@ BOOL FAR PASCAL ConfigDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 
         SetScrollRange(GetDlgItem(hDlg, IDC_STARS), SB_CTL, MIN_STARS, MAX_STARS, FALSE);
         SetScrollPos(GetDlgItem(hDlg, IDC_STARS), SB_CTL, gNumStars, TRUE);
-        SetDlgItemInt(hDlg, IDC_STARS_VAL, (UINT)gNumStars, FALSE);
+        UpdateStarsLabel(hDlg, gNumStars);
 
         SetScrollRange(GetDlgItem(hDlg, IDC_WAVE), SB_CTL, MIN_WAVE, MAX_WAVE, FALSE);
         SetScrollPos(GetDlgItem(hDlg, IDC_WAVE), SB_CTL, gWaveLevel, TRUE);
@@ -989,7 +1013,9 @@ BOOL FAR PASCAL ConfigDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
             if (pos > maxVal) pos = maxVal;
 
             SetScrollPos(hwndScroll, SB_CTL, pos, TRUE);
-            if (valId) {
+            if (valId == IDC_STARS_VAL) {
+                UpdateStarsLabel(hDlg, pos);
+            } else if (valId) {
                 SetDlgItemInt(hDlg, valId, (UINT)pos, FALSE);
             }
         }
