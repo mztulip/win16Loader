@@ -168,7 +168,8 @@ BOOL post_msg(HWND h, WORD m, WORD wp, LONG lp)
     /* Okno bez zywego wlasciciela (pulpit powstaje przed pierwszym zadaniem): odbierze biezace.
      * Inaczej nikt nie zabierze komunikatu, a miejsce zwalnia sie tylko od poczatku kolejki. */
     WORD task = (h && WP(h)) ? WP(h)->task : 0;
-    if (!task || !IsTask(task)) task = GetCurrentTask();
+    if (h == HDESKTOP) task = 0;
+    else if (!task || !IsTask(task)) task = GetCurrentTask();
     if ((m == WM_MOUSEMOVE || m == WM_NCMOUSEMOVE) && g_qt != g_qh) {   /* liczy sie ostatnia pozycja */
         MSG *l = &g_q[(g_qt + QSIZE - 1) % QSIZE];
         if (l->message == m && l->hwnd == h && l->wParam == wp) {
@@ -194,6 +195,10 @@ BOOL API PostMessage(HWND h, WORD m, WORD wp, LONG lp)
         return TRUE;
     }
     if (h && !WP(h)) return FALSE;
+    if (h == HDESKTOP && m == WM_SYSCOMMAND && (wp & 0xFFF0) == SC_SCREENSAVE) {
+        DefWindowProc(HDESKTOP, m, wp, lp);
+        return TRUE;
+    }
     return post_msg(h, m, wp, lp);
 }
 
@@ -267,6 +272,7 @@ static void key_event(WORD e)
         if (n) vk = n;
     }
     if (!vk) return;
+    g_last_input = tick();
     prev = (g_keys[vk] & 0x80) != 0;
     if (up) g_keys[vk] &= ~0x80;
     else { if (!prev) g_keys[vk] ^= 1; g_keys[vk] |= 0x80; }
@@ -348,6 +354,7 @@ static void mouse_msg(WORD cmsg, BOOL isdown)
 static void mouse_moved(int x, int y)
 {
     if (x == g_mx && y == g_my) return;
+    g_last_input = tick();
     g_mx = x; g_my = y;
     GdiMoveCursor(x, y);
     mouse_msg(WM_MOUSEMOVE, FALSE);
@@ -360,6 +367,7 @@ static void mouse_buttons(WORD b)
     for (i = 0; i < 3; i++) {
         WORD bit = 1 << i;
         if ((b & bit) == (g_mbtn & bit)) continue;
+        g_last_input = tick();
         g_mbtn ^= bit;
         mouse_msg((g_mbtn & bit) ? dn[i] : dn[i] + 1, (g_mbtn & bit) != 0);
     }
@@ -671,7 +679,8 @@ static BOOL get_msg(LPMSG m, HWND filt, WORD mn, WORD mx, BOOL remove)
     for (i = g_qh; i != g_qt; i = (i + 1) % QSIZE) {
         MSG *q = &g_q[i];
         if (q->message == WM_NULL && i == g_qh) { g_qh = (g_qh + 1) % QSIZE; continue; }
-        if (q->message == WM_NULL || g_qtask[i] != me) continue;
+        if (q->message == WM_NULL) continue;
+        if (g_qtask[i] != me && g_qtask[i] != 0 && q->hwnd != HDESKTOP) continue;
         if (filt && q->hwnd != filt && !IsChild(filt, q->hwnd)) continue;
         if (!in_filter(q->message, mn, mx)) continue;
         *m = *q;
@@ -704,9 +713,32 @@ static BOOL get_msg(LPMSG m, HWND filt, WORD mn, WORD mx, BOOL remove)
  * (g_idle zeruje kazde zadanie, ktore dostalo komunikat albo pracuje) */
 static WORD g_idle;
 
+static void check_screensaver_idle(void)
+{
+    static DWORD last_check = 0;
+    static int ss_active = -1;
+    static int ss_timeout = 0;
+    DWORD now = tick();
+    if (!g_last_input) g_last_input = now;
+    if ((long)(now - last_check) < 1000) return; /* raz na sekunde */
+    last_check = now;
+    if (ss_active < 0) {
+        ss_active = GetProfileInt("windows", "ScreenSaveActive", 1);
+        ss_timeout = GetProfileInt("windows", "ScreenSaveTimeOut", 120);
+    }
+    if (ss_active && ss_timeout > 0 && !g_ss_running) {
+        if ((long)(now - g_last_input) >= (long)ss_timeout * 1000L) {
+            udbg("USER: bezczynnosc - automatyczny start wygaszacza\n");
+            g_last_input = now;
+            PostMessage(HDESKTOP, WM_SYSCOMMAND, SC_SCREENSAVE, 0);
+        }
+    }
+}
+
 static void task_wait(void)
 {
     int n = GetNumTasks();
+    check_screensaver_idle();
     if (++g_idle >= (WORD)n) { g_idle = 0; cpu_idle(); }
     if (n > 1) { Yield(); send_pump(); }
 }
@@ -899,6 +931,8 @@ void API UserTaskExit(WORD task, WORD hinst, BOOL fault, WORD succ)
     for (k = 0; k < MAX_SENDS; k++) if (g_xs[k].used && g_xs[k].to == task) g_xs[k].done = TRUE;
     cls_free_inst(hinst, succ);
     menus_free_task(task);
+    g_ss_running = FALSE;
+    g_last_input = tick();
 }
 
 /* ordinal 953 (prywatny): reset kursora po powrocie z pelnoekranowego DOS */

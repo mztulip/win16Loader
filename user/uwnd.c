@@ -188,6 +188,17 @@ static void link_wnd(HWND h, HWND after)
     HWND c;
     if (!p) return;
     if (after == 0 || !p->child) {
+        /* Jesli na samej gorze jest pelnoekranowe okno topmost (np. wygaszacz),
+         * zadne inne okno nie moze go przyslonic */
+        if (p->child && h != p->child && (WP(p->child)->exstyle & WS_EX_TOPMOST)) {
+            WND __far *topw = WP(p->child);
+            if (topw->wr.left <= 0 && topw->wr.top <= 0 &&
+                topw->wr.right >= SCR_W && topw->wr.bottom >= SCR_H) {
+                w->next = topw->next;
+                topw->next = h;
+                return;
+            }
+        }
         /* okna "topmost" zostaja na gorze */
         if (!(w->exstyle & WS_EX_TOPMOST) && p->child && (WP(p->child)->exstyle & WS_EX_TOPMOST)) {
             c = p->child;

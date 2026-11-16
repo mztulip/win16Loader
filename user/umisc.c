@@ -323,10 +323,13 @@ HWND API GetSysModalWindow(void)     { return 0; }
 HWND API SetSysModalWindow(HWND h)   { (void)h; return 0; }
 BOOL API LockWindowUpdate(HWND h)    { (void)h; return TRUE; }
 
+BOOL  g_ss_running = FALSE;
+DWORD g_last_input = 0;
+
 /* ordinal 483: SPI_* - zwracamy rozsadne domyslne */
 BOOL API SystemParametersInfo(WORD act, WORD p, LPVOID pv, WORD win)
 {
-    (void)p; (void)win;
+    (void)win;
     switch (act) {
     case 1:  if (pv) *(WORD __far *)pv = 0; return TRUE;          /* SPI_GETBEEP */
     case 13: if (pv) *(int __far *)pv = 75; return TRUE;          /* SPI_ICONHORIZONTALSPACING */
@@ -335,6 +338,11 @@ BOOL API SystemParametersInfo(WORD act, WORD p, LPVOID pv, WORD win)
     case 25: if (pv) *(int __far *)pv = 1; return TRUE;           /* SPI_GETICONTITLEWRAP */
     case 27: if (pv) *(int __far *)pv = 0; return TRUE;           /* SPI_GETMENUDROPALIGNMENT */
     case 31: if (pv) umemset(pv, 0, 50); return TRUE;             /* SPI_GETICONTITLELOGFONT */
+    case 97:                                                       /* SPI_SCREENSAVERRUNNING */
+        if (pv) *(BOOL __far *)pv = g_ss_running;
+        g_ss_running = (BOOL)p;
+        if (!g_ss_running) g_last_input = tick();
+        return TRUE;
     }
     return TRUE;
 }

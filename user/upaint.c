@@ -909,6 +909,102 @@ static void track_move(HWND h)
     }
 }
 
+static void track_size(HWND h)
+{
+    WND __far *w = WP(h);
+    RECT r, o;
+    MSG m;
+    int x0 = mouse_x(), y0 = mouse_y();
+    int hit = 0;
+    BOOL cancelled = FALSE;
+    if (!w || (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) || !(w->style & WS_THICKFRAME)) return;
+    r = w->wr; o = r;
+    xor_frame((LPRECT)&r);
+    while (modal_next((LPMSG)&m)) {
+        if (m.message == WM_LBUTTONDOWN || m.message == WM_NCLBUTTONDOWN) break;
+        if (m.message == WM_RBUTTONDOWN || m.message == WM_NCRBUTTONDOWN) { cancelled = TRUE; break; }
+        if (m.message == WM_KEYDOWN) {
+            if (m.wParam == 0x1B) { cancelled = TRUE; break; }
+            if (m.wParam == 0x0D) break;
+            if (m.wParam >= 0x25 && m.wParam <= 0x28) {
+                int step = (GetKeyState(0x11) < 0) ? 1 : 8;
+                if (!hit) {
+                    if (m.wParam == 0x25) hit = HTLEFT;
+                    else if (m.wParam == 0x26) hit = HTTOP;
+                    else if (m.wParam == 0x27) hit = HTRIGHT;
+                    else if (m.wParam == 0x28) hit = HTBOTTOM;
+                } else {
+                    if ((hit == HTLEFT || hit == HTRIGHT) && m.wParam == 0x26)
+                        hit = (hit == HTLEFT) ? HTTOPLEFT : HTTOPRIGHT;
+                    else if ((hit == HTLEFT || hit == HTRIGHT) && m.wParam == 0x28)
+                        hit = (hit == HTLEFT) ? HTBOTTOMLEFT : HTBOTTOMRIGHT;
+                    else if ((hit == HTTOP || hit == HTBOTTOM) && m.wParam == 0x25)
+                        hit = (hit == HTTOP) ? HTTOPLEFT : HTBOTTOMLEFT;
+                    else if ((hit == HTTOP || hit == HTBOTTOM) && m.wParam == 0x27)
+                        hit = (hit == HTTOP) ? HTTOPRIGHT : HTBOTTOMRIGHT;
+                }
+                xor_frame((LPRECT)&r);
+                if (m.wParam == 0x25) {
+                    if (hit == HTLEFT || hit == HTTOPLEFT || hit == HTBOTTOMLEFT) r.left -= step;
+                    else if (hit == HTRIGHT || hit == HTTOPRIGHT || hit == HTBOTTOMRIGHT) r.right -= step;
+                }
+                if (m.wParam == 0x26) {
+                    if (hit == HTTOP || hit == HTTOPLEFT || hit == HTTOPRIGHT) r.top -= step;
+                    else if (hit == HTBOTTOM || hit == HTBOTTOMLEFT || hit == HTBOTTOMRIGHT) r.bottom -= step;
+                }
+                if (m.wParam == 0x27) {
+                    if (hit == HTLEFT || hit == HTTOPLEFT || hit == HTBOTTOMLEFT) r.left += step;
+                    else if (hit == HTRIGHT || hit == HTTOPRIGHT || hit == HTBOTTOMRIGHT) r.right += step;
+                }
+                if (m.wParam == 0x28) {
+                    if (hit == HTTOP || hit == HTTOPLEFT || hit == HTTOPRIGHT) r.top += step;
+                    else if (hit == HTBOTTOM || hit == HTBOTTOMLEFT || hit == HTBOTTOMRIGHT) r.bottom += step;
+                }
+                if (r.right - r.left < 100) { if (r.left != o.left) r.left = r.right - 100; else r.right = r.left + 100; }
+                if (r.bottom - r.top < 27) { if (r.top != o.top) r.top = r.bottom - 27; else r.bottom = r.top + 27; }
+                xor_frame((LPRECT)&r);
+                continue;
+            }
+        }
+        if (m.message == WM_MOUSEMOVE || m.message == WM_NCMOUSEMOVE) {
+            int dx = mouse_x() - x0, dy = mouse_y() - y0;
+            if (!hit) {
+                if (dx > 2 && dy > 2) hit = HTBOTTOMRIGHT;
+                else if (dx < -2 && dy < -2) hit = HTTOPLEFT;
+                else if (dx > 2 && dy < -2) hit = HTTOPRIGHT;
+                else if (dx < -2 && dy > 2) hit = HTBOTTOMLEFT;
+                else if (dx > 2) hit = HTRIGHT;
+                else if (dx < -2) hit = HTLEFT;
+                else if (dy > 2) hit = HTBOTTOM;
+                else if (dy < -2) hit = HTTOP;
+            }
+            if (!hit) hit = HTBOTTOMRIGHT;
+            if (dx || dy) {
+                xor_frame((LPRECT)&r);
+                r = o;
+                switch (hit) {
+                case HTLEFT: r.left += dx; break;
+                case HTRIGHT: r.right += dx; break;
+                case HTTOP: r.top += dy; break;
+                case HTBOTTOM: r.bottom += dy; break;
+                case HTTOPLEFT: r.left += dx; r.top += dy; break;
+                case HTTOPRIGHT: r.right += dx; r.top += dy; break;
+                case HTBOTTOMLEFT: r.left += dx; r.bottom += dy; break;
+                case HTBOTTOMRIGHT: r.right += dx; r.bottom += dy; break;
+                }
+                if (r.right - r.left < 100) { if (r.left != o.left) r.left = r.right - 100; else r.right = r.left + 100; }
+                if (r.bottom - r.top < 27) { if (r.top != o.top) r.top = r.bottom - 27; else r.bottom = r.top + 27; }
+                xor_frame((LPRECT)&r);
+            }
+        }
+    }
+    xor_frame((LPRECT)&r);
+    if (!cancelled && (w = WP(h)) && (r.left != o.left || r.top != o.top || r.right != o.right || r.bottom != o.bottom)) {
+        if (w->style & WS_CHILD) OffsetRect((LPRECT)&r, -WP(w->parent)->cr.left, -WP(w->parent)->cr.top);
+        SetWindowPos(h, 0, r.left, r.top, r.right - r.left, r.bottom - r.top, 0x0004 | 0x0010);
+    }
+}
+
 static BOOL track_button(HWND h, LPRECT rr, char glyph)
 {
     MSG m;
@@ -1212,12 +1308,29 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
             send_msg(h, WM_SYSCOMMAND, (w->flags & WF_MAXIMIZED) ? SC_RESTORE : SC_MAXIMIZE, lp);
         else return DefWindowProc(h, WM_NCLBUTTONDOWN, wp, lp);
         return 0;
-    case WM_SETCURSOR:
+    case WM_SETCURSOR: {
+        WORD hit = LOWORD(lp);
         if ((w->style & WS_CHILD) && WP(w->parent) && send_msg(w->parent, WM_SETCURSOR, wp, lp)) return 1;
-        if (LOWORD(lp) == HTCLIENT && g_cls[w->cls].cursor) SetCursor(g_cls[w->cls].cursor);
-        else if (LOWORD(lp) == (WORD)HTERROR && (HIWORD(lp) == WM_LBUTTONDOWN)) MessageBeep(0);
-        else SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32512, 0)));
+        if (hit == HTCLIENT && g_cls[w->cls].cursor) {
+            SetCursor(g_cls[w->cls].cursor);
+        } else if (hit == (WORD)HTERROR && (HIWORD(lp) == WM_LBUTTONDOWN)) {
+            MessageBeep(0);
+        } else if ((w->style & WS_THICKFRAME) && !(w->flags & (WF_MINIMIZED | WF_MAXIMIZED))) {
+            if (hit == HTLEFT || hit == HTRIGHT)
+                SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32644, 0)));
+            else if (hit == HTTOP || hit == HTBOTTOM)
+                SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32645, 0)));
+            else if (hit == HTTOPLEFT || hit == HTBOTTOMRIGHT)
+                SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32642, 0)));
+            else if (hit == HTTOPRIGHT || hit == HTBOTTOMLEFT)
+                SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32643, 0)));
+            else
+                SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32512, 0)));
+        } else {
+            SetCursor(LoadCursor(0, (LPCSTR)MAKELONG(32512, 0)));
+        }
         return 1;
+    }
     case WM_MOUSEACTIVATE:
         if ((w->style & WS_CHILD) && WP(w->parent)) {
             LRESULT r = send_msg(w->parent, WM_MOUSEACTIVATE, wp, lp);
@@ -1295,7 +1408,36 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
         case SC_MAXIMIZE: ShowWindow(h, 3); break;
         case SC_RESTORE:  ShowWindow(h, 9); break;
         case SC_MOVE:     track_move(h); break;
-        case SC_KEYMENU:  if (w->id && !(w->style & WS_CHILD)) menu_track_bar(h, -1, -1, (WORD)LOWORD(lp)); break;
+        case SC_SIZE:     track_size(h); break;
+        case SC_KEYMENU:
+            if ((WORD)LOWORD(lp) == ' ') {
+                if (w->style & WS_SYSMENU) {
+                    HMENU sm = GetSystemMenu(h, FALSE);
+                    if (sm) {
+                        RECT cap, sys, mn, mx, cl;
+                        int cmd;
+                        cap_rects(w, (LPRECT)&cap, (LPRECT)&sys, (LPRECT)&mn, (LPRECT)&mx, (LPRECT)&cl);
+                        cmd = menu_track_popup(sm, w->wr.left + sys.left, w->wr.top + sys.bottom + 1, h, TRUE);
+                        if (cmd) send_msg(h, WM_SYSCOMMAND, cmd, 0);
+                    }
+                }
+            } else if (w->id && !(w->style & WS_CHILD)) {
+                menu_track_bar(h, -1, -1, (WORD)LOWORD(lp));
+            }
+            break;
+        case SC_SCREENSAVE: {
+            char scr[80];
+            udbg("USER: WM_SYSCOMMAND SC_SCREENSAVE\n");
+            g_ss_running = TRUE;
+            g_last_input = tick();
+            scr[0] = 0;
+            GetPrivateProfileString("boot", "scrnsave.exe", "", (LPSTR)scr, sizeof(scr), "SYSTEM.INI");
+            if (!scr[0]) {
+                ustrcpy((LPSTR)scr, "C:\\WINDOWS\\WIN31SS.SCR");
+            }
+            WinExec((LPCSTR)scr, 1);
+            break;
+        }
         }
         return 0;
     case WM_SYSKEYDOWN:
@@ -1311,7 +1453,7 @@ LRESULT API DefWindowProc(HWND h, WORD m, WORD wp, LONG lp)
     case WM_SYSCHAR:
         if (lp & (1L << 29)) {
             HWND t = wnd_toplevel(h);
-            if (WP(t) && WP(t)->id) send_msg(t, WM_SYSCOMMAND, SC_KEYMENU, (BYTE)wp);
+            if (WP(t) && (WP(t)->id || (BYTE)wp == ' ')) send_msg(t, WM_SYSCOMMAND, SC_KEYMENU, (BYTE)wp);
         }
         return 0;
     case WM_ACTIVATE:

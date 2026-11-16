@@ -114,6 +114,8 @@ typedef struct {
 #define WF_ICONTITLE  0x4000       /* okno tytulu ikony (klasa #32772) */
 
 extern WORD g_wndmem;
+extern BOOL g_ss_running;
+extern DWORD g_last_input;
 #define WP(h)       wnd_ptr(h)
 WND __far *wnd_ptr(HWND h);        /* NULL dla niepoprawnego */
 HWND  wnd_handle(WORD idx);
@@ -303,6 +305,7 @@ typedef struct { HWND hwnd, after; int x, y, cx, cy; WORD flags; } WINDOWPOS;
 #define SC_KEYMENU    0xF100
 #define SC_RESTORE    0xF120
 #define SC_TASKLIST   0xF130
+#define SC_SCREENSAVE 0xF140
 
 /* ---- Kolory systemowe (COLOR_*) ---- */
 #define COLOR_SCROLLBAR      0
@@ -391,6 +394,8 @@ DWORD API SizeofResource(WORD, WORD);
 void  API OutputDebugString(LPCSTR);
 int   API GetProfileInt(LPCSTR, LPCSTR, int);
 int   API GetProfileString(LPCSTR, LPCSTR, LPCSTR, LPSTR, int);
+int   API GetPrivateProfileString(LPCSTR, LPCSTR, LPCSTR, LPSTR, int, LPCSTR);
+WORD  API WinExec(LPCSTR, WORD);
 HFILE API _lopen(LPCSTR, int);
 WORD  API _lclose(HFILE);
 DWORD API _hread(HFILE, void __far *, DWORD);
@@ -400,6 +405,7 @@ void  API FatalAppExit(WORD, LPCSTR);
 /* ---- Wewnetrzne (miedzy plikami) ---- */
 void   udbg(LPCSTR s);
 void   udbg_hex(DWORD v, int d);
+int __far __cdecl wsprintf(LPSTR, LPCSTR, ...);
 void   user_init(void);
 LRESULT send_msg(HWND h, WORD m, WORD w, LONG l);
 LRESULT call_proc(WNDPROC p, WORD ds, HWND h, WORD m, WORD w, LONG l);

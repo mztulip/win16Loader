@@ -365,7 +365,7 @@ HMENU API GetSystemMenu(HWND h, BOOL revert)
     EnableMenuItem(m, SC_RESTORE, (w->flags & (WF_MAXIMIZED | WF_MINIMIZED)) ? 0 : MF_GRAYED);
     EnableMenuItem(m, SC_MAXIMIZE, ((w->style & WS_MAXIMIZEBOX) && !(w->flags & WF_MAXIMIZED)) ? 0 : MF_GRAYED);
     EnableMenuItem(m, SC_MINIMIZE, ((w->style & WS_MINIMIZEBOX) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
-    EnableMenuItem(m, SC_SIZE, ((w->style & WS_THICKFRAME) && !(w->flags & WF_MINIMIZED)) ? 0 : MF_GRAYED);
+    EnableMenuItem(m, SC_SIZE, ((w->style & WS_THICKFRAME) && !(w->flags & (WF_MINIMIZED | WF_MAXIMIZED))) ? 0 : MF_GRAYED);
     EnableMenuItem(m, SC_MOVE, (w->flags & WF_MAXIMIZED) ? MF_GRAYED : 0);
     return m;
 }
