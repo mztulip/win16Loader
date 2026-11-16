@@ -1,0 +1,31 @@
+#include <windows.h>
+#include "resource.h"
+
+IDI_APP ICON "src/i486ss.ico"
+
+STRINGTABLE
+BEGIN
+    NAME,        "Flaga i486"
+    DESCRIPTION, "Wygaszacz ekranu z powiewajaca flaga i486 DX"
+END
+
+IDD_CONFIG DIALOG 20, 20, 160, 115
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Ustawienia Flagi i486"
+FONT 8, "MS Sans Serif"
+BEGIN
+    LTEXT         "Predkosc:", -1, 10, 15, 45, 8
+    SCROLLBAR     IDC_SPEED, 60, 13, 65, 10, SBS_HORZ | WS_TABSTOP
+    LTEXT         "3", IDC_SPEED_VAL, 132, 15, 20, 8
+
+    LTEXT         "Gwiazdy:", -1, 10, 35, 45, 8
+    SCROLLBAR     IDC_STARS, 60, 33, 65, 10, SBS_HORZ | WS_TABSTOP
+    LTEXT         "50", IDC_STARS_VAL, 132, 35, 20, 8
+
+    LTEXT         "Falowanie:", -1, 10, 55, 45, 8
+    SCROLLBAR     IDC_WAVE, 60, 53, 65, 10, SBS_HORZ | WS_TABSTOP
+    LTEXT         "2", IDC_WAVE_VAL, 132, 55, 20, 8
+
+    DEFPUSHBUTTON "OK",     IDOK,     55, 85, 40, 14
+    PUSHBUTTON    "Anuluj", IDCANCEL, 105, 85, 40, 14
+END

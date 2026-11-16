@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--clock-exe", default="example_apps/clock/CLOCK.EXE", help="CLOCK.EXE path")
     parser.add_argument("--charmap-exe", default="example_apps/charmap/CHARMAP.EXE", help="CHARMAP.EXE path")
     parser.add_argument("--hexview-exe", default="example_apps/hexview/HEXVIEW.EXE", help="HEXVIEW.EXE path")
+    parser.add_argument("--screensaver-scr", default="example_apps/win31-screensaver/WIN31SS.SCR", help="Screensaver .SCR path")
+    parser.add_argument("--i486ss-scr", default="example_apps/i486-screensaver/I486SS.SCR", help="i486 Screensaver .SCR path")
     parser.add_argument("--mario-dir", default="games/mario", help="Mario game directory")
     args = parser.parse_args()
 
@@ -105,8 +107,8 @@ def main():
     print("Writing FDCONFIG.SYS and FDAUTO.BAT...")
     fdconfig = (
         "!LASTDRIVE=Z\r\n"
-        "!BUFFERS=10\r\n"
-        "!FILES=40\r\n"
+        "!BUFFERS=6\r\n"
+        "!FILES=30\r\n"
         "SHELL=C:\\FREEDOS\\BIN\\COMMAND.COM C:\\FREEDOS\\BIN /E:512 /P=C:\\FDAUTO.BAT\r\n"
     )
     fdauto = (
@@ -137,6 +139,8 @@ def main():
         run(["python3", "tools/make_i486_ico.py"])
     if not os.path.exists("windir/DOSPRMPT.PIF") and os.path.exists("tools/make_pif.py"):
         run(["python3", "tools/make_pif.py"])
+    if not os.path.exists("windir/SCREENSV.ICO") and os.path.exists("tools/make_screensaver_ico.py"):
+        run(["python3", "tools/make_screensaver_ico.py"])
 
     win_files = [
         ("loader.exe", "LOADER.EXE"),
@@ -152,6 +156,7 @@ def main():
         ("windir/CLOCK.ICO", "CLOCK.ICO"),
         ("windir/LOADER16.ICO", "LOADER16.ICO"),
         ("windir/I486.ICO", "I486.ICO"),
+        ("windir/SCREENSV.ICO", "SCREENSV.ICO"),
         ("control.exe", "CONTROL.EXE"),
     ]
     notepad_candidates = [
@@ -211,6 +216,29 @@ def main():
 
     if os.path.exists("example_apps/hexview/HEXVIEW.ICO"):
         win_files.append(("example_apps/hexview/HEXVIEW.ICO", "HEXVIEW.ICO"))
+
+    scr_candidates = [
+        args.screensaver_scr,
+        "example_apps/win31-screensaver/WIN31SS.SCR",
+        "example_apps/win31-screensaver/win31ss.exe",
+    ]
+    for c in scr_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "WIN31SS.SCR"))
+            break
+
+    i486_scr_candidates = [
+        args.i486ss_scr,
+        "example_apps/i486-screensaver/I486SS.SCR",
+        "example_apps/i486-screensaver/i486ss.exe",
+    ]
+    for c in i486_scr_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "I486SS.SCR"))
+            break
+
+    if os.path.exists("windir/I486.ICO"):
+        win_files.append(("windir/I486.ICO", "I486.ICO"))
 
     for src, dst in win_files:
         run(["mcopy", "-oi", mpart, src, f"::WINDOWS/{dst}"])
@@ -283,10 +311,20 @@ def main():
         run(["mcopy", "-oi", mpart, "windir/I486.ICO", "::CALMIRA/I486.ICO"])
     if os.path.exists("windir/HEXVIEW.ICO"):
         run(["mcopy", "-oi", mpart, "windir/HEXVIEW.ICO", "::CALMIRA/HEXVIEW.ICO"])
+    if os.path.exists("windir/SCREENSV.ICO"):
+        run(["mcopy", "-oi", mpart, "windir/SCREENSV.ICO", "::CALMIRA/SCREENSV.ICO"])
     if os.path.exists("windir/CALMIRA.INI"):
         run(["mcopy", "-oi", mpart, "windir/CALMIRA.INI", "::CALMIRA/CALMIRA.INI"])
     if os.path.exists("windir/START.INI"):
         run(["mcopy", "-oi", mpart, "windir/START.INI", "::CALMIRA/START.INI"])
+    for c in scr_candidates:
+        if c and os.path.exists(c):
+            run(["mcopy", "-oi", mpart, c, "::CALMIRA/WIN31SS.SCR"])
+            break
+    for c in i486_scr_candidates:
+        if c and os.path.exists(c):
+            run(["mcopy", "-oi", mpart, c, "::CALMIRA/I486SS.SCR"])
+            break
 
     # 9. Create C:\SKIFREE with SKI.EXE and README.TXT
     print("Setting up C:\\SKIFREE and documentation...")

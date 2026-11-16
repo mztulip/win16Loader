@@ -31,6 +31,8 @@ TEST CTLTEST DONE pass=36 fail=0
 | `notepad`  | NOTEPAD.EXE  | Klasyczny Notatnik Win16 (wieloliniowy edytor tekstu, menu, dialogi COMMDLG) |
 | `charmap`  | CHARMAP.EXE  | Klasyczna Tablica Znaków Win16 (siatka 16x14, podgląd, schowek CF_TEXT, wybór czcionki) |
 | `hexview`  | HEXVIEW.EXE  | Przeglądarka plików binarnych (offset, bajty hex, zdekodowany ASCII, skok do adresu, podświetlanie, skojarzenia .sys/.bin/.dat) |
+| `win31-screensaver` | WIN31SS.SCR | Wygaszacz ekranu Win16 (animacja figur geometrycznych, smuga, tęcza, dialog konfiguracji, autor: Tim Shaw, <https://github.com/tdshaw2000/win31-screensaver>) |
+| `i486-screensaver`  | I486SS.SCR  | Wygaszacz ekranu Win16 z oficjalną flagą systemu: powiewająca na wietrze flaga z mikroprocesorem i486 DX, promienistymi ścieżkami PCB, gwiazdami i dialogiem konfiguracji |
 
 ## Budowanie i uruchamianie
 
