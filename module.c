@@ -33,7 +33,7 @@
 #define MAX_MODREFS    32
 #define MAX_SEGS       64
 #define THUNK_SIZE     8
-#define HASH_SIZE      4096     /* > max liczby thunkow */
+#define HASH_SIZE      1024     /* > max liczby thunkow */
 #define MAX_STUBS      1024
 #define CHUNK          0x8000u  /* bufor do strumieniowania plik -> XMS */
 
@@ -50,12 +50,12 @@ extern unsigned long g_ext_mem_kb;
 
 /* Przydzialy programu w kolejnosci ich wykonania. Ponowne uruchomienie zakonczonego programu
  * wykonuje te same kroki, wiec dostaje te same adresy: XMS i selektory nie uciekaja. */
-#define MAX_ALLOCLOG 700
+#define MAX_ALLOCLOG 64
 struct ALLOCLOG {
     unsigned nx, ns;
     unsigned char bad;
     struct { unsigned long phys, size; } x[MAX_ALLOCLOG];
-    unsigned s[64 + 8];
+    unsigned s[32];
 };
 static struct ALLOCLOG __far *g_rec, __far *g_replay;
 static unsigned g_rp_x, g_rp_s, g_replay_idx, g_log_dll;
@@ -66,9 +66,10 @@ typedef struct {
     unsigned       nsegs;
     unsigned       first_sel;
     unsigned       dgroup_sel;
-    unsigned short __far *ent_off;   /* [MAX_ORD] */
-    unsigned char  __far *ent_seg;   /* [MAX_ORD]: 0=brak, 0xFE=stala */
-    unsigned char  __far *ent_flg;   /* [MAX_ORD]: flagi wejscia (bit1 = shared data) */
+    unsigned short max_ord;
+    unsigned short __far *ent_off;   /* [max_ord] */
+    unsigned char  __far *ent_seg;   /* [max_ord]: 0=brak, 0xFE=stala */
+    unsigned char  __far *ent_flg;   /* [max_ord]: flagi wejscia (bit1 = shared data) */
     struct ALLOCLOG __far *log;      /* programy: przydzialy do ponownego uruchomienia */
 } MOD;
 
@@ -260,13 +261,6 @@ static int new_mod(const char *name, unsigned flags, const char *path)
     strncpy(m->name, name, 9);
     upcase(m->name);
     m->flags = flags;
-    m->ent_off = (unsigned short __far *)_fmalloc(MAX_ORD * 2);
-    m->ent_seg = (unsigned char  __far *)_fmalloc(MAX_ORD);
-    m->ent_flg = (unsigned char  __far *)_fmalloc(MAX_ORD);
-    if (!m->ent_off || !m->ent_seg || !m->ent_flg) { mlog("ERROR: brak pamieci (entry)\n"); return -1; }
-    _fmemset(m->ent_off, 0, MAX_ORD * 2);
-    _fmemset(m->ent_seg, 0, MAX_ORD);
-    _fmemset(m->ent_flg, 0, MAX_ORD);
     e = mt_entry(idx);
     _fmemset(e, 0, MT_SIZE);
     _fstrncpy((char __far *)e + MT_NAME, m->name, 9);
@@ -461,7 +455,7 @@ static int resolve_import(unsigned tmod, unsigned ord, TARGET *t)
     unsigned short th;
     t->is_const = 0;
     if (stricmp(m->name, "KERNEL") == 0 && kernel_equate(ord, t)) return 0;
-    if (!(m->flags & MTF_VIRTUAL) && ord < MAX_ORD && m->ent_seg[ord]) {
+    if (!(m->flags & MTF_VIRTUAL) && m->ent_seg && ord < m->max_ord && m->ent_seg[ord]) {
         unsigned char es = m->ent_seg[ord];
         if (es == 0xFE) {           /* stala w tablicy wejsc */
             t->is_const = 1; t->sel = t->off = m->ent_off[ord];
@@ -525,7 +519,7 @@ static int apply_fixups(FILE *f, long reloc_off, unsigned char __far *seg,
         if (rtype == RTYPE_INTERNALREF) {
             if (rec.target1 == 0xFF) {        /* wejscie w segmencie movable */
                 unsigned ord = rec.target2;
-                if (ord < MAX_ORD && m->ent_seg[ord] && m->ent_seg[ord] != 0xFE) {
+                if (m->ent_seg && ord < m->max_ord && m->ent_seg[ord] && m->ent_seg[ord] != 0xFE) {
                     sel = m->first_sel + (m->ent_seg[ord] - 1u) * 8u;
                     off = m->ent_off[ord];
                 } else { nbad++; continue; }
@@ -707,21 +701,51 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
          ne.ne_autodata);
 
     /* Tablica wejsc */
-    {
+    if (ne.ne_cbenttab > 0) {
         unsigned char __far *p = tmp + ne.ne_enttab;
         unsigned char __far *end = p + ne.ne_cbenttab;
         unsigned ord = 1;
+        unsigned max_ord = 0;
         while (p < end && p[0]) {
-            unsigned cnt = p[0], sg = p[1], j;
+            unsigned cnt = p[0], sg = p[1];
             p += 2;
-            if (sg == 0) { ord += cnt; continue; }
-            for (j = 0; j < cnt; j++, ord++) {
-                unsigned es, eo, fl = p[0];
-                if (sg == 0xFF) { es = p[3]; eo = p[4] | ((unsigned)p[5] << 8); p += 6; }
-                else            { es = sg;   eo = p[1] | ((unsigned)p[2] << 8); p += 3; }
-                if (ord < MAX_ORD) {
-                    m->ent_seg[ord] = (unsigned char)es; m->ent_off[ord] = eo;
-                    m->ent_flg[ord] = (unsigned char)fl;
+            if (sg != 0) {
+                if (ord + cnt > max_ord) max_ord = ord + cnt;
+            }
+            ord += cnt;
+            if (sg == 0xFF) p += 6 * cnt;
+            else if (sg != 0) p += 3 * cnt;
+        }
+        if (max_ord > 0) {
+            if (max_ord > MAX_ORD) max_ord = MAX_ORD;
+            if (!m->ent_off || m->max_ord < max_ord) {
+                if (m->ent_off) _ffree(m->ent_off);
+                if (m->ent_seg) _ffree(m->ent_seg);
+                if (m->ent_flg) _ffree(m->ent_flg);
+                m->max_ord = max_ord;
+                m->ent_off = (unsigned short __far *)_fmalloc(max_ord * sizeof(unsigned short));
+                m->ent_seg = (unsigned char  __far *)_fmalloc(max_ord);
+                m->ent_flg = (unsigned char  __far *)_fmalloc(max_ord);
+            }
+            if (m->ent_off && m->ent_seg && m->ent_flg) {
+                _fmemset(m->ent_off, 0, m->max_ord * sizeof(unsigned short));
+                _fmemset(m->ent_seg, 0, m->max_ord);
+                _fmemset(m->ent_flg, 0, m->max_ord);
+                p = tmp + ne.ne_enttab;
+                ord = 1;
+                while (p < end && p[0]) {
+                    unsigned cnt = p[0], sg = p[1], j;
+                    p += 2;
+                    if (sg == 0) { ord += cnt; continue; }
+                    for (j = 0; j < cnt; j++, ord++) {
+                        unsigned es, eo, fl = p[0];
+                        if (sg == 0xFF) { es = p[3]; eo = p[4] | ((unsigned)p[5] << 8); p += 6; }
+                        else            { es = sg;   eo = p[1] | ((unsigned)p[2] << 8); p += 3; }
+                        if (ord < m->max_ord) {
+                            m->ent_seg[ord] = (unsigned char)es; m->ent_off[ord] = eo;
+                            m->ent_flg[ord] = (unsigned char)fl;
+                        }
+                    }
                 }
             }
         }
@@ -807,7 +831,9 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
         int is_data = (s.ns_flags & NSDATA) != 0;
         if (fsz > alloc) alloc = fsz;
         if (ne.ne_autodata && i == ne.ne_autodata - 1u) {
-            if (is_app) alloc += ne.ne_stack;
+            unsigned stack_sz = ne.ne_stack;
+            if (is_app && stack_sz < 5120) stack_sz = 5120;
+            if (is_app) alloc += stack_sz;
             if (is_app) g_app_heapstart = (unsigned)alloc;
             alloc += ne.ne_heap;
             if (alloc > 0x10000UL) alloc = 0x10000UL;
@@ -851,9 +877,9 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
          * por. NE_FixupSegmentPrologs w Wine): wpis z danymi wspolnymi (flaga 2, DLL)
          * -> "mov ax,DGROUP"; eksport modulu MULTIPLEDATA (aplikacja) -> "nop nop nop", zeby DS
          * bral sie z AX ustawionego przez thunk MakeProcInstance. */
-        if (!system && ne.ne_autodata && fsz) {
+        if (!system && ne.ne_autodata && fsz && m->ent_off && m->ent_seg && m->ent_flg) {
             unsigned dg = m->first_sel + (ne.ne_autodata - 1u) * 8u, o, np = 0, nn = 0;
-            for (o = 1; o < MAX_ORD; o++) {
+            for (o = 1; o < m->max_ord; o++) {
                 unsigned eo = m->ent_off[o];
                 if (m->ent_seg[o] != i + 1u || eo + 3UL > fsz) continue;
                 if (!((tmp[eo] == 0x1E && tmp[eo + 1] == 0x58 && tmp[eo + 2] == 0x90) ||
@@ -883,10 +909,12 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     if (replayed) g_replay = 0;
 
     if (is_app) {
+        unsigned stack_sz = ne.ne_stack;
+        if (stack_sz < 5120) stack_sz = 5120;
         g_entry_cs = ne.ne_cs ? m->first_sel + (ne.ne_cs - 1u) * 8u : 0;
         g_entry_ip = ne.ne_ip;
         g_app_ds   = m->dgroup_sel;
-        g_app_stack = ne.ne_stack;
+        g_app_stack = stack_sz;
         g_app_heap  = ne.ne_heap;
         if (ne.ne_sp) g_init_sp = ne.ne_sp;
         else {
@@ -895,11 +923,11 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
             fseek(f, mz.e_lfanew + ne.ne_segtab + (long)(ne.ne_autodata - 1) * 8, SEEK_SET);
             fread(&s, sizeof(s), 1, f);
             top = (unsigned long)(s.ns_minalloc ? s.ns_minalloc : s.ns_cbseg)
-                + ne.ne_stack;
+                + stack_sz;
             g_init_sp = top >= 0x10000UL ? 0xFFFE : (unsigned)(top & ~1UL);
         }
-        mlog("  Wejscie apki: %04X:%04X DS=SS=%04X SP=%04X\n",
-             g_entry_cs, g_entry_ip, g_app_ds, g_init_sp);
+        mlog("  Wejscie apki: %04X:%04X DS=SS=%04X SP=%04X (stack=%u)\n",
+             g_entry_cs, g_entry_ip, g_app_ds, g_init_sp, g_app_stack);
     } else if (ne.ne_cs && !system && g_ndllinit < MAX_DLLINIT) {
         unsigned short *d = &g_dllinit[g_ndllinit * 4];
         d[0] = m->first_sel + (ne.ne_cs - 1u) * 8u;
@@ -974,6 +1002,7 @@ void mod_reset(void)
         if (g_mods[i].ent_off) _ffree(g_mods[i].ent_off);
         if (g_mods[i].ent_seg) _ffree(g_mods[i].ent_seg);
         if (g_mods[i].ent_flg) _ffree(g_mods[i].ent_flg);
+        if (g_mods[i].log) _ffree(g_mods[i].log);
     }
     memset(g_mods, 0, sizeof(g_mods));
     g_nmods = 0;
