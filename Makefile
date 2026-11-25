@@ -640,9 +640,12 @@ CALMIRA2_EXE = $(CALMIRA2_SRC)/SRC/CALMIRA.exe
 $(CALMIRA2_EXE): $(wildcard $(CALMIRA2_SRC)/SRC/*.PAS $(CALMIRA2_SRC)/SRC/*.DPR $(CALMIRA2_SRC)/VCL/*.PAS $(CALMIRA2_SRC)/wuil/*.pas $(CALMIRA2_SRC)/wuil/fpc16 $(CALMIRA2_SRC)/wuil/bindres)
 	cd $(CALMIRA2_SRC) && ./wuil/fpc16 -Mdelphi -CX -XX -FuSRC -FuVCL -Fuwuil -FiSRC -FiVCL SRC/CALMIRA.DPR && ./wuil/bindres
 
-calmira2.img: calmira.img $(CALMIRA2_EXE)
+calmira2.img: calmira.img $(CALMIRA2_EXE) tools/patch_calmira_logo.py
 	cp calmira.img $@
-	mcopy -o -i $@@@1M $(CALMIRA2_EXE) ::CALMIRA/CALMIRA.EXE
+	cp $(CALMIRA2_EXE) /tmp/calmira2_patched.exe
+	python3 tools/patch_calmira_logo.py /tmp/calmira2_patched.exe
+	mcopy -o -i $@@@1M /tmp/calmira2_patched.exe ::CALMIRA/CALMIRA.EXE
+	rm -f /tmp/calmira2_patched.exe
 
 reset-calmira2:
 	rm -f calmira2.img

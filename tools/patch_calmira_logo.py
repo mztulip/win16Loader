@@ -191,11 +191,12 @@ def patch_calmira_exe(path):
     rto = struct.unpack_from('<H', data, ne + 0x24)[0] + ne
     align = struct.unpack_from('<H', data, rto)[0]
 
-    # Find resource STARTBMPS and ICONs
+    # Find resource STARTBMPS, ICONs, and GROUP_ICONs
     p = rto + 2
     target_off = None
     target_len = None
     icons_by_id = {}
+    group_icons = {}
 
     while True:
         type_id = struct.unpack_from('<H', data, p)[0]
@@ -210,10 +211,13 @@ def patch_calmira_exe(path):
             if not (id_field & 0x8000):
                 str_off = rto + id_field
                 slen = data[str_off]
-                name = data[str_off+1:str_off+1+slen].decode('latin1', 'replace')
-                if raw_type == 2 and name.upper() == 'STARTBMPS':
+                name = data[str_off+1:str_off+1+slen].decode('latin1', 'replace').upper()
+                if raw_type == 2 and name == 'STARTBMPS':
                     target_off = off
                     target_len = length
+                elif raw_type == 14 and length >= 20:
+                    icon_id = struct.unpack_from('<H', data, off + 6 + 12)[0]
+                    group_icons[name] = icon_id
             elif raw_type == 3:
                 icons_by_id[id_field & 0x7fff] = off
             p += 12
@@ -248,13 +252,15 @@ def patch_calmira_exe(path):
             data[row_start + 8 + byte_idx] = val
             data[row_start + 120 + byte_idx] = val
 
-    # 3. Patch FILEICON (Icon #6) and TINYFILEICON (Icon #31)
-    if 6 in icons_by_id:
-        patch_fileicon(data, icons_by_id[6])
-        print(f'Successfully patched FILEICON (Icon #6) at {hex(icons_by_id[6])} with i486 document logo!')
-    if 31 in icons_by_id:
-        patch_tinyfileicon(data, icons_by_id[31])
-        print(f'Successfully patched TINYFILEICON (Icon #31) at {hex(icons_by_id[31])} with i486 mini document logo!')
+    # 3. Patch FILEICON and TINYFILEICON (resolved via RT_GROUP_ICON, fallback to 6 / 31)
+    fileicon_id = group_icons.get('FILEICON', 6)
+    tinyfileicon_id = group_icons.get('TINYFILEICON', 31)
+    if fileicon_id in icons_by_id:
+        patch_fileicon(data, icons_by_id[fileicon_id])
+        print(f'Successfully patched FILEICON (Icon #{fileicon_id}) at {hex(icons_by_id[fileicon_id])} with i486 document logo!')
+    if tinyfileicon_id in icons_by_id:
+        patch_tinyfileicon(data, icons_by_id[tinyfileicon_id])
+        print(f'Successfully patched TINYFILEICON (Icon #{tinyfileicon_id}) at {hex(icons_by_id[tinyfileicon_id])} with i486 mini document logo!')
 
     with open(path, 'wb') as f:
         f.write(data)
