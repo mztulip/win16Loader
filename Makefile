@@ -15,7 +15,7 @@ FDBOOT  = FD14-FloppyEdition/144m/x86BOOT.img
 
 export WATCOM INCLUDE EDPATH WIPATH PATH
 
-.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira release
+.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira run-calmira2 run-calmira2-snapshot reset-calmira2 release
 
 SKIFREE_DIR = SKIFREE
 
@@ -631,6 +631,36 @@ run-calmira: calmira.img floppy.img
 run-calmira-snapshot:
 	$(MAKE) run-calmira SNAPSHOT=1
 
+# -------------------------------------------------------
+# Calmira II kompilowana z oryginalnych zrodel przez FPC (i8086-win16) + WUIL
+# -------------------------------------------------------
+CALMIRA2_SRC = ../calmira_src
+CALMIRA2_EXE = $(CALMIRA2_SRC)/SRC/CALMIRA.exe
+
+$(CALMIRA2_EXE): $(wildcard $(CALMIRA2_SRC)/SRC/*.PAS $(CALMIRA2_SRC)/SRC/*.DPR $(CALMIRA2_SRC)/VCL/*.PAS $(CALMIRA2_SRC)/wuil/*.pas $(CALMIRA2_SRC)/wuil/fpc16 $(CALMIRA2_SRC)/wuil/bindres)
+	cd $(CALMIRA2_SRC) && ./wuil/fpc16 -Mdelphi -CX -XX -FuSRC -FuVCL -Fuwuil -FiSRC -FiVCL SRC/CALMIRA.DPR && ./wuil/bindres
+
+calmira2.img: calmira.img $(CALMIRA2_EXE)
+	cp calmira.img $@
+	mcopy -o -i $@@@1M $(CALMIRA2_EXE) ::CALMIRA/CALMIRA.EXE
+
+reset-calmira2:
+	rm -f calmira2.img
+	$(MAKE) calmira2.img
+	@echo "=== Obraz calmira2.img zresetowany ==="
+
+run-calmira2: calmira2.img floppy.img
+	qemu-system-i386 -vga std,retrace=precise \
+	    -drive file=floppy.img,if=floppy,format=raw \
+	    -drive file=calmira2.img,if=ide,format=raw -boot c -m 64 \
+	    $(QEMU_SNAPSHOT) \
+	    $(QEMU_REBOOT) \
+	    -serial stdio \
+	    -d cpu_reset,guest_errors -D qemu.log
+
+run-calmira2-snapshot:
+	$(MAKE) run-calmira2 SNAPSHOT=1
+
 clean:
 	rm -f kernel.exe kernel.obj
 	rm -f user.exe user.obj
@@ -640,5 +670,5 @@ clean:
 	rm -f test_rc.exe test_rc.obj TESTRES.NE
 	rm -f control.exe control.obj
 	rm -f panic.bin
-	rm -f boot.img boot_test_rc.img boot_win16test.img calmira.img floppy.img bochs.log qemu.log
+	rm -f boot.img boot_test_rc.img boot_win16test.img calmira.img calmira2.img floppy.img bochs.log qemu.log
 	$(MAKE) -C win16test clean
