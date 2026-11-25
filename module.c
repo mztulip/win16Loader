@@ -379,6 +379,9 @@ static int kernel_equate(unsigned ord, TARGET *t)
 
 /* Import po nazwie: tablica nazw importow programu (offset w pliku) -> ordinal w pliku modulu */
 static unsigned long g_imptab_off;
+#define IMPCACHE_MAX 384
+static struct { unsigned short tmod, name_off, ord; } __far g_impcache[IMPCACHE_MAX];
+static unsigned g_impcache_n;
 
 static unsigned name_in_table(FILE *f, const char *want, unsigned long max)
 {
@@ -408,11 +411,16 @@ static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
 {
     static char want[130], path[80];
     unsigned char len = 0;
-    long pos = ftell(f);
-    unsigned ord = 0;
+    long pos;
+    unsigned ord = 0, ci;
     FILE *m;
     MZ_HEADER mz;
     NE_HEADER ne;
+    for (ci = 0; ci < g_impcache_n; ci++)
+        if (g_impcache[ci].tmod == (unsigned short)tmod &&
+            g_impcache[ci].name_off == (unsigned short)name_off)
+            return g_impcache[ci].ord;
+    pos = ftell(f);
     fseek(f, g_imptab_off + name_off, SEEK_SET);
     fread(&len, 1, 1, f);
     fread(want, 1, len, f);
@@ -421,21 +429,26 @@ static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
     if (!stricmp(g_mods[tmod].name, "KERNEL")) {
         unsigned k;
         for (k = 0; g_equate_names[k].name; k++)
-            if (!stricmp(want, g_equate_names[k].name)) return g_equate_names[k].ord;
-    }
-    _fstrncpy((char __far *)path, (char __far *)mt_entry(tmod) + MT_PATH, sizeof(path) - 1);
-    path[sizeof(path) - 1] = 0;
-    if (path[0] && (m = fopen(path, "rb")) != 0) {
-        if (fread(&mz, sizeof(mz), 1, m) == 1 && !fseek(m, mz.e_lfanew, SEEK_SET) &&
-            fread(&ne, sizeof(ne), 1, m) == 1) {
-            fseek(m, mz.e_lfanew + ne.ne_restab, SEEK_SET);
-            ord = name_in_table(m, want, 0);
-            if (!ord && ne.ne_cbnrestab) {
-                fseek(m, ne.ne_nrestab, SEEK_SET);
-                ord = name_in_table(m, want, ne.ne_cbnrestab);
+            if (!stricmp(want, g_equate_names[k].name)) {
+                ord = g_equate_names[k].ord;
+                break;
             }
+    }
+    if (!ord) {
+        _fstrncpy((char __far *)path, (char __far *)mt_entry(tmod) + MT_PATH, sizeof(path) - 1);
+        path[sizeof(path) - 1] = 0;
+        if (path[0] && (m = fopen(path, "rb")) != 0) {
+            if (fread(&mz, sizeof(mz), 1, m) == 1 && !fseek(m, mz.e_lfanew, SEEK_SET) &&
+                fread(&ne, sizeof(ne), 1, m) == 1) {
+                fseek(m, mz.e_lfanew + ne.ne_restab, SEEK_SET);
+                ord = name_in_table(m, want, 0);
+                if (!ord && ne.ne_cbnrestab) {
+                    fseek(m, ne.ne_nrestab, SEEK_SET);
+                    ord = name_in_table(m, want, ne.ne_cbnrestab);
+                }
+            }
+            fclose(m);
         }
-        fclose(m);
     }
     if (!ord) {
         if (stricmp(g_mods[tmod].name, "KERNEL") == 0) {
@@ -446,6 +459,12 @@ static unsigned import_name_ord(FILE *f, unsigned tmod, unsigned name_off)
         }
     }
     if (!ord) mlog("  WARN: import po nazwie %s.%s nie znaleziony\n", g_mods[tmod].name, want);
+    if (g_impcache_n < IMPCACHE_MAX) {
+        g_impcache[g_impcache_n].tmod = (unsigned short)tmod;
+        g_impcache[g_impcache_n].name_off = (unsigned short)name_off;
+        g_impcache[g_impcache_n].ord = (unsigned short)ord;
+        g_impcache_n++;
+    }
     return ord;
 }
 
@@ -500,8 +519,9 @@ static int apply_fixups(FILE *f, long reloc_off, unsigned char __far *seg,
                         unsigned long seg_size, unsigned midx, int *mod_map,
                         unsigned nmodref)
 {
+    static NE_RELOC __far rbuf[128];
     MOD *m = &g_mods[midx];
-    unsigned short count, i;
+    unsigned short count, i, bpos = 0, bcnt = 0;
     NE_RELOC rec;
     unsigned nbad = 0;
 
@@ -511,7 +531,14 @@ static int apply_fixups(FILE *f, long reloc_off, unsigned char __far *seg,
     for (i = 0; i < count; i++) {
         unsigned rtype, sel = 0, off = 0, size;
         TARGET t;
-        if (fread(&rec, sizeof(rec), 1, f) != 1) return -1;
+        if (bpos >= bcnt) {
+            unsigned short want = count - i;
+            if (want > 128) want = 128;
+            if (fread(rbuf, sizeof(NE_RELOC), want, f) != want) return -1;
+            bcnt = want;
+            bpos = 0;
+        }
+        rec = rbuf[bpos++];
         rtype = rec.reloc_type & 3;
         size  = ((rec.addr_type & 0x7F) == ATYPE_FAR_PTR) ? 4 :
                 ((rec.addr_type & 0x7F) == ATYPE_LOBYTE) ? 1 : 2;
@@ -821,6 +848,7 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     }
 
     g_imptab_off = mz.e_lfanew + (unsigned long)ne.ne_imptab;
+    g_impcache_n = 0;
     /* Segmenty */
     for (i = 0; i < m->nsegs; i++) {
         NE_SEG_ENTRY s = segtab[i];
