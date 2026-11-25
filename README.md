@@ -1,5 +1,7 @@
 # win16Loader
 
+**English** | [Polski](README.pl.md)
+
 A minimal Win16 compatible loader for i486, running on top of FreeDOS.
 
 ## Goal
@@ -93,9 +95,9 @@ Current code lives in the repository root. Historical step-by-step snapshots are
 
 ## Documentation
 
-- [Architektura pamięci i mapa MCB](docs/pamiec.md) – szczegółowy opis dwupoziomowego modelu pamięci (konwencjonalna <640 KB vs XMS >1 MB), mapa MCB, zwalnianie zasobów, alokatory oraz porównanie z Windows 3.1.
-- [Obsługa wyjątków CPU i ochrona pamięci](docs/debugging_i_wyjatki.md) – sprzętowe limity segmentów x86 (#GP/#SS), izolacja procesów w trybie wielozadaniowym, ekran paniki VESA (Panic Screen) oraz zrzuty rejestrów i stosu (Crash Dump).
-- [Wydajność GDI i podział stron](docs/wydajnosc_gdi.md) – analiza optymalizacji stronicowania pamięci dla emulatora QEMU.
+- [Memory architecture and MCB map](docs/pamiec.md) *(in Polish)* – detailed description of the two-tier memory model (conventional <640 KB vs XMS >1 MB), MCB map, resource freeing, allocators, and comparison with Windows 3.1.
+- [CPU exception handling and memory protection](docs/debugging_i_wyjatki.md) *(in Polish)* – x86 hardware segment limits (#GP/#SS), process isolation in multitasking mode, VESA Panic Screen, and register/stack crash dumps.
+- [GDI performance and page splitting](docs/wydajnosc_gdi.md) *(in Polish)* – analysis of memory paging optimizations for the QEMU emulator.
 
 ## License
 
