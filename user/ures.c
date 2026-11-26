@@ -4,6 +4,7 @@
 /* Obiekt ikony/kursora: blok GlobalAlloc, HICON = selektor */
 typedef struct {
     WORD magic;                  /* 'IC' */
+    WORD ref;                    /* licznik referencji (CopyIcon/DestroyIcon) */
     int  w, h, hx, hy;
     WORD andbm, xorbm;           /* bitmapy GDI: mono AND, kolor XOR */
     BYTE andb[128], xorb[128];   /* 32x32 mono (kursor dla GDI): wiersze po 4 B */
@@ -28,7 +29,7 @@ static HICON icon_make(int w, int h, int hx, int hy, BYTE __far *andm, WORD ands
     ICONOBJ __far *o = (ICONOBJ __far *)GlobalLock(hi);
     int y, x;
     if (!o) return 0;
-    o->magic = ICON_MAGIC; o->w = w; o->h = h; o->hx = hx; o->hy = hy; o->cursor = cursor;
+    o->magic = ICON_MAGIC; o->ref = 1; o->w = w; o->h = h; o->hx = hx; o->hy = hy; o->cursor = cursor;
     o->andbm = CreateBitmap(w, h, 1, 1, 0);
     {   /* bitmapa AND: przepisz wiersze do formatu DDB (WORD) */
         static BYTE tmp[32 * 4];
@@ -332,6 +333,7 @@ BOOL API DestroyIcon(HICON h)
     if (!o) return FALSE;
     for (i = 0; i < 8; i++) if (g_sysicon[i] == h) return TRUE;
     for (i = 0; i < 16; i++) if (g_syscur[i] == h) return TRUE;
+    if (o->ref > 1) { o->ref--; return TRUE; }
     DeleteObject(o->andbm);
     if (o->xorbm) DeleteObject(o->xorbm);
     o->magic = 0;
@@ -339,8 +341,14 @@ BOOL API DestroyIcon(HICON h)
     return TRUE;
 }
 BOOL API DestroyCursor(HCURSOR h)  { return DestroyIcon(h); }
-HICON API CopyIcon(WORD hinst, HICON h)    { (void)hinst; return h; }
-HCURSOR API CopyCursor(WORD hinst, HCURSOR h) { (void)hinst; return h; }
+HICON API CopyIcon(WORD hinst, HICON h)
+{
+    ICONOBJ __far *o = icon_ptr(h);
+    (void)hinst;
+    if (o) o->ref++;
+    return h;
+}
+HCURSOR API CopyCursor(WORD hinst, HCURSOR h) { return CopyIcon(hinst, h); }
 
 /* Rozmiar ikony (dla SHELL/USER) - ordinal 951 */
 DWORD API UserIconSize(HICON h) { ICONOBJ __far *o = icon_ptr(h); return o ? MAKELONG(o->w, o->h) : 0; }
