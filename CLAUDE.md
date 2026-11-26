@@ -22,9 +22,11 @@ make reset-calmira  # szybki reset calmira.img do stanu fabrycznego
 make OLDGUI=1 boot.img   # stare user.exe/gdi.exe (tylko SkiFree)
 make clean
 python3 tools/run_examples.py   # testy aplikacji przykladowych (example_apps/) w QEMU bez okna
+python3 tools/run_examples.py --hd calmira.img   # to samo z woluminu C: bez stacji dyskietek (wszystkie apki)
 ```
 
-Headless: `tools/qemu_headless.py --fd boot.img [--hd calmira.img] --run "LOADER.EXE X.EXE" KROKI`
+Headless: `tools/qemu_headless.py [--fd boot.img] [--hd calmira.img [--boot c]] --run "LOADER.EXE X.EXE" KROKI`
+(bez `--fd` startuje z woluminu C:, a `--run` trafia na koniec jego `FDAUTO.BAT`)
 (`w` czekaj, `p` zrzut PNG, `k` klawisz, `a x,y` mysz bezwzglednie, `m dx,dy`, `c` klik, `C` szybki dwuklik).
 Dodatkowy krok `d<sek>` = czekaj na linie `TEST ... DONE` w logu COM1.
 Opcja loadera `-t` = trace wywolan API na COM1 (`>mod off cs:ip`, nazwy z map: `*/*.map`).
@@ -175,6 +177,12 @@ Pogrubiony MS Sans Serif to prawdziwy font `fonts/sserifb.fon` (generator `tools
   okna combo zostaje 22 (WM_WINDOWPOSCHANGING), lista jest osobnym oknem; pierwsze zamkniecie po otwarciu myszka pomijamy.
 - **Ostatnie zadanie**: task_exit zeruje KCB_INT_CB przed `int 21h`, bo przez dyspozytor 4Ch wracalo do task_exit w nieskonczonosc.
 - **CREATESTRUCT**: lpszName @22, lpszClass @26 (CS_NAME_OFF).
+- **GlobalAlloc daje DPL=3** (selektory z RPL=3 jak w Windows - Woodruff), a KERNEL/USER/GDI dzialaja na CPL=0:
+  bloku z GlobalAlloc nie wolno ladowac do SS (#GP). Stosy jadra: prawa 0x92 (`exc_stack_alloc` w ktask.c).
+- **Testy nie zakladaja A:** - pliki obok programu przez `T("PLIK")` / `TD("\\KATALOG")` z `testlog.h`
+  (`t_init(hInstance)` w WinMain). Tylko `dosprompt` testuje sama stacje dyskietek.
+- **loader.exe pod QEMU TCG**: przy `serial_TEXT` na koncu pierwszej ramki kodu (~0xFF05) start konczyl sie
+  "Stack Overflow!" (pod KVM dzialal) - stad `serial.obj` zaraz po `loader.c` w linii linkera.
 
 ## Multitasking model
 
