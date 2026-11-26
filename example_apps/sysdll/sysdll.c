@@ -102,7 +102,7 @@ static void misc_tests(HINSTANCE hi)
     DdeUninitialize(inst);
 
     /* VER, MMSYSTEM, COMMDLG */
-    CHECK_INT(GetFileVersionInfoSize("A:\\SYSDLL.EXE", &vh), 0, "GetFileVersionInfoSize: brak VERSIONINFO");
+    CHECK_INT(GetFileVersionInfoSize(T("SYSDLL.EXE"), &vh), 0, "GetFileVersionInfoSize: brak VERSIONINFO");
     CHECK(!sndPlaySound("ding.wav", SND_ASYNC), "sndPlaySound: brak dzwieku = FALSE");
     CHECK_INT(CommDlgExtendedError(), 0, "CommDlgExtendedError");
 
@@ -167,6 +167,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     HWND h;
     (void)cmd;
     t_app = "SYSDLL";
+    t_init(hi);
     if (!prev) {
         memset(&wc, 0, sizeof(wc));
         wc.lpfnWndProc = WndProc;

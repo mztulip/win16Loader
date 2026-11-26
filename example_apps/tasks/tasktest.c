@@ -41,6 +41,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     DWORD t0;
     (void)prev; (void)cmd; (void)show;
     t_app = "TASKTEST";
+    t_init(hi);
     g_me = GetCurrentTask();
     CHECK(g_me != 0, "GetCurrentTask");
     CHECK_INT(GetNumTasks(), 1, "GetNumTasks na starcie");
@@ -55,8 +56,8 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     ShowWindow(me, SW_SHOWNORMAL);
     UpdateWindow(me);
 
-    CHECK(WinExec("A:\\NIEMA.EXE", SW_SHOWNORMAL) == 2, "WinExec: brak pliku = 2");
-    h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINNOACTIVE);
+    CHECK(WinExec(T("NIEMA.EXE"), SW_SHOWNORMAL) == 2, "WinExec: brak pliku = 2");
+    h = WinExec(T("TASKCHLD.EXE arg1 arg2"), SW_SHOWMINNOACTIVE);
     CHECK(h > 32, "WinExec: sukces > 32");
     CHECK(h != (UINT)hi, "dziecko ma inny hInstance");
     CHECK(GetCurrentTask() == g_me, "po WinExec dalej to samo zadanie");
@@ -115,7 +116,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     }
 
     /* ponowne uruchomienie: klasy dziecka musialy zniknac */
-    h = WinExec("A:\\TASKCHLD.EXE arg1 arg2", SW_SHOWMINNOACTIVE);
+    h = WinExec(T("TASKCHLD.EXE arg1 arg2"), SW_SHOWMINNOACTIVE);
     CHECK(h > 32, "drugie uruchomienie po koncu pierwszego");
     t0 = GetTickCount();
     while (!(ch = FindWindow("TaskChildW", NULL)) && GetTickCount() - t0 < 10000UL) Yield();
@@ -128,24 +129,27 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     /* katalog biezacy: osobny dla kazdego zadania, nowe zadanie dziedziczy */
     {
         char cur[80];
-        chdir("A:\\FREEDOS");
-        h = WinExec("A:\\TASKCHLD.EXE wd A:\\FREEDOS", SW_SHOWNORMAL);
+        char cmdb[120];
+        chdir(TD("\\FREEDOS"));
+        wsprintf(cmdb, "%sTASKCHLD.EXE wd %s", T(""), TD("\\FREEDOS"));
+        h = WinExec(cmdb, SW_SHOWNORMAL);
         CHECK(h > 32, "uruchomienie: test katalogu");
         getcwd(cur, sizeof(cur));
-        CHECK_STR(cur, "A:\\FREEDOS", "chdir dziecka nie zmienia katalogu rodzica");
-        chdir("A:\\FREEDOS\\BIN");
+        CHECK_STR(cur, TD("\\FREEDOS"), "chdir dziecka nie zmienia katalogu rodzica");
+        chdir(TD("\\FREEDOS\\BIN"));
         t0 = GetTickCount();
         while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
         getcwd(cur, sizeof(cur));
-        CHECK_STR(cur, "A:\\FREEDOS\\BIN", "katalog rodzica po koncu dziecka");
+        CHECK_STR(cur, TD("\\FREEDOS\\BIN"), "katalog rodzica po koncu dziecka");
         /* ShellExecute: katalog startowy nowego programu, bez zmiany u wolajacego */
-        h = (UINT)ShellExecute(0, "open", "A:\\TASKCHLD.EXE", "wd A:\\FREEDOS", "A:\\FREEDOS", SW_SHOWNORMAL);
+        wsprintf(cmdb, "wd %s", TD("\\FREEDOS"));
+        h = (UINT)ShellExecute(0, "open", T("TASKCHLD.EXE"), cmdb, TD("\\FREEDOS"), SW_SHOWNORMAL);
         CHECK(h > 32, "ShellExecute: katalog startowy");
         getcwd(cur, sizeof(cur));
-        CHECK_STR(cur, "A:\\FREEDOS\\BIN", "ShellExecute nie zmienia katalogu wolajacego");
+        CHECK_STR(cur, TD("\\FREEDOS\\BIN"), "ShellExecute nie zmienia katalogu wolajacego");
         t0 = GetTickCount();
         while (GetNumTasks() > 1 && GetTickCount() - t0 < 10000UL) Yield();
-        chdir("A:\\");
+        chdir(TD("\\"));
     }
 
     /* kopie jednego programu: hPrevInstance, wspolna klasa, klasa przezywa pierwsza kopie */
@@ -155,8 +159,8 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         /* inny program z ta sama nazwa klasy: kopie dziecka nie moga dostac tej klasy */
         wc.lpszClassName = "TaskInstW";
         CHECK(RegisterClass(&wc) != 0, "rodzic rejestruje klase o tej samej nazwie");
-        h1 = WinExec("A:\\TASKCHLD.EXE inst", SW_SHOWNORMAL);
-        h2 = WinExec("A:\\TASKCHLD.EXE inst", SW_SHOWNORMAL);
+        h1 = WinExec(T("TASKCHLD.EXE inst"), SW_SHOWNORMAL);
+        h2 = WinExec(T("TASKCHLD.EXE inst"), SW_SHOWNORMAL);
         CHECK(h1 > 32 && h2 > 32 && h1 != h2, "dwie kopie dzialaja razem");
         CHECK_INT(GetNumTasks(), 3, "GetNumTasks: dwie kopie i rodzic");
         CHECK_INT(GetModuleUsage((HINSTANCE)h1), 2, "GetModuleUsage programu = liczba kopii");
@@ -179,7 +183,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
             while (GetNumTasks() > 2 && GetTickCount() - t0 < 5000UL) Yield();
             CHECK_INT(GetNumTasks(), 2, "pierwsza kopia zakonczona");
             CHECK_INT((WORD)SendMessage(w2, WM_USER + 1, 0, 0), 1234 + h2, "druga kopia dziala po koncu pierwszej");
-            h3 = WinExec("A:\\TASKCHLD.EXE inst", SW_SHOWNORMAL);
+            h3 = WinExec(T("TASKCHLD.EXE inst"), SW_SHOWNORMAL);
             CHECK(h3 > 32, "trzecia kopia po koncu pierwszej");
             t0 = GetTickCount();
             while (GetTickCount() - t0 < 300) Yield();
@@ -205,7 +209,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         HTASK ct = 0;
         sh[0] = 2; sh[1] = SW_SHOWNORMAL;
         lp.env = 0; lp.cmd = tail; lp.show = sh; lp.res = 0;
-        h = (UINT)LoadModule("A:\\TASKCHLD.EXE", &lp);
+        h = (UINT)LoadModule(T("TASKCHLD.EXE"), &lp);
         CHECK(h > 32, "LoadModule z parametrami");
         te.dwSize = sizeof(te);
         if (TaskFirst(&te)) do {
@@ -230,7 +234,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         UINT first = 0;
         char d[60];
         for (i = 0; i < 12; i++) {
-            h = WinExec("A:\\TASKCHLD.EXE quick", SW_SHOWNORMAL);
+            h = WinExec(T("TASKCHLD.EXE quick"), SW_SHOWNORMAL);
             if (h <= 32) { bad++; break; }
             if (!first) first = h;
             if (h != first) bad++;
@@ -244,9 +248,9 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     }
 
     /* wyjatek w dziecku konczy tylko dziecko; dwa naraz: kazde ma swoj stos i swoj komunikat */
-    h = WinExec("A:\\TASKCHLD.EXE crash", SW_SHOWNORMAL);
+    h = WinExec(T("TASKCHLD.EXE crash"), SW_SHOWNORMAL);
     CHECK(h > 32, "uruchomienie programu z wyjatkiem");
-    h = WinExec("A:\\TASKCHLD.EXE crash", SW_SHOWNORMAL);
+    h = WinExec(T("TASKCHLD.EXE crash"), SW_SHOWNORMAL);
     CHECK(h > 32, "drugi program z wyjatkiem w tym samym czasie");
     t0 = GetTickCount();
     while (GetNumTasks() > 1 && GetTickCount() - t0 < 30000UL) pump(100);

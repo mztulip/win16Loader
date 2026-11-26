@@ -57,10 +57,11 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     HWND h;
     int i;
     t_app = "TASKCHLD";
+    t_init(hi);
     if (cmd[0] == 'q') {                              /* "quick": wszystko zostawia nieposprzatane */
         int k, files = 0, brushes = 0, mem = 0, menus = 0;
         char d[60];
-        for (k = 0; k < 10; k++) if (_lopen("A:\\LOADER.EXE", 0) != -1) files++;
+        for (k = 0; k < 10; k++) if (_lopen(T("TASKCHLD.EXE"), 0) != -1) files++;
         for (k = 0; k < 200; k++) if (CreateSolidBrush(RGB(k, 0, 0))) brushes++;
         for (k = 0; k < 8; k++) if (GlobalAlloc(GMEM_FIXED, 32768L)) mem++;
         for (k = 0; k < 30; k++) if (CreateMenu()) menus++;
@@ -112,10 +113,10 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
         want[k] = 0;
         getcwd(cur, sizeof(cur));
         CHECK_STR(cur, want, "katalog dziedziczony przy uruchomieniu");
-        chdir("A:\\");
+        chdir(TD("\\"));
         for (n = 0; n < 10; n++) Yield();             /* rodzic zmienia swoj katalog w tym czasie */
         getcwd(cur, sizeof(cur));
-        CHECK_STR(cur, "A:\\", "zmiana katalogu innego zadania mnie nie dotyczy");
+        CHECK_STR(cur, TD("\\"), "zmiana katalogu innego zadania mnie nie dotyczy");
         return 0;
     }
     if (cmd[0] == 'c') {                              /* "crash": wyjatek w programie */

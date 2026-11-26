@@ -34,6 +34,37 @@ static void t_log(const char *name, BOOL ok, const char *detail)
 #define CHECK_STR(s, exp, name) do { char _d[120]; wsprintf(_d, "'%s' == '%s'", (LPSTR)(s), (LPSTR)(exp)); \
     t_log(name, lstrcmp((LPSTR)(s), (LPSTR)(exp)) == 0, _d); } while (0)
 
+/* Pliki testu obok programu, nie na sztywno na A: - testy dzialaja tak samo z dyskietki
+ * i z woluminu C: (tools/run_examples.py --hd). t_init(hInstance) na poczatku WinMain. */
+static char t_dir[80];                         /* katalog programu z '\' na koncu */
+static void t_init(HINSTANCE hi)
+{
+    int n = GetModuleFileName(hi, t_dir, sizeof(t_dir));
+    while (n > 0 && t_dir[n - 1] != '\\' && t_dir[n - 1] != ':') n--;
+    t_dir[n] = 0;
+}
+/* T("PLIK") -> "<katalog programu>PLIK"; 4 bufory rotacyjne */
+static LPSTR T(const char *name)
+{
+    static char b[4][100];
+    static int k;
+    char *p = b[k++ & 3];
+    lstrcpy(p, t_dir);
+    lstrcat(p, (LPSTR)name);
+    return p;
+}
+/* TD("\\FREEDOS") -> "<dysk programu>:\\FREEDOS" */
+static LPSTR TD(const char *path)
+{
+    static char b[4][100];
+    static int k;
+    char *p = b[k++ & 3];
+    p[0] = t_dir[0] ? t_dir[0] : 'A';
+    p[1] = ':';
+    lstrcpy(p + 2, (LPSTR)path);
+    return p;
+}
+
 static void t_done(void)
 {
     char buf[80];

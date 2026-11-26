@@ -2,7 +2,9 @@
 """run_examples.py - uruchom aplikacje przykladowe (example_apps/*) w QEMU bez okna
 i zbierz wyniki testow (linie "TEST ..." z OutputDebugString na porcie szeregowym).
 
-Uzycie: tools/run_examples.py [--fd boot.img] [--out DIR] [nazwa ...]
+Uzycie: tools/run_examples.py [--fd boot.img | --hd calmira.img] [--out DIR] [nazwa ...]
+  --hd: testy z woluminu C: bez stacji dyskietek (kopia obrazu dysku, swiezy runtime
+        i windir/WIN.INI w C:\\WINDOWS, aplikacje w C:\\TESTS); dosprompt pominiety.
   bez nazw - wszystkie aplikacje z APPS ponizej.
 Dla kazdej apki: zrzut ekranu OUT/<nazwa>.png, log OUT/<nazwa>/serial.log.
 Kod wyjscia 1, jesli ktorykolwiek test FAIL albo brak linii DONE.
@@ -20,6 +22,11 @@ EXTRA = {'shell': [('example_apps/app.ico', 'SHELLTST.ICO')],
                      for f in ('LIBCHLD.EXE', 'DEMODLL.DLL', 'DEMODYN.DLL', 'DEMOBAD.DLL')]}
 # programy zamykane Alt+F4 jako jedyne zadanie: loader musi wrocic do DOS
 BACK_TO_DOS = ('shell', 'sysdll', 'fonts', 'clock')
+# aplikacje bez wlasnego katalogu (testy dymne): skad wziac .EXE na wolumin (--hd)
+SMOKE_SRC = {'ski': 'SKIFREE/SKI.EXE', 'win1app': 'win16_example_app/Win1App.exe',
+             'clock': 'example_apps/clock/CLOCK.EXE'}
+# testy samej stacji dyskietek (wyjmowanie dyskietki, B:) - tylko w trybie dyskietki
+FLOPPY_ONLY = ('dosprompt',)
 APPS = {
     'controls': ('example_apps/controls', 'CTLTEST.EXE', ['w4', 'pshot', 'kesc', 'w1']),
     'odmenu':   ('example_apps/odmenu', 'ODMENU.EXE', ['w4', 'pshot', 'kesc', 'w1', 'kesc', 'w1']),
@@ -63,32 +70,70 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--fd', default=os.path.join(ROOT, 'boot.img'))
     ap.add_argument('--out', default=os.path.join(ROOT, 'qemu_out', 'examples'))
+    ap.add_argument('--hd', help='obraz dysku FreeDOS (np. calmira.img): testy z C:\\TESTS')
     ap.add_argument('--boot-wait', default='22')
     ap.add_argument('names', nargs='*')
     a = ap.parse_args()
     names = a.names or list(APPS)
+    if a.hd:
+        skip = [n for n in names if n in FLOPPY_ONLY]
+        for n in skip:
+            print(f'  {n}: pominiety w trybie --hd (test stacji dyskietek)')
+        names = [n for n in names if n not in FLOPPY_ONLY]
     os.makedirs(a.out, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix='ex_')
-    fd = os.path.join(tmp, 'fd.img')
-    shutil.copy(a.fd, fd)
+    fd = None
+    if not a.hd:
+        fd = os.path.join(tmp, 'fd.img')
+        shutil.copy(a.fd, fd)
+    hd = None
+    if a.hd:
+        hd = os.path.join(tmp, 'hd.img')
+        shutil.copy(a.hd, hd)
+        img = hd + '@@1M'
+        for src, dst in (('loader.exe', 'LOADER.EXE'), ('kernel.exe', 'KERNEL.EXE'),
+                         ('user/USER.EXE', 'USER.EXE'), ('gdi/GDI.EXE', 'GDI.EXE'),
+                         ('WIN16API.DB', 'WIN16API.DB')):
+            if os.path.exists(os.path.join(ROOT, src)):
+                subprocess.run(['mcopy', '-o', '-i', img, os.path.join(ROOT, src), '::WINDOWS/' + dst], check=True)
+        for f in sorted(os.listdir(os.path.join(ROOT, 'dlls'))):
+            if f.upper().endswith(('.DLL', '.DRV')):
+                subprocess.run(['mcopy', '-o', '-i', img, os.path.join(ROOT, 'dlls', f), '::WINDOWS/' + f.upper()], check=True)
+        subprocess.run(['mcopy', '-o', '-i', img, os.path.join(ROOT, 'windir', 'WIN.INI'), '::WINDOWS/WIN.INI'], check=True)
+        bat = os.path.join(tmp, 'FDAUTO.BAT')
+        with open(bat, 'w', newline='') as f:
+            f.write('@echo off\r\nSET PATH=C:\\WINDOWS;C:\\FREEDOS\\BIN\r\nSET PROMPT=$P$G\r\nC:\r\ncd \\TESTS\r\n')
+        subprocess.run(['mcopy', '-o', '-i', img, bat, '::FDAUTO.BAT'], check=True)
+        subprocess.run(['mmd', '-D', 's', '-i', img, '::TESTS'], stderr=subprocess.DEVNULL)
+        fd_target, fd = fd, img                       # aplikacje laduja na wolumin
+        prefix = '::TESTS/'
+        for n in names:
+            if APPS[n][0] is None and n in SMOKE_SRC:
+                subprocess.run(['mcopy', '-o', '-i', img, os.path.join(ROOT, SMOKE_SRC[n]),
+                                prefix + APPS[n][1]], check=True)
+    else:
+        prefix = '::'
     for n in names:
         d, exe, _ = APPS[n]
         if d is None:
             continue
         subprocess.run(['make', '-s', '-C', os.path.join(ROOT, d)], check=True)
-        subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, d, exe), '::' + exe], check=True)
+        subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, d, exe), prefix + exe], check=True)
         for src, dst in EXTRA.get(n, []):
-            if '/' in dst:                                  # podkatalog na dyskietce
-                subprocess.run(['mmd', '-D', 's', '-i', fd, '::' + dst.rsplit('/', 1)[0]], stderr=subprocess.DEVNULL)
-            subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, src), '::' + dst], check=True)
+            if '/' in dst:                                  # podkatalog
+                subprocess.run(['mmd', '-D', 's', '-i', fd, prefix + dst.rsplit('/', 1)[0]], stderr=subprocess.DEVNULL)
+            subprocess.run(['mcopy', '-o', '-i', fd, os.path.join(ROOT, src), prefix + dst], check=True)
+    if hd:
+        fd = fd_target
     bad = False
     summary = []
     for idx, n in enumerate(names):
         d, exe, steps = APPS[n]
         out = os.path.join(a.out, n)
         steps = [s if not s.startswith('p') else ('p' + n if s == 'pshot' or s == 'p' else s) for s in steps]
-        subprocess.run([sys.executable, os.path.join(HERE, 'qemu_headless.py'), '--fd', fd,
-                        '--run', 'LOADER.EXE ' + exe, '--out', out, '--port', str(4500 + idx),
+        disk = ['--fd', fd] if not hd else ['--hd', hd, '--boot', 'c']
+        subprocess.run([sys.executable, os.path.join(HERE, 'qemu_headless.py')] + disk +
+                       ['--run', 'LOADER.EXE ' + exe, '--out', out, '--port', str(4500 + idx),
                         '--boot-wait', a.boot_wait] + steps,
                        stdout=subprocess.DEVNULL)
         log = open(os.path.join(out, 'serial.log'), errors='replace').read()

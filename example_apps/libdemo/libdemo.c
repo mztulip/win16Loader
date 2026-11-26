@@ -5,7 +5,7 @@
 #include "testlog.h"
 #include "demodll.h"
 
-#define DIR "A:\\LIBDEMO\\"
+#define DIR "LIBDEMO\\"   /* wzgledem katalogu programu: T(T(DIR "X")) */
 #define MAX_LINES 20
 static char g_lines[MAX_LINES][64];
 static int g_nl;
@@ -33,17 +33,17 @@ static void demo(void)
     DEMOINFO i;
 
     /* import statyczny: test w LIBCHLD.EXE, drugi raz biblioteka juz jest w pamieci */
-    h = WinExec(DIR "LIBCHLD.EXE", SW_SHOWNORMAL);
+    h = WinExec(T(DIR "LIBCHLD.EXE"), SW_SHOWNORMAL);
     wsprintf(d, "wynik %u", h);
     show_line("WinExec z importem DLL", h > 32, d);
     wait_child();
-    h = WinExec(DIR "LIBCHLD.EXE", SW_SHOWNORMAL);
+    h = WinExec(T(DIR "LIBCHLD.EXE"), SW_SHOWNORMAL);
     show_line("drugie uruchomienie", h > 32, "");
     wait_child();
     show_line("programy potomne zakonczone", GetNumTasks() == 1, "");
 
     /* LoadLibrary biblioteki, ktorej jeszcze nie ma w pamieci */
-    a = LoadLibrary(DIR "DEMODYN.DLL");
+    a = LoadLibrary(T(DIR "DEMODYN.DLL"));
     wsprintf(d, "uchwyt %04X", (WORD)a);
     show_line("LoadLibrary DEMODYN", (UINT)a > 32, d);
     if ((UINT)a > 32) {
@@ -54,7 +54,7 @@ static void demo(void)
             wsprintf(d, "wywolan=%d heap=%u", i.calls, i.heap);
             show_line("LibEntry wywolane raz", i.calls == 1, d);
             show_line("sterta DLL dziala", i.heap_ok, "");
-            b = LoadLibrary(DIR "DEMODYN.DLL");
+            b = LoadLibrary(T(DIR "DEMODYN.DLL"));
             f(&i);
             show_line("drugi LoadLibrary bez LibEntry", b == a && i.calls == 1, "");
             wsprintf(d, "%d", GetModuleUsage(a));
@@ -64,7 +64,7 @@ static void demo(void)
             FreeLibrary(a);
             show_line("ostatni FreeLibrary wola WEP", GlobalFindAtom(WEP_ATOM) != 0, "");
             show_line("po FreeLibrary modulu nie ma", GetModuleHandle("DEMODYN") == 0, "");
-            b = LoadLibrary(DIR "DEMODYN.DLL");
+            b = LoadLibrary(T(DIR "DEMODYN.DLL"));
             wsprintf(d, "uchwyt %04X", (WORD)b);
             show_line("ponowny LoadLibrary", (UINT)b > 32 && b == a, d);
             f(&i);                                 /* wciaz wazny: te same adresy */
@@ -72,13 +72,13 @@ static void demo(void)
             show_line("LibEntry od nowa, swieze dane", i.calls == 1 && i.reads == 1, d);
         }
     }
-    a = LoadLibrary(DIR "NIEMA.DLL");
+    a = LoadLibrary(T(DIR "NIEMA.DLL"));
     wsprintf(d, "kod %u", (UINT)a);
     show_line("LoadLibrary: brak pliku", (UINT)a == 2, d);
-    a = LoadLibrary(DIR "DEMOBAD.DLL");
+    a = LoadLibrary(T(DIR "DEMOBAD.DLL"));
     wsprintf(d, "kod %u", (UINT)a);
     show_line("LibEntry zwraca blad", (UINT)a < 32, d);
-    b = LoadLibrary(DIR "DEMOBAD.DLL");
+    b = LoadLibrary(T(DIR "DEMOBAD.DLL"));
     show_line("nieudana DLL nie wraca jako dobra", (UINT)b < 32, "");
     t_done();
 }
@@ -105,6 +105,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     HWND h;
     (void)cmd;
     t_app = "LIBDEMO";
+    t_init(hi);
     if (!prev) {
         memset(&wc, 0, sizeof(wc));
         wc.lpfnWndProc = WndProc;

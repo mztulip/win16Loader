@@ -48,8 +48,8 @@ static void icon_tests(HINSTANCE hi)
     g_icon_exe = ExtractIcon(hi, g_exe, 0);
     CHECK(g_icon_exe > (HICON)1, "ExtractIcon(0) z EXE");
     CHECK(ExtractIcon(hi, g_exe, 5) == 0, "ExtractIcon: indeks poza zakresem = 0");
-    CHECK(ExtractIcon(hi, "A:\\NIEMA.EXE", 0) == 0, "ExtractIcon: brak pliku = 0");
-    g_icon_ico = ExtractIcon(hi, "A:\\SHELLTST.ICO", 0);
+    CHECK(ExtractIcon(hi, T("NIEMA.EXE"), 0) == 0, "ExtractIcon: brak pliku = 0");
+    g_icon_ico = ExtractIcon(hi, T("SHELLTST.ICO"), 0);
     CHECK(g_icon_ico > (HICON)1, "ExtractIcon z pliku .ICO");
 }
 
@@ -89,6 +89,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     HWND h;
     (void)cmd;
     t_app = "SHELLTST";
+    t_init(hi);
     if (!prev) {
         memset(&wc, 0, sizeof(wc));
         wc.lpfnWndProc = WndProc;

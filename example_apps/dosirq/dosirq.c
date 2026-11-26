@@ -33,7 +33,7 @@ static void test_stale_seg(void)
     HGLOBAL g1 = GlobalAlloc(GMEM_MOVEABLE, 256), g2 = GlobalAlloc(GMEM_MOVEABLE, 256);
     HGLOBAL hi = g1 > g2 ? g1 : g2, lo = g1 > g2 ? g2 : g1;
     unsigned sel = HIWORD((DWORD)GlobalLock(hi)), fs;
-    int f = _lopen("A:\\LOADER.EXE", 0), r;
+    int f = _lopen(T("DOSIRQ.EXE"), 0), r;
     load_fs(sel);
     load_gs(sel);
     GlobalUnlock(hi);
@@ -60,7 +60,7 @@ static void run_test(void)
     test_stale_seg();
     GetCursorPos(&last);
     while (moves < 120 && GetTickCount() - start < 40000UL) {
-        int f = _lopen("A:\\LOADER.EXE", 0), s;
+        int f = _lopen(T("DOSIRQ.EXE"), 0), s;
         if (f != -1) {
             _lread(f, buf, sizeof(buf));
             _lclose(f);
@@ -85,6 +85,7 @@ int PASCAL WinMain(HINSTANCE hi, HINSTANCE prev, LPSTR cmd, int show)
     HWND h;
     (void)cmd;
     t_app = "DOSIRQ";
+    t_init(hi);
     if (!prev) {
         memset(&wc, 0, sizeof(wc));
         wc.lpfnWndProc = WndProc;
