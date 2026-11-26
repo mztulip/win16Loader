@@ -1,0 +1,45 @@
+#include <windows.h>
+#include "icoview.h"
+
+ICOVIEW_ICON ICON "ICOVIEW.ICO"
+
+ICOVIEW_MENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Open...\tCtrl+O",        IDM_FILE_OPEN
+        MENUITEM "Save as &BMP...\tCtrl+S", IDM_FILE_SAVEBMP
+        MENUITEM "&Close",                  IDM_FILE_CLOSE
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit\tAlt+F4",           IDM_FILE_EXIT
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Zoom &1x\t1",             IDM_VIEW_ZOOM1
+        MENUITEM "Zoom &2x\t2",             IDM_VIEW_ZOOM2
+        MENUITEM "Zoom &4x\t4",             IDM_VIEW_ZOOM4
+        MENUITEM "Zoom &8x\t8",             IDM_VIEW_ZOOM8
+        MENUITEM SEPARATOR
+        MENUITEM "Pixel &Grid\tG",          IDM_VIEW_GRID
+        MENUITEM SEPARATOR
+        MENUITEM "Bg: &Checkerboard",       IDM_BG_CHECKER
+        MENUITEM "Bg: &Desktop",            IDM_BG_DESKTOP
+        MENUITEM "Bg: &White",              IDM_BG_WHITE
+        MENUITEM "Bg: Blac&k",              IDM_BG_BLACK
+        MENUITEM "Bg: G&ray",               IDM_BG_GRAY
+        MENUITEM SEPARATOR
+        MENUITEM "Mode: &Icon (Composite)", IDM_MODE_COMPOSITE
+        MENUITEM "Mode: &XOR (Color)",      IDM_MODE_XOR
+        MENUITEM "Mode: &AND (Mask)",       IDM_MODE_AND
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Icon Viewer...",   IDM_HELP_ABOUT
+    END
+END
+
+ICOVIEW_ACCEL ACCELERATORS
+BEGIN
+    "^O", IDM_FILE_OPEN
+    "^S", IDM_FILE_SAVEBMP
+END

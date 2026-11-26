@@ -107,6 +107,7 @@ static ATOM register_class(WNDCLASS __far *wc, BOOL system)
 ATOM API RegisterClass(WNDCLASS __far *wc)
 {
     user_init();
+    if (wc && wc->name && HIWORD(wc->name)) { udbg("USER: RegisterClass '"); udbg(wc->name); udbg("'\n"); }
     return register_class(wc, FALSE);
 }
 

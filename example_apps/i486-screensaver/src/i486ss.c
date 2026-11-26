@@ -702,6 +702,7 @@ static void RenderBaseFlag(HDC hdcScreen)
     /* 5. Center i486 DX Microprocessor */
     /* CPU center is at (91, 62) */
     /* Outer PGA Gold Pins (8 pins per side) */
+    DeleteObject(hpenGold);
     hpenGold = CreatePen(PS_SOLID, 1, RGB(255, 215, 60));
     SelectObject(hdc, hpenGold);
 
@@ -754,6 +755,7 @@ static void RenderBaseFlag(HDC hdcScreen)
         tri[1].x = 70; tri[1].y = 33;
         tri[2].x = 64; tri[2].y = 39;
         Polygon(hdc, tri, 3);
+        SelectObject(hdc, hbrCeramic);
         DeleteObject(hbrGoldPin);
     }
 
@@ -770,6 +772,7 @@ static void RenderBaseFlag(HDC hdcScreen)
         MoveTo(hdc, 73, 79); LineTo(hdc, 73, 44); LineTo(hdc, 108, 44);
         SelectObject(hdc, hpenLidHi);
         MoveTo(hdc, 108, 44); LineTo(hdc, 108, 79); LineTo(hdc, 72, 79);
+        SelectObject(hdc, hpenOld);
         DeleteObject(hpenLidHi);
         DeleteObject(hpenLidLo);
     }
@@ -791,6 +794,7 @@ static void RenderBaseFlag(HDC hdcScreen)
         Rectangle(hdc, 83, 57, 99, 66);
         DrawLetterD(hdc, 85, 58, RGB(255, 235, 100));
         DrawLetterX(hdc, 91, 58, RGB(255, 235, 100));
+        SelectObject(hdc, hbrLid);
         DeleteObject(hbrBadge);
     }
 
@@ -832,7 +836,7 @@ static void DrawFlagAt(HDC hdc, int x, int y)
 {
     int s;
     HBRUSH hbrGoldBall, hbrOld;
-    HPEN hpenPole, hpenOld;
+    HPEN hpenPole, hpenRing, hpenOld;
 
     if (!gHdcFlag) return;
 
@@ -871,8 +875,8 @@ static void DrawFlagAt(HDC hdc, int x, int y)
     Rectangle(hdc, x + 2, y + FLAG_H + 12, x + 10, y + FLAG_H + 15);
 
     /* Brass mounting rings (grommets) connecting cloth to pole */
-    hpenPole = CreatePen(PS_SOLID, 1, RGB(255, 220, 80));
-    SelectObject(hdc, hpenPole);
+    hpenRing = CreatePen(PS_SOLID, 1, RGB(255, 220, 80));
+    SelectObject(hdc, hpenRing);
     MoveTo(hdc, x + 6, y + 8);  LineTo(hdc, x + 9, y + 8);
     MoveTo(hdc, x + 6, y + FLAG_H); LineTo(hdc, x + 9, y + FLAG_H);
 
@@ -880,6 +884,7 @@ static void DrawFlagAt(HDC hdc, int x, int y)
     SelectObject(hdc, hpenOld);
     DeleteObject(hbrGoldBall);
     DeleteObject(hpenPole);
+    DeleteObject(hpenRing);
 }
 
 /* Parse screensaver command line */

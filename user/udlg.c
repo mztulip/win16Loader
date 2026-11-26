@@ -416,7 +416,9 @@ int API MessageBox(HWND owner, LPCSTR text, LPCSTR cap, WORD type)
     int nb, i, W, H, tx, bw = 70, iconw, def;
     WORD bset = type & 0x0F, icon = (type >> 4) & 0x0F;
     user_init();
-    udbg("USER: MessageBox '"); if (text) udbg(text); udbg("'\n");
+    udbg("USER: MessageBox '"); if (text) udbg(text);
+    udbg("' cap='"); if (cap) udbg(cap);
+    udbg("' type="); udbg_hex(type, 4); udbg("\n");
     if (bset > 5) bset = 0;
     for (nb = 0; nb < 3 && btns[bset][nb]; nb++);
     dc = GetDC(0);

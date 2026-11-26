@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--clock-exe", default="example_apps/clock/CLOCK.EXE", help="CLOCK.EXE path")
     parser.add_argument("--charmap-exe", default="example_apps/charmap/CHARMAP.EXE", help="CHARMAP.EXE path")
     parser.add_argument("--hexview-exe", default="example_apps/hexview/HEXVIEW.EXE", help="HEXVIEW.EXE path")
+    parser.add_argument("--icoview-exe", default="example_apps/icoview/ICOVIEW.EXE", help="ICOVIEW.EXE path")
     parser.add_argument("--screensaver-scr", default="example_apps/win31-screensaver/WIN31SS.SCR", help="Screensaver .SCR path")
     parser.add_argument("--i486ss-scr", default="example_apps/i486-screensaver/I486SS.SCR", help="i486 Screensaver .SCR path")
     parser.add_argument("--mario-dir", default="games/mario", help="Mario game directory")
@@ -141,6 +142,8 @@ def main():
         run(["python3", "tools/make_pif.py"])
     if not os.path.exists("windir/SCREENSV.ICO") and os.path.exists("tools/make_screensaver_ico.py"):
         run(["python3", "tools/make_screensaver_ico.py"])
+    if not os.path.exists("windir/MARIO.ICO") and os.path.exists("tools/make_mario_ico.py"):
+        run(["python3", "tools/make_mario_ico.py"])
 
     win_files = [
         ("loader.exe", "LOADER.EXE"),
@@ -157,6 +160,7 @@ def main():
         ("windir/LOADER16.ICO", "LOADER16.ICO"),
         ("windir/I486.ICO", "I486.ICO"),
         ("windir/SCREENSV.ICO", "SCREENSV.ICO"),
+        ("windir/MARIO.ICO", "MARIO.ICO"),
         ("control.exe", "CONTROL.EXE"),
     ]
     notepad_candidates = [
@@ -216,6 +220,19 @@ def main():
 
     if os.path.exists("example_apps/hexview/HEXVIEW.ICO"):
         win_files.append(("example_apps/hexview/HEXVIEW.ICO", "HEXVIEW.ICO"))
+
+    icoview_candidates = [
+        args.icoview_exe,
+        "example_apps/icoview/ICOVIEW.EXE",
+        "example_apps/icoview/ICOVIEW.exe",
+    ]
+    for c in icoview_candidates:
+        if c and os.path.exists(c):
+            win_files.append((c, "ICOVIEW.EXE"))
+            break
+
+    if os.path.exists("example_apps/icoview/ICOVIEW.ICO"):
+        win_files.append(("example_apps/icoview/ICOVIEW.ICO", "ICOVIEW.ICO"))
 
     scr_candidates = [
         args.screensaver_scr,
@@ -311,8 +328,12 @@ def main():
         run(["mcopy", "-oi", mpart, "windir/I486.ICO", "::CALMIRA/I486.ICO"])
     if os.path.exists("windir/HEXVIEW.ICO"):
         run(["mcopy", "-oi", mpart, "windir/HEXVIEW.ICO", "::CALMIRA/HEXVIEW.ICO"])
+    if os.path.exists("windir/ICOVIEW.ICO"):
+        run(["mcopy", "-oi", mpart, "windir/ICOVIEW.ICO", "::CALMIRA/ICOVIEW.ICO"])
     if os.path.exists("windir/SCREENSV.ICO"):
         run(["mcopy", "-oi", mpart, "windir/SCREENSV.ICO", "::CALMIRA/SCREENSV.ICO"])
+    if os.path.exists("windir/MARIO.ICO"):
+        run(["mcopy", "-oi", mpart, "windir/MARIO.ICO", "::CALMIRA/MARIO.ICO"])
     if os.path.exists("windir/CALMIRA.INI"):
         run(["mcopy", "-oi", mpart, "windir/CALMIRA.INI", "::CALMIRA/CALMIRA.INI"])
     if os.path.exists("windir/START.INI"):
