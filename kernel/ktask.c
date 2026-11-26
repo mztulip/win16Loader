@@ -110,6 +110,18 @@ static void set_running(WORD hinst, BOOL on)
     else MTW(mi, MT_FLAGS) &= ~MTF_RUNNING;
 }
 
+
+/* Stos dla wyjatku konczacego zadanie: KERNEL dziala na CPL=0, a SS musi miec DPL == CPL.
+ * GlobalAlloc daje bloki z DPL=3 (selektory aplikacji z RPL=3, jak w Windows), wiec
+ * zaladowanie takiego bloku do SS w obsludze wyjatku dawalo #GP w kolko. */
+WORD API SelectorAccessRights(WORD sel, WORD op, WORD rights);
+static WORD exc_stack_alloc(void)
+{
+    WORD st = (WORD)GlobalAlloc(0x40, 0x2000);
+    if (st) SelectorAccessRights(st, 1, 0x92);
+    return st;
+}
+
 /* Zadanie startowe: uruchomil je loader, jego dane sa w KCB */
 void task_init(void)
 {
@@ -130,7 +142,7 @@ void task_init(void)
     g_n = 1;
     set_running(t->hinst, TRUE);
     {   /* wyjatek konczacy zadanie dziala na wlasnym stosie: stos zadania moze byc zepsuty */
-        WORD st = (WORD)GlobalAlloc(0x40, 0x2000);
+        WORD st = exc_stack_alloc();
         kmem_set_owner(st, 0);
         kmem_set_owner(t->h, 0);
         KCBW(KCB_EXC_STACK) = st;
@@ -360,7 +372,7 @@ void task_fault_c(void)
     KCBW(KCB_NTASKS) = 0;                          /* wyjatek przy sprzataniu = panika */
     g_t[g_cur].dying = TRUE;
     {   /* ten stos zostaje na czas komunikatu, inne zadanie moze w tym czasie tez zawiesc */
-        WORD st = (WORD)GlobalAlloc(0x40, 0x2000);
+        WORD st = exc_stack_alloc();
         if (st) { kmem_set_owner(st, 0); KCBW(KCB_EXC_STACK) = st; }
     }
     mi = mod_from_handle(g_t[g_cur].hinst);
