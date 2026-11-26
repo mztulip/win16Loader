@@ -525,7 +525,7 @@ WORD API waveOutGetPosition(WORD hWaveOut, LPVOID lpInfo, WORD uSize)
     (void)uSize;
     if (!g_wo_open || hWaveOut != 1 || !mt) return MMSYSERR_INVALHANDLE;
 
-    if (g_sb_playing && (g_poll++ & 7) && g_sb_autoinit) {
+    if (g_sb_playing && (g_poll++ & 63) && g_sb_autoinit) {
         /* Gry odpytuja pozycje w petli (Woodruff ~19000/s). Sprzet czytamy co 8. raz:
          * kazdy odczyt to ~7 operacji na portach ISA (wolne na 486, a w QEMU z oknem GTK
          * kazde wyjscie z KVM czeka na watek ekranu i zabiera czas odczytom dysku). */
