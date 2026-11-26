@@ -701,6 +701,12 @@ pm16_app_returned:
     mov  es, ax
     mov  fs, ax
     mov  gs, ax
+    ; SS tez na 16-bitowy segment (B=0) i ESP bez starszych bitow: tryb rzeczywisty zachowuje
+    ; ukryte atrybuty SS z PM. Stos wejscia do PM jest 32-bitowy (SEL_DATA32, ESP=0x9FC00),
+    ; wiec na prawdziwym CPU (KVM, 486) push/pop w rm_real szly przez ESP w zle miejsce
+    ; i maszyna sie resetowala przy wyjsciu z programu. TCG tego atrybutu nie respektuje.
+    mov  ss, ax
+    mov  esp, rmi_stack_top
 
     ; Przywroc PIC do ukladu BIOS (IRQ0-7 -> INT 08h, IRQ8-15 -> INT 70h),
     ; inaczej po powrocie do DOS IRQ0 trafilby w INT 20h (terminate).
@@ -2116,12 +2122,12 @@ int21_handler:
     out  dx, al
     pop  dx
     pop  ax
-    mov  [cs:local_exit_code], al
     ; Odwin stos do stanu sprzed "call far [cs:call_ptr]" w pm16_call_app
     ; (IRET-frame INT 21h i ramki apki sa porzucane) i wroc do trybu rzeczywistego.
     cli
     mov  dx, SEL_DATA16
     mov  ds, dx
+    mov  [local_exit_code], al   ; przez DS=SEL_DATA16: zapis przez CS (segment kodu) = #GP
     mov  ss, [app_ret_ss]
     mov  sp, [app_ret_sp]
     add  sp, 2           ; zdejmij "push ds" sprzed zapisu SS:SP

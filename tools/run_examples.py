@@ -72,6 +72,7 @@ def main():
     ap.add_argument('--out', default=os.path.join(ROOT, 'qemu_out', 'examples'))
     ap.add_argument('--hd', help='obraz dysku FreeDOS (np. calmira.img): testy z C:\\TESTS')
     ap.add_argument('--boot-wait', default='22')
+    ap.add_argument('--kvm', action='store_true', help='QEMU z KVM (prawdziwy CPU; TCG przepuszcza niektore bledy ochrony)')
     ap.add_argument('names', nargs='*')
     a = ap.parse_args()
     names = a.names or list(APPS)
@@ -131,7 +132,7 @@ def main():
         d, exe, steps = APPS[n]
         out = os.path.join(a.out, n)
         steps = [s if not s.startswith('p') else ('p' + n if s == 'pshot' or s == 'p' else s) for s in steps]
-        disk = ['--fd', fd] if not hd else ['--hd', hd, '--boot', 'c']
+        disk = (['--fd', fd] if not hd else ['--hd', hd, '--boot', 'c']) + (['--kvm'] if a.kvm else [])
         subprocess.run([sys.executable, os.path.join(HERE, 'qemu_headless.py')] + disk +
                        ['--run', 'LOADER.EXE ' + exe, '--out', out, '--port', str(4500 + idx),
                         '--boot-wait', a.boot_wait] + steps,

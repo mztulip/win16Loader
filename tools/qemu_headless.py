@@ -44,6 +44,7 @@ def main():
     ap.add_argument('--boot-wait', type=float, default=25)
     ap.add_argument('--boot', default='a', choices=['a', 'c'])
     ap.add_argument('--mem', type=int, default=16)
+    ap.add_argument('--kvm', action='store_true', help='-enable-kvm: kod gosci na prawdziwym CPU (TCG nie sprawdza np. zapisu do segmentu kodu)')
     ap.add_argument('steps', nargs='*')
     a = ap.parse_args()
 
@@ -63,7 +64,7 @@ def main():
             f.write(b'@echo off\r\n' + b''.join(l.strip().encode() + b'\r\n'
                                                 for l in a.run.split(';')))
         subprocess.run(['mcopy', '-o', '-i', fd, bat, '::fdauto.bat'], check=True)
-    cmd = ['qemu-system-i386', '-vga', 'std,retrace=precise']
+    cmd = ['qemu-system-i386'] + (['-enable-kvm'] if a.kvm else []) + ['-vga', 'std,retrace=precise']
     if fd:
         cmd += ['-drive', f'file={fd},if=floppy,format=raw']
     if a.fdb:
