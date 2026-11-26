@@ -29,9 +29,9 @@
 #include "module.h"
 
 #define MAX_ORD        1024     /* max ordinal w tablicy wejsc modulu */
-#define MAX_GDTP       256
+#define MAX_GDTP       512
 #define MAX_MODREFS    32
-#define MAX_SEGS       64
+#define MAX_SEGS       128
 #define THUNK_SIZE     8
 #define HASH_SIZE      1024     /* > max liczby thunkow */
 #define MAX_STUBS      1024

@@ -563,14 +563,15 @@ static void phantom_b_restore(void)
 
 static void shrink_dos_memory(void)
 {
-    unsigned ss_val;
+    unsigned ss_val, sp_val;
     unsigned needed, maxsize;
     unsigned psp_val = _psp;
     unsigned err;
     __asm {
         mov ss_val, ss
+        mov sp_val, sp
     }
-    needed = (ss_val - psp_val) + 0x800;
+    needed = (ss_val - psp_val) + ((sp_val + 15u) >> 4) + 0x100u;
     err = _dos_setblock(needed, psp_val, &maxsize);
     kprintf("DOS mem shrink: psp=%04X ss=%04X needed=%u para err=%u max=%u\n",
             psp_val, ss_val, needed, err, maxsize);

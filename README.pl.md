@@ -23,7 +23,11 @@ Loader uruchamia się z obrazu dyskietki FreeDOS. Implementuje:
 
 SkiFree działa (sprite'y, pętla gry, pasek stanu). Dostępna jest powłoka graficzna z ikonami NE, menedżer okien z paskiem tytułu / przyciskiem zamknięcia / menu systemowym / przenoszeniem okien oraz poprawny powrót do powłoki po zakończeniu aplikacji.
 
-Przepisane moduły `KERNEL`/`USER`/`GDI` (katalogi `kernel/`, `user/`, `gdi/`) wraz z mniejszymi systemowymi bibliotekami DLL (`dlls/`: SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG) uruchamiają powłokę **Calmira II** (Delphi 1): pulpit, pasek zadań, menu Start i okna dialogowe (`make run-calmira`; najpierw wypakuj Calmira II 3.3 ze strony <http://www.calmira.org/downloads/> do `../win31_apps/english_calmira/calmii33`).
+Przepisane moduły `KERNEL`/`USER`/`GDI` (katalogi `kernel/`, `user/`, `gdi/`) wraz z mniejszymi systemowymi bibliotekami DLL (`dlls/`: SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG) uruchamiają powłoki **Calmira** (Delphi 1): pulpit, pasek zadań, menu Start i okna dialogowe:
+- **Calmira II 3.3** (`make run-calmira`; wypakuj ze strony <http://www.calmira.org/downloads/> do `../win31_apps/english_calmira/calmii33`)
+- **Calmira NextGen** (`make run-calmiranextgen`; pobierz z <https://www.vogons.org/viewtopic.php?p=1456922> do `../win31_apps/Calmiranextgen`)
+- **Calmira Longhorn** (`make run-calmira-longhorn`; pobierz z <http://www.win3x.org/win3board/viewtopic.php?t=4019> i wypakuj do `../win31_apps/calmira_longhorn/calmira_longhorn_en_36/CALMIRA`)
+
 Każda funkcja ma aplikację testową w `example_apps/` (`python3 tools/run_examples.py`).
 
 ## Zrzuty ekranu
@@ -31,6 +35,10 @@ Każda funkcja ma aplikację testową w `example_apps/` (`python3 tools/run_exam
 | Powłoka Calmira II 3.3 (menu Start, Porada dnia, Eksplorator) |
 |---|
 | ![Calmira II](docs/screenshots/calmira.png) |
+
+| Calmira NextGen | Calmira Longhorn |
+|---|---|
+| ![Calmira NextGen](docs/screenshots/calmira_nextgen.png) | ![Calmira Longhorn](docs/screenshots/calmira_longhorn.png) |
 
 | SkiFree (oryginalny plik binarny Win16) | Powłoka graficzna z ikonami NE |
 |---|---|
@@ -61,10 +69,13 @@ make            # zbuduj wszystko (kompilacja + utworzenie boot.img)
 make run-qemu   # uruchom w QEMU, wyjście portu szeregowego na stdout
 make run        # uruchom w Bochs z debuggerem GUI
 
-# Środowisko Windows Calmira II:
+# Środowiska Windows Calmira:
 make run-calmira           # uruchom Calmira II (dysk twardy calmira.img)
 make run-calmira-snapshot  # uruchom w trybie tymczasowym/overlay (zmiany na dysku nie są zapisywane)
 make reset-calmira         # przywróć calmira.img do czystego/fabrycznego stanu
+
+make run-calmiranextgen    # uruchom Calmira NextGen (calmiranextgen.img)
+make run-calmira-longhorn  # uruchom Calmira Longhorn (calmira-longhorn.img)
 ```
 
 ## Struktura projektu
@@ -113,5 +124,7 @@ win16Loader jest wolnym oprogramowaniem; możesz go rozpowszechniać i/lub modyf
 | Dyskietka FreeDOS | `FD14-FloppyEdition/` (poza repozytorium) | GPL i inne | do pobrania z <https://www.freedos.org> |
 | SkiFree | poza repozytorium (`SKIFREE/SKI.EXE`) | freeware | aplikacja testowa, <https://ski.ihoc.net/> |
 | Calmira II 3.3 (angielska) | poza repozytorium (`../win31_apps/english_calmira/calmii33`, źródła `../win31_apps/english_calmira/cal33src`) | GPL-2.0-or-later | aplikacja testowa, <http://www.calmira.org/downloads/> |
+| Calmira NextGen 1.1 | poza repozytorium (`../win31_apps/Calmiranextgen`) | własnościowa / freeware (All rights reserved) | aplikacja testowa autorstwa Petera Protuša, <https://www.vogons.org/viewtopic.php?p=1456922> |
+| Calmira Longhorn 3.6 | poza repozytorium (`../win31_apps/calmira_longhorn/calmira_longhorn_en_36/CALMIRA`) | GPL-2.0-or-later | aplikacja testowa autorstwa Petera Protuša (na bazie Calmira XP 4.0 beta), <http://www.win3x.org/win3board/viewtopic.php?t=4019> |
 
 Wine: <https://www.winehq.org>, źródła <https://gitlab.winehq.org/wine/wine>.

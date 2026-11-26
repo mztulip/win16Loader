@@ -24,9 +24,12 @@ The loader boots from a FreeDOS floppy image. It implements:
 SkiFree runs (sprites, game loop, status bar). Graphical shell with NE icons, window manager with title bar/close button/system menu/move, proper app exit back to the shell.
 
 The rewritten `KERNEL`/`USER`/`GDI` (directories `kernel/`, `user/`, `gdi/`) plus small system
-DLLs (`dlls/`: SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG) run the
-**Calmira II** shell (Delphi 1): desktop, taskbar, Start menu, dialogs (`make run-calmira`;
-unpack Calmira II 3.3 from <http://www.calmira.org/downloads/> into `../win31_apps/english_calmira/calmii33` first).
+DLLs (`dlls/`: SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG) run **Calmira**
+shells (Delphi 1): desktop, taskbar, Start menu, dialogs:
+- **Calmira II 3.3** (`make run-calmira`; unpack from <http://www.calmira.org/downloads/> into `../win31_apps/english_calmira/calmii33`)
+- **Calmira NextGen** (`make run-calmiranextgen`; download from <https://www.vogons.org/viewtopic.php?p=1456922> into `../win31_apps/Calmiranextgen`)
+- **Calmira Longhorn** (`make run-calmira-longhorn`; download from <http://www.win3x.org/win3board/viewtopic.php?t=4019> and unpack into `../win31_apps/calmira_longhorn/calmira_longhorn_en_36/CALMIRA`)
+
 Every feature has a test app in `example_apps/` (`python3 tools/run_examples.py`).
 
 ## Screenshots
@@ -34,6 +37,10 @@ Every feature has a test app in `example_apps/` (`python3 tools/run_examples.py`
 | Calmira II 3.3 shell (Start menu, Tip of the Day, Explorer) |
 |---|
 | ![Calmira II](docs/screenshots/calmira.png) |
+
+| Calmira NextGen | Calmira Longhorn |
+|---|---|
+| ![Calmira NextGen](docs/screenshots/calmira_nextgen.png) | ![Calmira Longhorn](docs/screenshots/calmira_longhorn.png) |
 
 | SkiFree (original Win16 binary) | Graphical shell with NE icons |
 |---|---|
@@ -64,10 +71,13 @@ make            # build everything (compile + create boot.img)
 make run-qemu   # run under QEMU, serial output to stdout
 make run        # run under Bochs with GUI debugger
 
-# Calmira II Windows environment:
+# Calmira Windows environments:
 make run-calmira           # launch Calmira II (calmira.img hard drive)
 make run-calmira-snapshot  # launch in transient/overlay mode (no disk changes saved)
 make reset-calmira         # reset calmira.img to clean/factory state
+
+make run-calmiranextgen    # launch Calmira NextGen (calmiranextgen.img)
+make run-calmira-longhorn  # launch Calmira Longhorn (calmira-longhorn.img)
 ```
 
 ## Project structure
@@ -118,5 +128,7 @@ the same license as Wine. See [`LICENSE`](LICENSE).
 | FreeDOS floppy | `FD14-FloppyEdition/` (not in the repo) | GPL and others | download from <https://www.freedos.org> |
 | SkiFree | not in the repo (`SKIFREE/SKI.EXE`) | freeware | test application, <https://ski.ihoc.net/> |
 | Calmira II 3.3 (English) | not in the repo (`../win31_apps/english_calmira/calmii33`, sources `../win31_apps/english_calmira/cal33src`) | GPL-2.0-or-later | test application, <http://www.calmira.org/downloads/> |
+| Calmira NextGen 1.1 | not in the repo (`../win31_apps/Calmiranextgen`) | proprietary / freeware (All rights reserved) | test application by Peter Protus, <https://www.vogons.org/viewtopic.php?p=1456922> |
+| Calmira Longhorn 3.6 | not in the repo (`../win31_apps/calmira_longhorn/calmira_longhorn_en_36/CALMIRA`) | GPL-2.0-or-later | test application by Peter Protus (based on Calmira XP 4.0 beta), <http://www.win3x.org/win3board/viewtopic.php?t=4019> |
 
 Wine: <https://www.winehq.org>, sources <https://gitlab.winehq.org/wine/wine>.

@@ -15,7 +15,7 @@ FDBOOT  = FD14-FloppyEdition/144m/x86BOOT.img
 
 export WATCOM INCLUDE EDPATH WIPATH PATH
 
-.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira run-calmira2 run-calmira2-snapshot reset-calmira2 release
+.PHONY: all run run-qemu clean run-calmira run-calmira-snapshot reset-calmira run-calmira2 run-calmira2-snapshot reset-calmira2 run-calmiranextgen run-calmiranextgen-snapshot reset-calmiranextgen run-calmira-longhorn run-calmira-longhorn-snapshot reset-calmira-longhorn release
 
 SKIFREE_DIR = SKIFREE
 
@@ -582,6 +582,9 @@ windir/CLOCK.ICO: example_apps/clock/gen_clock_ico.py
 windir/SCREENSV.ICO: tools/make_screensaver_ico.py
 	python3 tools/make_screensaver_ico.py
 
+windir/MARIO.ICO: tools/make_mario_ico.py
+	python3 tools/make_mario_ico.py
+
 windir/DOSPRMPT.PIF: tools/make_pif.py
 	python3 tools/make_pif.py
 
@@ -593,7 +596,7 @@ control.exe: control.c
 
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
              $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) $(CLOCK_EXE) $(CHARMAP_EXE) $(HEXVIEW_EXE) $(WIN31SS_SCR) $(I486SS_SCR) \
-             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/HEXVIEW.ICO windir/SCREENSV.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
+             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/HEXVIEW.ICO windir/SCREENSV.ICO windir/MARIO.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
              $(wildcard windir/*.BMP) $(wildcard games/mario/*.*) $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
@@ -664,6 +667,60 @@ run-calmira2: calmira2.img floppy.img
 run-calmira2-snapshot:
 	$(MAKE) run-calmira2 SNAPSHOT=1
 
+# -------------------------------------------------------
+# Calmira NextGen (rozpakowywana z SETUP.EXE do C:\NEXTGEN)
+# -------------------------------------------------------
+CALMIRA_NEXTGEN_DIR ?= ../win31_apps/Calmiranextgen
+
+calmiranextgen.img: calmira.img tools/install_calmiranextgen.py
+	cp calmira.img $@.tmp
+	python3 tools/install_calmiranextgen.py --img=$@.tmp --src="$(CALMIRA_NEXTGEN_DIR)"
+	mv $@.tmp $@
+
+reset-calmiranextgen:
+	rm -f calmiranextgen.img
+	$(MAKE) calmiranextgen.img
+	@echo "=== Obraz calmiranextgen.img zresetowany ==="
+
+run-calmiranextgen: calmiranextgen.img floppy.img
+	qemu-system-i386 -vga std,retrace=precise \
+	    -drive file=floppy.img,if=floppy,format=raw \
+	    -drive file=calmiranextgen.img,if=ide,format=raw -boot c -m 64 \
+	    $(QEMU_SNAPSHOT) \
+	    $(QEMU_REBOOT) \
+	    -serial stdio \
+	    -d cpu_reset,guest_errors -D qemu.log
+
+run-calmiranextgen-snapshot:
+	$(MAKE) run-calmiranextgen SNAPSHOT=1
+
+# -------------------------------------------------------
+# Calmira Longhorn (instalowana do C:\LONGHORN)
+# -------------------------------------------------------
+CALMIRA_LONGHORN_DIR ?= ../win31_apps/calmira_longhorn/calmira_longhorn_en_36/CALMIRA
+
+calmira-longhorn.img: calmira.img tools/install_calmira_longhorn.py
+	cp calmira.img $@.tmp
+	python3 tools/install_calmira_longhorn.py --img=$@.tmp --src="$(CALMIRA_LONGHORN_DIR)"
+	mv $@.tmp $@
+
+reset-calmira-longhorn:
+	rm -f calmira-longhorn.img
+	$(MAKE) calmira-longhorn.img
+	@echo "=== Obraz calmira-longhorn.img zresetowany ==="
+
+run-calmira-longhorn: calmira-longhorn.img floppy.img
+	qemu-system-i386 -vga std,retrace=precise \
+	    -drive file=floppy.img,if=floppy,format=raw \
+	    -drive file=calmira-longhorn.img,if=ide,format=raw -boot c -m 64 \
+	    $(QEMU_SNAPSHOT) \
+	    $(QEMU_REBOOT) \
+	    -serial stdio \
+	    -d cpu_reset,guest_errors -D qemu.log
+
+run-calmira-longhorn-snapshot:
+	$(MAKE) run-calmira-longhorn SNAPSHOT=1
+
 clean:
 	rm -f kernel.exe kernel.obj
 	rm -f user.exe user.obj
@@ -673,5 +730,5 @@ clean:
 	rm -f test_rc.exe test_rc.obj TESTRES.NE
 	rm -f control.exe control.obj
 	rm -f panic.bin
-	rm -f boot.img boot_test_rc.img boot_win16test.img calmira.img calmira2.img floppy.img bochs.log qemu.log
+	rm -f boot.img boot_test_rc.img boot_win16test.img calmira.img calmira2.img calmiranextgen.img calmira-longhorn.img floppy.img bochs.log qemu.log
 	$(MAKE) -C win16test clean
