@@ -624,6 +624,7 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
     MENU __far *m = mptr(hm);
     HWND pw;
     int cw, ch, sel = -1, result = 0, i, depth;
+    int mx0 = mouse_x(), my0 = mouse_y();
     MSG msg;
     BOOL moved = FALSE;
     if (!m || !m->n) return 0;
@@ -647,7 +648,8 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
         int mx = mouse_x(), my = mouse_y();
         if (msg.message == WM_MOUSEMOVE || msg.message == WM_NCMOUSEMOVE) {
             int hit = popup_hit(pw, hm, mx, my);
-            moved = TRUE;
+            if (hit >= 0 || mx - mx0 > 4 || mx0 - mx > 4 || my - my0 > 4 || my0 - my > 4)
+                moved = TRUE;
             if (hit == -2 && over_parent(depth, mx, my)) { result = MENU_TO_PARENT; break; }
             if (hit >= 0 && hit != sel) {
                 sel = hit;
