@@ -110,7 +110,10 @@ static WORD  g_dma_last_hw = 0;
 static DWORD g_dma_wraps = 0;
 static DWORD g_dma_moved_tick = 0;   /* ostatni ruch licznika DMA (watchdog) */
 static DWORD g_last_ms = 0;
-static BOOL  g_dma_ever_moved = FALSE;          /* ostatnia zwrocona pozycja (ms) - ciaglosc przy watchdogu */
+static BOOL  g_dma_ever_moved = FALSE;
+static DWORD g_last_bytes = 0;       /* ostatnia zwrocona pozycja (bajty) */
+static WORD  g_poll = 0;             /* licznik wywolan waveOutGetPosition */
+static WORD  g_sync_hw = 0;          /* licznik DMA przy ostatnim kopiowaniu do pierscienia */          /* ostatnia zwrocona pozycja (ms) - ciaglosc przy watchdogu */
 
 #define SYNC_AHEAD  0x3000u          /* tyle bajtow przed pozycja odtwarzania kopiujemy do DMA */
 #define STALL_MS    500UL            /* licznik DMA stoi tyle ms -> zegar systemowy */
@@ -356,6 +359,7 @@ static void sb_start(BOOL looping, DWORD buf_len)
     g_dma_last_hw = 0;
     g_dma_wraps = 0;
     g_dma_moved_tick = GetTickCount();
+    g_sync_hw = 0;
     g_sb_playing = TRUE;
 }
 
@@ -509,6 +513,7 @@ WORD API waveOutReset(WORD hWaveOut)
     g_wo_src = NULL;
     g_wo_src_len = 0;
     g_last_ms = 0;
+    g_last_bytes = 0;
     return MMSYSERR_NOERROR;
 }
 
@@ -520,7 +525,13 @@ WORD API waveOutGetPosition(WORD hWaveOut, LPVOID lpInfo, WORD uSize)
     (void)uSize;
     if (!g_wo_open || hWaveOut != 1 || !mt) return MMSYSERR_INVALHANDLE;
 
-    if (g_sb_playing) {
+    if (g_sb_playing && (g_poll++ & 7) && g_sb_autoinit) {
+        /* Gry odpytuja pozycje w petli (Woodruff ~19000/s). Sprzet czytamy co 8. raz:
+         * kazdy odczyt to ~7 operacji na portach ISA (wolne na 486, a w QEMU z oknem GTK
+         * kazde wyjscie z KVM czeka na watek ekranu i zabiera czas odczytom dysku). */
+        bytes = g_last_bytes;
+        elapsed_ms = g_last_ms;
+    } else if (g_sb_playing) {
         DWORD now = GetTickCount();
         WORD hw;
         (void)io_inb(SB_READ_STATUS);   /* ack ewentualnego IRQ 8-bit */
@@ -545,7 +556,10 @@ WORD API waveOutGetPosition(WORD hWaveOut, LPVOID lpInfo, WORD uSize)
             goto clock;
         }
         if (g_sb_autoinit) {
-            sb_sync_ahead(hw);
+            if ((WORD)(hw - g_sync_hw) >= 0x800 || hw < g_sync_hw) {   /* co >= 2KB odtwarzania */
+                sb_sync_ahead(hw);
+                g_sync_hw = hw;
+            }
             bytes = g_dma_wraps * g_dma_len + hw;
         } else {
             /* single-cycle: po koncu licznik stoi na koncu bufora (lub zawinal do 0) */
@@ -560,6 +574,7 @@ WORD API waveOutGetPosition(WORD hWaveOut, LPVOID lpInfo, WORD uSize)
             bytes = g_wo_written_bytes;
     }
     g_last_ms = elapsed_ms;
+    g_last_bytes = bytes;
 
     if (mt->wType == TIME_MS) {
         mt->u.ms = elapsed_ms;

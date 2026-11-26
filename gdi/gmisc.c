@@ -14,14 +14,21 @@ static BOOL g_dac_ready = FALSE;
 /* VBE 4F09h (BL=0 ustaw): ES:DI = tablica B,G,R,0 (6 bit). KERNEL kopiuje ja do bufora RM. */
 static WORD vbe_set_pal(WORD start, WORD n, BYTE __far *tab);
 #pragma aux vbe_set_pal = \
-    "push es"               \
-    "mov es, cx"            \
     "mov cx, ax"            \
     "mov ax, 0x4F09"        \
     "xor bl, bl"            \
     "int 0x10"              \
-    "pop es"                \
-    parm [dx] [ax] [cx di] value [ax] modify [ax bx cx dx si di];
+    parm [dx] [ax] [es di] value [ax] modify [ax bx cx dx si di es];
+
+static void dac_outsb(BYTE __far *src, WORD cnt);
+#pragma aux dac_outsb = \
+    "push ds"               \
+    "mov ds, dx"            \
+    "mov dx, 0x3C9"         \
+    "cld"                   \
+    "rep outsb"             \
+    "pop ds"                \
+    parm [dx si] [cx] modify [cx dx si];
 
 /* Wpisy [start, start+n) z g_dac_rgb do sprzetowego DAC */
 static void dac_upload(WORD start, WORD n)
@@ -41,12 +48,19 @@ static void dac_upload(WORD start, WORD n)
         if (vbe_set_pal(start, n, (BYTE __far *)tab) == 0x004F) return;
         g_hw_dacvbe = 0;                           /* nie dziala: sprobuj portow VGA */
     }
-    vga_outb(0x3C8, (BYTE)start);
-    for (i = 0; i < n; i++) {
-        DWORD px = g_dac_rgb[start + i];
-        vga_outb(0x3C9, (BYTE)((px >> 18) & 0x3F));
-        vga_outb(0x3C9, (BYTE)((px >> 10) & 0x3F));
-        vga_outb(0x3C9, (BYTE)((px >> 2)  & 0x3F));
+    {
+        /* Caly zakres jednym "rep outsb": pod KVM to jedno wyjscie do QEMU zamiast 3 na wpis
+         * (z oknem GTK kazde "out 3C9h" czekalo ~1 ms na watek ekranu -> sciemnianie filmow
+         * trwalo minuty i gra wygladala na zawieszona). Na 486 to zwykly szybki zapis palety. */
+        static BYTE rgb[256 * 3];
+        for (i = 0; i < n; i++) {
+            DWORD px = g_dac_rgb[start + i];
+            rgb[i * 3 + 0] = (BYTE)((px >> 18) & 0x3F);
+            rgb[i * 3 + 1] = (BYTE)((px >> 10) & 0x3F);
+            rgb[i * 3 + 2] = (BYTE)((px >> 2)  & 0x3F);
+        }
+        vga_outb(0x3C8, (BYTE)start);
+        dac_outsb((BYTE __far *)rgb, n * 3);
     }
 }
 
