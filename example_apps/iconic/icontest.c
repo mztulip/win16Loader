@@ -194,7 +194,12 @@ static void tests(HINSTANCE hi)
     {
         HDC sdc = GetDC(0);
         COLORREF bg = GetSysColor(COLOR_BACKGROUND);
-        CHECK(GetPixel(sdc, r.left, r.top) == bg, "ikona domyslna: rog ma tlo pulpitu");
+        char wp[80];
+        GetProfileString("desktop", "Wallpaper", "", wp, sizeof(wp));
+        if (!wp[0] || !lstrcmpi(wp, "(None)"))
+            CHECK(GetPixel(sdc, r.left, r.top) == bg, "ikona domyslna: rog ma tlo pulpitu");
+        else    /* z tapeta rog pokazuje tapete - byle nie bialy kwadrat */
+            CHECK(GetPixel(sdc, r.left, r.top) != RGB(255, 255, 255), "ikona domyslna: rog ma tlo pulpitu");
         CHECK(GetPixel(sdc, r.left + 16, r.top + 8) == RGB(0x0A, 0x6E, 0x7E), "ikona domyslna: pasek tytulu");
         CHECK(GetPixel(sdc, r.left + 16, r.top + 20) == RGB(255, 255, 255), "ikona domyslna: wnetrze");
         /* wlasne malowanie aplikacji bez ikony klasy zostaje nietkniete */

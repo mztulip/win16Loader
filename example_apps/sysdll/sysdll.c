@@ -123,8 +123,11 @@ static void misc_tests(HINSTANCE hi)
 
     /* SHELL: ShellAbout (ordinal 22) */
     {
-        FARPROC p = GetProcAddress(GetModuleHandle("SHELL"), (LPCSTR)22);
+        /* SHELL nie musi byc zaladowany (z dyskietki loader preloaduje DLL z katalogu apki) */
+        HINSTANCE hs = LoadLibrary("SHELL.DLL");
+        FARPROC p = (UINT)hs > 32 ? GetProcAddress(hs, (LPCSTR)22) : NULL;
         CHECK(p != NULL, "ShellAbout export (ord 22)");
+        if ((UINT)hs > 32) FreeLibrary(hs);
     }
 
     /* DOS Time / RTC (INT 21h AH=2Ch) */
