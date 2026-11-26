@@ -730,7 +730,12 @@ static void check_screensaver_idle(void)
         if ((long)(now - g_last_input) >= (long)ss_timeout * 1000L) {
             udbg("USER: bezczynnosc - automatyczny start wygaszacza\n");
             g_last_input = now;
-            PostMessage(HDESKTOP, WM_SYSCOMMAND, SC_SCREENSAVE, 0);
+            /* Jak Windows 3.1: SC_SCREENSAVE do aktywnego okna - wygaszacz uruchamia dopiero jego
+             * DefWindowProc, wiec gra/odtwarzacz moze go zablokowac (przechwycic i zwrocic 0) */
+            if (g_active && g_active != HDESKTOP && WP(g_active))
+                post_msg(g_active, WM_SYSCOMMAND, SC_SCREENSAVE, 0);
+            else
+                PostMessage(HDESKTOP, WM_SYSCOMMAND, SC_SCREENSAVE, 0);
         }
     }
 }

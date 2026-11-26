@@ -45,7 +45,7 @@ def main():
     for path in sys.argv[2:]:
         for line in open(path, encoding='latin1'):
             m = re.match(r'^[A-Za-z_].*\bAPI\s+(\w+)\s*\(', line)
-            if m and not line.rstrip().endswith(';'):
+            if m and (not line.rstrip().endswith(';') or '{' in line):   # definicja w jednej linii
                 funcs.append(m.group(1))
     out, used = [f'# {mod} - wygenerowane przez tools/gen_lnk.py'], set()
     missing = []
