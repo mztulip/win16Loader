@@ -53,6 +53,17 @@ typedef POINT __far *LPPOINT;
 /* ---- Selektory systemowe (pm_call.asm) ---- */
 #define SEL_VESA_BASE   0xA0      /* okna 64KB LFB, kolejne co 8 */
 #define SEL_KCB         0x98
+#define SEL_RM_A000     0x550     /* okno 64KB 0xA0000 dla VBE 1.2 banked */
+#define KCB_VESA_BPP    556
+#define KCB_VESA_PITCH  558
+#define KCB_VESA_BANKED 560
+#define KCB_VESA_BANKMODE 562
+#define KCB_VESA_GRANSH   564
+#define KCB_VESA_WINMASK  566
+#define KCB_VESA_DACVBE   568
+#define VBANK_LFB       0
+#define VBANK_VBE       1         /* INT 10h 4F05h */
+#define VBANK_WD        2         /* porty Paradise/WD PR0A */
 #define SCR_W           640
 #define SCR_H           480
 #define SCR_PITCH       (SCR_W * 3)
@@ -68,6 +79,22 @@ LPVOID API LockResource(WORD h);
 DWORD API SizeofResource(WORD hinst, WORD hres);
 WORD  API LoadLibrary(LPCSTR name);
 void  API OutputDebugString(LPCSTR s);
+WORD  API GetProfileInt(LPCSTR, LPCSTR, int);
+
+extern BYTE g_disp_bpp;
+extern BYTE g_hw_bpp;
+extern WORD g_hw_pitch;
+extern BYTE g_hw_banked;
+extern BYTE g_hw_bankmode;
+extern BYTE g_hw_gransh;
+extern BYTE g_hw_winmask;
+extern BYTE g_hw_dacvbe;
+extern WORD g_dac_gen;            /* zwiekszany przy kazdej zmianie g_dac_rgb */
+extern DWORD g_dac_rgb[256];
+
+/* Prywatne rozszerzenie StretchDIBits (WING.DLL): na ekranie 8bpp indeksy DIB to wprost
+ * sloty DAC (WinG z paleta identycznosciowa), bez mapowania przez tablice kolorow. */
+#define DIB_DEVIDX      0x8000
 
 /* ---- Typy obiektow ---- */
 #define OT_FREE    0
@@ -191,6 +218,8 @@ void  dc_lp2dp(DCOBJ __far *dc, int __far *x, int __far *y);
 int   dc_lenx(DCOBJ __far *dc, int v);
 int   dc_leny(DCOBJ __far *dc, int v);
 void  dc_effective_clip(DCOBJ __far *dc, RGNDATA16 __far *out);
+void  pal_idx_write(int x, int y, const BYTE __far *src, int n);
+void  pal_idx_flush(DCOBJ __far *dc, const DWORD *pal256);
 RGNDATA16 __far *rgn_ptr(WORD h);
 WORD  rgn_new(void);
 
@@ -212,6 +241,12 @@ DWORD mono_of(DWORD p);                /* kolor -> 0 / 0xFFFFFF */
 void  span_rop2(SURF __far *s, int y, int x0, int x1, DWORD c, WORD rop2);
 void  row_get(SURF __far *s, int x, int y, int n, DWORD *buf);
 void  row_put(SURF __far *s, int x, int y, int n, DWORD *buf);
+BYTE  gsurf_nearest(DWORD px);          /* 0x00RRGGBB -> najblizszy indeks DAC */
+void  row_put_idx(SURF __far *s, int x, int y, int n, const BYTE __far *idx);
+void  gsurf_init_screen(void);
+void  vga_dac_init(void);
+WORD  vga_dac_set_rgb(WORD start, WORD n, const BYTE __far *pal_entries);
+void  vga_dac_set_bgr(WORD start, WORD n, const BYTE __far *rgb_entries, WORD csize);
 void  bits_row(SURF __far *s, int y, int x, int xa, int xb, BYTE __far *bits, WORD step, DWORD c);
 DWORD rop3(BYTE rop, DWORD p, DWORD s, DWORD d);
 

@@ -4,6 +4,116 @@
 
 typedef struct { BYTE r, g, b, flags; } PALENTRY;
 
+static void vga_outb(WORD port, BYTE val);
+#pragma aux vga_outb = "out dx, al" parm [dx] [al];
+
+DWORD g_dac_rgb[256];
+WORD  g_dac_gen = 0;
+static BOOL g_dac_ready = FALSE;
+
+/* VBE 4F09h (BL=0 ustaw): ES:DI = tablica B,G,R,0 (6 bit). KERNEL kopiuje ja do bufora RM. */
+static WORD vbe_set_pal(WORD start, WORD n, BYTE __far *tab);
+#pragma aux vbe_set_pal = \
+    "push es"               \
+    "mov es, cx"            \
+    "mov cx, ax"            \
+    "mov ax, 0x4F09"        \
+    "xor bl, bl"            \
+    "int 0x10"              \
+    "pop es"                \
+    parm [dx] [ax] [cx di] value [ax] modify [ax bx cx dx si di];
+
+/* Wpisy [start, start+n) z g_dac_rgb do sprzetowego DAC */
+static void dac_upload(WORD start, WORD n)
+{
+    WORD i;
+    g_dac_gen++;
+    if (g_hw_bpp != 8 || !n) return;
+    if (g_hw_dacvbe) {
+        static BYTE tab[256 * 4];
+        for (i = 0; i < n; i++) {
+            DWORD px = g_dac_rgb[start + i];
+            tab[i * 4 + 0] = (BYTE)((px >> 2)  & 0x3F);
+            tab[i * 4 + 1] = (BYTE)((px >> 10) & 0x3F);
+            tab[i * 4 + 2] = (BYTE)((px >> 18) & 0x3F);
+            tab[i * 4 + 3] = 0;
+        }
+        if (vbe_set_pal(start, n, (BYTE __far *)tab) == 0x004F) return;
+        g_hw_dacvbe = 0;                           /* nie dziala: sprobuj portow VGA */
+    }
+    vga_outb(0x3C8, (BYTE)start);
+    for (i = 0; i < n; i++) {
+        DWORD px = g_dac_rgb[start + i];
+        vga_outb(0x3C9, (BYTE)((px >> 18) & 0x3F));
+        vga_outb(0x3C9, (BYTE)((px >> 10) & 0x3F));
+        vga_outb(0x3C9, (BYTE)((px >> 2)  & 0x3F));
+    }
+}
+
+void vga_dac_init(void)
+{
+    static const BYTE sys20[20][3] = {
+        {0,0,0},{128,0,0},{0,128,0},{128,128,0},{0,0,128},{128,0,128},{0,128,128},{192,192,192},
+        {192,220,192},{166,202,240},{255,251,240},{160,160,164},{128,128,128},{255,0,0},
+        {0,255,0},{255,255,0},{0,0,255},{255,0,255},{0,255,255},{255,255,255}
+    };
+    WORD i, r, g, b, idx = 10;
+    for (i = 0; i < 10; i++)
+        g_dac_rgb[i] = (DWORD)sys20[i][2] | ((DWORD)sys20[i][1] << 8) | ((DWORD)sys20[i][0] << 16);
+    for (r = 0; r < 6; r++)
+        for (g = 0; g < 6; g++)
+            for (b = 0; b < 6; b++, idx++)
+                g_dac_rgb[idx] = (DWORD)(b * 51) | ((DWORD)(g * 51) << 8) | ((DWORD)(r * 51) << 16);
+    for (; idx < 246; idx++) g_dac_rgb[idx] = 0;
+    for (i = 0; i < 10; i++)
+        g_dac_rgb[246 + i] = (DWORD)sys20[10 + i][2] | ((DWORD)sys20[10 + i][1] << 8) | ((DWORD)sys20[10 + i][0] << 16);
+    dac_upload(0, 256);
+    g_dac_ready = TRUE;
+}
+
+/* PALETTEENTRY (R,G,B,flags) -> DAC */
+WORD vga_dac_set_rgb(WORD start, WORD n, const BYTE __far *pal_entries)
+{
+    WORD i, changed = 0, lo = 0xFFFF, hi = 0;
+    if (start >= 256 || !n) return 0;
+    if (start + n > 256) n = 256 - start;
+    for (i = 0; i < n; i++) {
+        const BYTE __far *e = pal_entries + i * 4;
+        DWORD px = (DWORD)e[2] | ((DWORD)e[1] << 8) | ((DWORD)e[0] << 16);
+        if (!g_dac_ready || g_dac_rgb[start + i] != px) {
+            g_dac_rgb[start + i] = px;
+            changed++;
+            if (lo == 0xFFFF) lo = i;
+            hi = i;
+        }
+    }
+    g_dac_ready = TRUE;
+    if (changed) dac_upload(start + lo, hi - lo + 1);
+    return changed;
+}
+
+/* RGBQUAD/RGBTRIPLE (B,G,R[,0]) -> DAC */
+void vga_dac_set_bgr(WORD start, WORD n, const BYTE __far *rgb_entries, WORD csize)
+{
+    WORD i, changed = 0, lo = 0xFFFF, hi = 0;
+    if (g_hw_bpp != 8 || start >= 256 || !n || csize < 3) return;
+    if (start + n > 256) n = 256 - start;
+    for (i = 0; i < n; i++) {
+        const BYTE __far *c = rgb_entries + i * csize;
+        DWORD px = (DWORD)c[0] | ((DWORD)c[1] << 8) | ((DWORD)c[2] << 16);
+        if (!g_dac_ready || g_dac_rgb[start + i] != px) {
+            g_dac_rgb[start + i] = px;
+            changed++;
+            if (lo == 0xFFFF) lo = i;
+            hi = i;
+        }
+    }
+    g_dac_ready = TRUE;
+    if (changed) dac_upload(start + lo, hi - lo + 1);
+}
+
+static HPALETTE g_realized_pal = 0;   /* paleta ostatnio zrealizowana na ekranie 8bpp */
+
 /* ordinal 360 */
 HPALETTE API CreatePalette(WORD __far *lp)
 {
@@ -73,14 +183,67 @@ HPALETTE API GDISelectPalette(HDC hdc, HPALETTE h, BOOL bg)
     dc->pal = h;
     return o;
 }
-WORD API GDIRealizePalette(HDC hdc)  { (void)hdc; return 0; }
+WORD API GDIRealizePalette(HDC hdc)
+{
+    DCOBJ __far *dc = dc_get(hdc);
+    PALOBJ __far *po;
+    WORD n, changed;
+    if (g_disp_bpp != 8 || !dc || dc->is_mem || !dc->pal) return 0;
+    po = (PALOBJ __far *)obj_ptr(dc->pal, OT_PAL);
+    if (!po || !po->mem) return 0;
+    n = po->n > 256 ? 256 : po->n;
+    g_realized_pal = dc->pal;
+    changed = vga_dac_set_rgb(0, n, (const BYTE __far *)MK_FP(po->mem, 0));
+    /* W natywnym trybie 8bpp VGA RAMDAC (0x3C8/0x3C9) juz zaktualizowal ekran sprzetowo;
+     * w trybie emulacji na 24bpp przeliczamy bufor indeksow */
+    if (changed && g_hw_bpp != 8) pal_idx_flush(dc, g_dac_rgb);
+    return changed;
+}
 WORD API RealizeDefaultPalette(HDC hdc) { (void)hdc; return 0; }
-BOOL API AnimatePalette(HPALETTE h, WORD s, WORD n, LPVOID e) { (void)h; (void)s; (void)n; (void)e; return TRUE; }
+/* ordinal 367: zmiana wpisow palety + natychmiast w DAC, gdy paleta jest na ekranie
+ * (cykle kolorow / sciemnianie bez przerysowania: na 486 to jedyna szybka droga) */
+BOOL API AnimatePalette(HPALETTE h, WORD s, WORD n, LPVOID e)
+{
+    PALOBJ __far *p = (PALOBJ __far *)obj_ptr(h, OT_PAL);
+    PALENTRY __far *in = (PALENTRY __far *)e;
+    WORD i;
+    if (!p || !p->mem || !in || s >= p->n) return FALSE;
+    if (s + n > p->n) n = p->n - s;
+    for (i = 0; i < n; i++)
+        ((PALENTRY __far *)MK_FP(p->mem, 0))[s + i] = in[i];
+    if (g_disp_bpp == 8 && h == g_realized_pal && s < 256) {
+        if (s + n > 256) n = 256 - s;
+        vga_dac_set_rgb(s, n, (const BYTE __far *)in);
+    }
+    return TRUE;
+}
 BOOL API ResizePalette(HPALETTE h, WORD n) { (void)h; (void)n; return TRUE; }
 int  API UpdateColors(HDC hdc)       { (void)hdc; return 0; }
-WORD API GetNearestPaletteIndex(HPALETTE h, COLORREF c) { (void)h; (void)c; return 0; }
-/* ordinal 154: ekran true color - kolor dokladny */
-COLORREF API GetNearestColor(HDC hdc, COLORREF c) { (void)hdc; return c & 0xFFFFFFUL; }
+/* ordinal 370 */
+WORD API GetNearestPaletteIndex(HPALETTE h, COLORREF c)
+{
+    PALOBJ __far *p = (PALOBJ __far *)obj_ptr(h, OT_PAL);
+    PALENTRY __far *e;
+    DWORD best = 0xFFFFFFFFUL;
+    WORD i, bi = 0;
+    int r = (int)(c & 0xFF), g = (int)((c >> 8) & 0xFF), b = (int)((c >> 16) & 0xFF);
+    if (!p || !p->mem) return 0;
+    e = (PALENTRY __far *)MK_FP(p->mem, 0);
+    for (i = 0; i < p->n; i++) {
+        long dr = r - e[i].r, dg = g - e[i].g, db = b - e[i].b;
+        DWORD d = (DWORD)(dr * dr + dg * dg + db * db);
+        if (d < best) { best = d; bi = i; if (!d) break; }
+    }
+    return bi;
+}
+/* ordinal 154: true color - kolor dokladny; 8bpp - najblizszy kolor palety sprzetowej */
+COLORREF API GetNearestColor(HDC hdc, COLORREF c)
+{
+    (void)hdc;
+    if (g_disp_bpp == 8 && g_hw_bpp == 8 && !(c & 0xFF000000UL))
+        return px2rgb(g_dac_rgb[gsurf_nearest(rgb2px(c))]);
+    return c & 0xFFFFFFUL;
+}
 WORD API SetSystemPaletteUse(HDC hdc, WORD u) { (void)hdc; (void)u; return 1; }
 WORD API GetSystemPaletteUse(HDC hdc) { (void)hdc; return 1; }
 

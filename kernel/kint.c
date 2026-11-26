@@ -101,11 +101,82 @@ WORD int_dispatch_c(WORD vec, WORD ss, WORD sp)
     case 0x25:
     case 0x26:
         return absdisk(f, (BYTE)vec);
-    case 0x31:
-        dbg_puts("KERNEL: INT 31h (DPMI) AX="); dbg_hex(f->ax, 4); dbg_puts(" - brak\n");
-        f->flags |= CF_FLAG;
-        return 0;
+    case 0x31: {
+        extern WORD API AllocSelector(WORD);
+        extern WORD API FreeSelector(WORD);
+        extern WORD API AllocCStoDSAlias(WORD);
+        extern DWORD API GetSelectorBase(WORD);
+        extern WORD API SetSelectorBase(WORD, DWORD);
+        extern WORD API SetSelectorLimit(WORD, DWORD);
+        extern WORD API SelectorAccessRights(WORD, WORD, WORD);
+        f->flags &= ~CF_FLAG;
+        switch (f->ax) {
+        case 0x0000: { /* Allocate LDT Descriptors (CX count) */
+            WORD s = AllocSelector(0);
+            if (!s) { f->flags |= CF_FLAG; f->ax = 0x8011; }
+            else f->ax = s;
+            return 0;
+        }
+        case 0x0001: /* Free LDT Descriptor (BX) */
+            if (FreeSelector(f->bx)) { f->flags |= CF_FLAG; f->ax = 0x8022; }
+            return 0;
+        case 0x0002: { /* Segment to Descriptor (BX = real-mode seg) */
+            WORD s = AllocSelector(0);
+            if (!s) { f->flags |= CF_FLAG; f->ax = 0x8011; }
+            else {
+                SetSelectorBase(s, (DWORD)f->bx << 4);
+                SetSelectorLimit(s, 0xFFFFUL);
+                SelectorAccessRights(s, 1, 0x92);
+                f->ax = s;
+            }
+            return 0;
+        }
+        case 0x0003: /* Get Selector Increment Value */
+            f->ax = 8;
+            return 0;
+        case 0x0006: { /* Get Segment Base Address (BX -> CX:DX) */
+            DWORD b = GetSelectorBase(f->bx);
+            f->cx = HIWORD(b); f->dx = LOWORD(b);
+            return 0;
+        }
+        case 0x0007: /* Set Segment Base Address (BX, CX:DX) */
+            SetSelectorBase(f->bx, MAKELONG(f->dx, f->cx));
+            return 0;
+        case 0x0008: /* Set Segment Limit (BX, CX:DX) */
+            SetSelectorLimit(f->bx, MAKELONG(f->dx, f->cx));
+            return 0;
+        case 0x0009: /* Set Descriptor Access Rights (BX, CX) */
+            SelectorAccessRights(f->bx, 1, f->cx);
+            return 0;
+        case 0x000A: { /* Create Alias Descriptor (BX -> AX) */
+            WORD s = AllocCStoDSAlias(f->bx);
+            if (!s) { f->flags |= CF_FLAG; f->ax = 0x8011; }
+            else f->ax = s;
+            return 0;
+        }
+        default:
+            dbg_puts("KERNEL: INT 31h (DPMI) AX="); dbg_hex(f->ax, 4); dbg_puts(" - brak\n");
+            f->flags |= CF_FLAG;
+            return 0;
+        }
+    }
+    case 0x10:
+        if (f->ax == 0x4F09 && (f->bx & 0xFF) == 0 && f->cx && f->cx <= 256) {
+            /* VBE ustaw palete: tablica ES:DI (CX wpisow po 4 B) -> bufor RM */
+            WORD di = f->di;
+            r = rmregs();
+            frame_to_rm(f, r);
+            kmemcpy(MK_FP(SEL_RMBUF, RMBUF_DATA), MK_FP(f->es, f->di), f->cx * 4u);
+            r->es = KCBW(KCB_RMBUF_SEG);
+            r->di = RMBUF_DATA;
+            rm_int(0x10, r);
+            rm_to_frame(r, f);
+            f->di = di;                      /* DI apki bez zmian */
+            return 0;
+        }
+        goto reflect;
     default:
+    reflect:
         r = rmregs();
         frame_to_rm(f, r);
         rm_int((BYTE)vec, r);

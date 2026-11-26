@@ -77,8 +77,11 @@ shell.obj: shell.c
 module.obj: module.c module.h ne.h serial.h
 	$(WCC) -ml -q $< -fo=$@
 
+# serial.obj zaraz po loader.c: gdy serial_TEXT lezal na koncu pierwszej ramki kodu (~0xFF05..0xFFA7)
+# loader pod QEMU TCG (bez KVM) konczyl sie "Stack Overflow!" przed pierwszym wypisaniem na COM1
+# (pod KVM dzialal) - zalezne tylko od ukladu segmentow, nie od kodu.
 loader.exe: loader.c module.h ne.h pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj
-	$(WCL) -ml -l=dos -k8192 -fm=loader.map -q loader.c pm_call.obj serial.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
+	$(WCL) -ml -l=dos -k8192 -fm=loader.map -q loader.c serial.obj pm_call.obj pm_helpers.obj keyboard.obj mouse.obj rc_loader.obj shell.obj module.obj -fe=loader.exe
 
 # Baza sygnatur API Win16 (z .spec Wine) dla stubow niezaimplementowanych funkcji
 WIN16API.DB: tools/gen_apidb.py tools/imports.py
@@ -208,7 +211,8 @@ user/USER.EXE: $(UOBJS) user/user.lnk user/user_imp.lnk
 # Male DLL systemowe (dlls/): SHELL, KEYBOARD.DRV, TOOLHELP, DDEML, VER, MMSYSTEM, COMMDLG
 DLLCOMMON = dlls/w16lib.obj dlls/dllstub.obj kernel/rt386.obj
 DLLS = dlls/SHELL.DLL dlls/KEYBOARD.DRV dlls/TOOLHELP.DLL dlls/DDEML.DLL \
-       dlls/VER.DLL dlls/MMSYSTEM.DLL dlls/COMMDLG.DLL
+       dlls/VER.DLL dlls/MMSYSTEM.DLL dlls/COMMDLG.DLL dlls/DISPDIB.DLL \
+       dlls/WING.DLL
 
 dlls/%.obj: dlls/%.c dlls/w16.h
 	$(WCC) -ms -zu -zl -s -q -3 -ox $< -fo=$@
@@ -232,6 +236,8 @@ $(eval $(call DLL_RULE,DDEML.DLL,ddeml,DDEML))
 $(eval $(call DLL_RULE,VER.DLL,ver,VER))
 $(eval $(call DLL_RULE,MMSYSTEM.DLL,mmsystem,MMSYSTEM))
 $(eval $(call DLL_RULE,COMMDLG.DLL,commdlg,COMMDLG))
+$(eval $(call DLL_RULE,DISPDIB.DLL,dispdib,DISPDIB))
+$(eval $(call DLL_RULE,WING.DLL,wing,WING))
 
 dlls: $(DLLS)
 .PHONY: dlls
@@ -399,7 +405,7 @@ win16_example_app/Win1App.exe:
 	$(MAKE) -C win16_example_app
 
 # -------------------------------------------------------
-boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe $(CLOCK_EXE) $(CHARMAP_EXE) $(HEXVIEW_EXE) $(WIN31SS_SCR) $(I486SS_SCR) fdauto.bat win.bat fdconfig.sys $(FDBOOT)
+boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16_example_app/Win1App.exe $(CLOCK_EXE) $(CHARMAP_EXE) $(HEXVIEW_EXE) $(ICOVIEW_EXE) windir/ICOVIEW.ICO $(WIN31SS_SCR) $(I486SS_SCR) fdauto.bat win.bat fdconfig.sys $(FDBOOT)
 	cp $(FDBOOT) boot.img
 	mcopy -i boot.img -o fdconfig.sys               ::fdconfig.sys
 	mdel  -i boot.img ::fdauto.bat 2>/dev/null || true
@@ -417,6 +423,8 @@ boot.img: kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB win16
 	mcopy -i boot.img $(CLOCK_EXE)                  ::clock.exe
 	mcopy -i boot.img $(CHARMAP_EXE)                ::charmap.exe
 	mcopy -i boot.img $(HEXVIEW_EXE)                ::hexview.exe
+	mcopy -i boot.img $(ICOVIEW_EXE)                ::icoview.exe
+	mcopy -i boot.img windir/ICOVIEW.ICO            ::icoview.ico
 	mcopy -i boot.img $(WIN31SS_SCR)                ::win31ss.scr
 	mcopy -i boot.img $(I486SS_SCR)                 ::i486ss.scr
 	@echo "[OK] boot.img gotowy"
@@ -546,6 +554,7 @@ PAINT_EXE   = example_apps/paint/PAINT.EXE
 CLOCK_EXE   = example_apps/clock/CLOCK.EXE
 CHARMAP_EXE = example_apps/charmap/CHARMAP.EXE
 HEXVIEW_EXE = example_apps/hexview/HEXVIEW.EXE
+ICOVIEW_EXE = example_apps/icoview/ICOVIEW.EXE
 WIN31SS_SCR = example_apps/win31-screensaver/WIN31SS.SCR
 I486SS_SCR  = example_apps/i486-screensaver/I486SS.SCR
 
@@ -564,6 +573,9 @@ $(CHARMAP_EXE): example_apps/charmap/charmap.c example_apps/charmap/CHARMAP.rc e
 $(HEXVIEW_EXE): example_apps/hexview/hexview.c example_apps/hexview/HEXVIEW.rc example_apps/hexview/HEXVIEW.ICO
 	$(MAKE) -C example_apps/hexview
 
+$(ICOVIEW_EXE): example_apps/icoview/icoview.c example_apps/icoview/ICOVIEW.rc example_apps/icoview/ICOVIEW.ICO
+	$(MAKE) -C example_apps/icoview
+
 $(WIN31SS_SCR): example_apps/win31-screensaver/src/win31ss.c example_apps/win31-screensaver/src/win31ss.rc
 	$(MAKE) -C example_apps/win31-screensaver
 
@@ -572,6 +584,9 @@ $(I486SS_SCR): example_apps/i486-screensaver/src/i486ss.c example_apps/i486-scre
 
 windir/HEXVIEW.ICO: example_apps/hexview/gen_hexview_ico.py
 	python3 example_apps/hexview/gen_hexview_ico.py $@
+
+windir/ICOVIEW.ICO: example_apps/icoview/gen_icoview_ico.py
+	python3 example_apps/icoview/gen_icoview_ico.py $@
 
 windir/FREEDOS.ICO: tools/make_freedos_ico.py
 	python3 tools/make_freedos_ico.py
@@ -595,13 +610,13 @@ control.exe: control.c
 	$(WCL) -ms -zW -bt=windows -zq -l=windows -I$(WATCOM)/h -I$(WATCOM)/h/win control.c -fe=$@
 
 calmira.img: tools/make_bootable_hdd.py kernel.exe $(USER_BIN) $(GDI_BIN) $(DLLS) loader.exe WIN16API.DB \
-             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) $(CLOCK_EXE) $(CHARMAP_EXE) $(HEXVIEW_EXE) $(WIN31SS_SCR) $(I486SS_SCR) \
-             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/HEXVIEW.ICO windir/SCREENSV.ICO windir/MARIO.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
+             $(wildcard $(CALMIRA_DIR)/*.*) windir/WIN.INI windir/SYSTEM.INI $(NOTEPAD_EXE) $(PAINT_EXE) $(CLOCK_EXE) $(CHARMAP_EXE) $(HEXVIEW_EXE) $(ICOVIEW_EXE) $(WIN31SS_SCR) $(I486SS_SCR) \
+             control.exe windir/DOSPRMPT.PIF windir/FREEDOS.ICO windir/CLOCK.ICO windir/HEXVIEW.ICO windir/ICOVIEW.ICO windir/SCREENSV.ICO windir/MARIO.ICO windir/REG.TXT windir/CALMIRA.INI windir/START.INI \
              $(wildcard windir/*.BMP) $(wildcard games/mario/*.*) $(FDBOOT)
 	python3 tools/make_bootable_hdd.py --out=$@ --size=$(HDD_MB) --fdboot=$(FDBOOT) \
 	    --calmira-dir=$(CALMIRA_DIR) --wine-fonts=$(WINE_FONTS) \
 	    --user-bin=$(USER_BIN) --gdi-bin=$(GDI_BIN) --notepad-exe=$(NOTEPAD_EXE) --paint-exe=$(PAINT_EXE) \
-	    --clock-exe=$(CLOCK_EXE) --charmap-exe=$(CHARMAP_EXE) --hexview-exe=$(HEXVIEW_EXE) \
+	    --clock-exe=$(CLOCK_EXE) --charmap-exe=$(CHARMAP_EXE) --hexview-exe=$(HEXVIEW_EXE) --icoview-exe=$(ICOVIEW_EXE) \
 	    --screensaver-scr=$(WIN31SS_SCR) \
 	    --i486ss-scr=$(I486SS_SCR) \
 	    --mario-dir=games/mario

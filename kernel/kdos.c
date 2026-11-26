@@ -128,7 +128,8 @@ HFILE API _lopen(LPCSTR path, int mode)
 {
     RMREGS __far *r = rr(0x3D00 | (mode & 0xFF));
     r->dx = put_str(RMBUF_DATA, path);
-    if (rm_int21()) return HFILE_ERROR;
+    if (rm_int21()) { dbg_puts("KERNEL: _lopen FAIL '"); dbg_puts(path); dbg_puts("'\n"); return HFILE_ERROR; }
+    dbg_puts("KERNEL: _lopen OK '"); dbg_puts(path); dbg_puts("'\n");
     fh_add(r->ax);
     return (HFILE)r->ax;
 }

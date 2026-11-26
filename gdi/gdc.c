@@ -343,27 +343,27 @@ int API GetDeviceCaps(HDC hdc, int idx)
     case 6:   return 156;                 /* VERTSIZE mm */
     case 8:   return SCR_W;               /* HORZRES */
     case 10:  return SCR_H;               /* VERTRES */
-    case 12:  return mono ? 1 : 24;       /* BITSPIXEL */
+    case 12:  return mono ? 1 : g_disp_bpp; /* BITSPIXEL */
     case 14:  return 1;                   /* PLANES */
     case 16:  return -1;                  /* NUMBRUSHES */
     case 18:  return -1;                  /* NUMPENS */
     case 22:  return 0;                   /* NUMFONTS */
-    case 24:  return mono ? 2 : -1;       /* NUMCOLORS */
+    case 24:  return mono ? 2 : (g_disp_bpp == 8 ? 20 : -1); /* NUMCOLORS */
     case 26:  return sizeof(DCOBJ);       /* PDEVICESIZE */
     case 28:  return 0xFF;                /* CURVECAPS */
     case 30:  return 0xFE;                /* LINECAPS */
     case 32:  return 0xFF;                /* POLYGONALCAPS */
     case 34:  return 0x0004;              /* TEXTCAPS: TC_CP_STROKE */
     case 36:  return 1;                   /* CLIPCAPS */
-    case 38:  return 0x0001 | 0x0008 | 0x0010 | 0x0080 | 0x0200 | 0x0400 | 0x0800 | 0x2000;
+    case 38:  return 0x0001 | 0x0008 | 0x0010 | 0x0080 | (g_disp_bpp == 8 ? 0x0100 : 0) | 0x0200 | 0x0400 | 0x0800 | 0x2000;
     case 40:  return 36;                  /* ASPECTX */
     case 42:  return 36;                  /* ASPECTY */
     case 44:  return 51;                  /* ASPECTXY */
     case 88:  return 96;                  /* LOGPIXELSX */
     case 90:  return 96;                  /* LOGPIXELSY */
-    case 104: return 0;                   /* SIZEPALETTE */
-    case 106: return 0;                   /* NUMRESERVED */
-    case 108: return 24;                  /* COLORRES */
+    case 104: return g_disp_bpp == 8 ? 256 : 0; /* SIZEPALETTE */
+    case 106: return g_disp_bpp == 8 ? 20 : 0;  /* NUMRESERVED */
+    case 108: return g_disp_bpp == 8 ? 18 : 24; /* COLORRES */
     }
     return 0;
 }

@@ -3,12 +3,97 @@
 #include "gdi.h"
 
 /* ============================================================
- * Adresowanie: offset liniowy -> far ptr (ciag selektorow co 8 = 64KB)
+ * Adresowanie: offset liniowy -> far ptr (ciag selektorow co 8 = 64KB
+ * lub okno 0xA000 z przelaczaniem bankow VBE 1.2 dla kart SVGA z 1992 r.)
  * ============================================================ */
+static WORD g_cur_bank = 0xFFFF;
+
+/* VBE 4F05h: BX = okno (0=A, 1=B; BH=0 ustaw), DX = pozycja w jednostkach granularnosci.
+ * Z PM idzie przez softint -> KERNEL -> odbicie do trybu rzeczywistego. */
+static void vbe_set_win(WORD win, WORD pos);
+#pragma aux vbe_set_win = \
+    "mov ax, 0x4F05"        \
+    "int 0x10"              \
+    parm [bx] [dx] modify [ax bx cx dx si di];
+
+/* Paradise/WD90Cxx: PR0A (Graphics Controller 3CEh, indeks 09h), jednostki 4KB */
+static void wd_set_pr0a(BYTE pos);
+#pragma aux wd_set_pr0a = \
+    "mov ah, al"            \
+    "mov al, 0x09"          \
+    "mov dx, 0x3CE"         \
+    "out dx, ax"            \
+    parm [al] modify [ax dx];
+
+/* Okno 0xA000 pokazuje 64KB pamieci ekranu od (bank << 16) */
+static void set_bank(WORD bank)
+{
+    WORD pos = bank << g_hw_gransh;
+    if (g_hw_bankmode == VBANK_WD) {
+        wd_set_pr0a((BYTE)pos);
+    } else {
+        if (g_hw_winmask & 1) vbe_set_win(0, pos);
+        if (g_hw_winmask & 2) vbe_set_win(1, pos);
+    }
+    g_cur_bank = bank;
+}
+
 static BYTE __far *addr(SURF __far *s, DWORD off)
 {
+    if (s->sel == SEL_VESA_BASE && g_hw_banked) {
+        WORD bank = (WORD)(off >> 16);
+        if (bank != g_cur_bank) set_bank(bank);
+        return (BYTE __far *)MK_FP(SEL_RM_A000, (WORD)off);
+    }
     return (BYTE __far *)MK_FP(s->sel + (WORD)(off >> 16) * 8, (WORD)off);
 }
+
+/* Najblizszy kolor palety sprzetowej: pelne przeszukanie 256 wpisow to ~3000 instrukcji,
+ * wiec wyniki trzymamy w malym cache (direct-mapped), uniewaznianym przez g_dac_gen. */
+#define NC_SIZE 256
+static DWORD g_nc_px[NC_SIZE];
+static BYTE  g_nc_idx[NC_SIZE];
+static BYTE  g_nc_ok[NC_SIZE];
+static WORD  g_nc_gen = 0xFFFF;
+
+static BYTE dac_search(DWORD px)
+{
+    int r = (int)((px >> 16) & 0xFF), g = (int)((px >> 8) & 0xFF), b = (int)(px & 0xFF);
+    DWORD best = 0xFFFFFFFFUL;
+    WORD i, bi = 0;
+    for (i = 0; i < 256; i++) {
+        DWORD c = g_dac_rgb[i];
+        int dr, dg, db;
+        DWORD d;
+        if (c == px) return (BYTE)i;
+        dr = r - (int)((c >> 16) & 0xFF);
+        dg = g - (int)((c >> 8) & 0xFF);
+        db = b - (int)(c & 0xFF);
+        d = (DWORD)((long)dr * dr + (long)dg * dg + (long)db * db);
+        if (d < best) { best = d; bi = i; }
+    }
+    return (BYTE)bi;
+}
+
+static BYTE dac_nearest(DWORD px)
+{
+    WORD h;
+    px &= 0xFFFFFFUL;
+    if (g_nc_gen != g_dac_gen) {
+        WORD i;
+        for (i = 0; i < NC_SIZE; i++) g_nc_ok[i] = 0;
+        g_nc_gen = g_dac_gen;
+    }
+    h = (WORD)((px ^ (px >> 8) ^ (px >> 16)) & (NC_SIZE - 1));
+    if (!g_nc_ok[h] || g_nc_px[h] != px) {
+        g_nc_px[h] = px;
+        g_nc_idx[h] = dac_search(px);
+        g_nc_ok[h] = 1;
+    }
+    return g_nc_idx[h];
+}
+
+BYTE gsurf_nearest(DWORD px) { return dac_nearest(px); }
 
 /* y*pitch bez wolania __U4M (pitch < 64KB w praktyce zawsze) */
 DWORD mul16(WORD a, WORD b);
@@ -23,6 +108,7 @@ static DWORD row_off(SURF __far *s, int y)
 /* Ile calych pikseli miesci sie do konca okna 64KB (bez dzielenia DWORD: __U4D) */
 #define ROOM32(lo) ((lo) ? (WORD)(0 - (lo)) >> 2 : 0x4000U)
 #define ROOM24(lo) ((lo) ? (WORD)(0 - (lo)) / 3 : 21845U)
+#define ROOM8(lo)  ((lo) ? (WORD)(0 - (lo)) : 0xFFFFU)
 #define MUL3(n)    (((DWORD)(n) << 1) + (DWORD)(n))
 
 DWORD rgb2px(COLORREF c)
@@ -49,6 +135,10 @@ DWORD px_get(SURF __far *s, int x, int y)
         off = row_off(s, y) + ((DWORD)x << 2);
         return *(DWORD __far *)addr(s, off) & 0xFFFFFFUL;
     }
+    if (s->bpp == 8) {
+        off = row_off(s, y) + (DWORD)x;
+        return g_dac_rgb[*addr(s, off)];
+    }
     off = row_off(s, y) + MUL3(x);
     if ((WORD)off <= 0xFFFD) {
         BYTE __far *p = addr(s, off);
@@ -64,6 +154,11 @@ void px_put(SURF __far *s, int x, int y, DWORD c)
         if (s->mono) c = mono_of(c);
         off = row_off(s, y) + ((DWORD)x << 2);
         *(DWORD __far *)addr(s, off) = c;
+        return;
+    }
+    if (s->bpp == 8) {
+        off = row_off(s, y) + (DWORD)x;
+        *addr(s, off) = dac_nearest(c);
         return;
     }
     off = row_off(s, y) + MUL3(x);
@@ -91,6 +186,17 @@ void row_get(SURF __far *s, int x, int y, int n, DWORD *buf)
             int k = (WORD)n < room ? n : (int)room;
             for (i = 0; i < k; i++) buf[i] = p[i] & 0xFFFFFFUL;
             buf += k; n -= k; off += (DWORD)k << 2;
+        }
+        return;
+    }
+    if (s->bpp == 8) {
+        off = row_off(s, y) + (DWORD)x;
+        while (n > 0) {
+            WORD room = ROOM8((WORD)off);
+            BYTE __far *p = addr(s, off);
+            int k = (WORD)n < room ? n : (int)room;
+            for (i = 0; i < k; i++) buf[i] = g_dac_rgb[p[i]];
+            buf += k; n -= k; off += (DWORD)k;
         }
         return;
     }
@@ -127,6 +233,17 @@ void row_put(SURF __far *s, int x, int y, int n, DWORD *buf)
         }
         return;
     }
+    if (s->bpp == 8) {
+        off = row_off(s, y) + (DWORD)x;
+        while (n > 0) {
+            WORD room = ROOM8((WORD)off);
+            BYTE __far *p = addr(s, off);
+            int k = (WORD)n < room ? n : (int)room;
+            for (i = 0; i < k; i++) p[i] = dac_nearest(buf[i]);
+            buf += k; n -= k; off += (DWORD)k;
+        }
+        return;
+    }
     off = row_off(s, y) + MUL3(x);
     while (n > 0) {
         WORD room = ROOM24((WORD)off);
@@ -144,6 +261,35 @@ void row_put(SURF __far *s, int x, int y, int n, DWORD *buf)
             }
             buf += k; n -= k; off += MUL3(k);
         }
+    }
+}
+
+/* Bezposredni zapis surowych indeksow 8bpp -> VESA 8bpp (LFB lub banked 0xA000) */
+void row_put_idx(SURF __far *s, int x, int y, int n, const BYTE __far *idx)
+{
+    DWORD off = row_off(s, y) + (DWORD)x;
+    int i;
+    while (n > 0) {
+        WORD room = ROOM8((WORD)off);
+        BYTE __far *p = addr(s, off);
+        int k = (WORD)n < room ? n : (int)room;
+        for (i = 0; i < k; i++) p[i] = idx[i];
+        idx += k; n -= k; off += (DWORD)k;
+    }
+}
+
+/* Jednolita linia na ekranie 8bpp */
+static void fill8(SURF __far *s, int x, int y, int n, DWORD c)
+{
+    DWORD off = row_off(s, y) + (DWORD)x;
+    BYTE idx = dac_nearest(c);
+    int i;
+    while (n > 0) {
+        WORD room = ROOM8((WORD)off);
+        BYTE __far *p = addr(s, off);
+        int k = (WORD)n < room ? n : (int)room;
+        for (i = 0; i < k; i++) p[i] = idx;
+        n -= k; off += (DWORD)k;
     }
 }
 
@@ -184,6 +330,9 @@ void bits_row(SURF __far *s, int y, int x, int xa, int xb, BYTE __far *bits, WOR
     if (s->bpp == 32) {
         off0 = row_off(s, y) + ((DWORD)xa << 2);
         off1 = off0 + ((DWORD)(end - i) << 2) - 1;
+    } else if (s->bpp == 8) {
+        off0 = row_off(s, y) + (DWORD)xa;
+        off1 = off0 + (DWORD)(end - i) - 1;
     } else {
         off0 = row_off(s, y) + MUL3(xa);
         off1 = off0 + MUL3(end - i) - 1;
@@ -199,6 +348,13 @@ void bits_row(SURF __far *s, int y, int x, int xa, int xb, BYTE __far *bits, WOR
         DWORD __far *p = (DWORD __far *)addr(s, off0);
         for (; i < end; i++, p++) {
             if (b & m) *p = c;
+            if (!(m >>= 1)) { m = 0x80; bp += step; if (i + 1 < end) b = *bp; }
+        }
+    } else if (s->bpp == 8) {
+        BYTE __far *p = addr(s, off0);
+        BYTE idx = dac_nearest(c);
+        for (; i < end; i++, p++) {
+            if (b & m) *p = idx;
             if (!(m >>= 1)) { m = 0x80; bp += step; if (i + 1 < end) b = *bp; }
         }
     } else {
@@ -254,7 +410,11 @@ void span_rop2(SURF __far *s, int y, int x0, int x1, DWORD c, WORD rop2)
         }
         return;
     }
-    if (rop2 == 13) { fill24(s, x0, y, x1 - x0, c); return; }
+    if (rop2 == 13) {
+        if (s->bpp == 8) fill8(s, x0, y, x1 - x0, c);
+        else fill24(s, x0, y, x1 - x0, c);
+        return;
+    }
     while (x0 < x1) {
         int k = x1 - x0 > 128 ? 128 : x1 - x0, i;
         row_get(s, x0, y, k, line);
@@ -311,8 +471,8 @@ BOOL surf_of_dc(DCOBJ __far *dc, SURF __far *s)
         s->w = b->w; s->h = b->h; s->pitch = (DWORD)b->w << 2;
         return TRUE;
     }
-    s->sel = SEL_VESA_BASE; s->bpp = 24; s->mono = 0;
-    s->w = SCR_W; s->h = SCR_H; s->pitch = SCR_PITCH;
+    s->sel = SEL_VESA_BASE; s->bpp = g_hw_bpp; s->mono = 0;
+    s->w = SCR_W; s->h = SCR_H; s->pitch = g_hw_pitch;
     return TRUE;
 }
 
@@ -325,6 +485,7 @@ static BYTE  g_cxor[CUR_MAX * CUR_MAX / 8];    /* 1 = bialy (gdy AND=0) / odwroc
 static int   g_cw = 16, g_ch = 16, g_chx, g_chy;
 static int   g_cx = SCR_W / 2, g_cy = SCR_H / 2;
 static DWORD g_cbg[CUR_MAX * CUR_MAX];
+static BYTE  g_cbg8[CUR_MAX * CUR_MAX];
 static int   g_cbx, g_cby;                     /* lewy-gorny rog zapisanego tla */
 static BOOL  g_cdrawn, g_chave, g_cexcl;
 static int   g_cshow = 0;                      /* >= 0 widoczny */
@@ -349,6 +510,17 @@ static void cur_default(void)
 
 static SURF g_scr = { SEL_VESA_BASE, 24, 0, SCR_W, SCR_H, SCR_PITCH };
 
+void gsurf_init_screen(void)
+{
+    g_scr.sel = SEL_VESA_BASE;
+    g_scr.bpp = g_hw_bpp;
+    g_scr.mono = 0;
+    g_scr.w = SCR_W;
+    g_scr.h = SCR_H;
+    g_scr.pitch = g_hw_pitch;
+    g_cur_bank = 0xFFFF;
+}
+
 /* Wiersze kursora przyciete do ekranu: [*x0,*x1) w wsp. ekranu; FALSE = poza ekranem */
 static BOOL cur_clip(int __far *x0, int __far *x1)
 {
@@ -365,7 +537,11 @@ static void cur_erase(void)
         for (y = 0; y < g_ch; y++) {
             int sy = g_cby + y;
             if (sy < 0 || sy >= SCR_H) continue;
-            row_put((SURF __far *)&g_scr, x0, sy, x1 - x0, &g_cbg[y * CUR_MAX + (x0 - g_cbx)]);
+            if (g_scr.bpp == 8)
+                row_put_idx((SURF __far *)&g_scr, x0, sy, x1 - x0,
+                            (const BYTE __far *)&g_cbg8[y * CUR_MAX + (x0 - g_cbx)]);
+            else
+                row_put((SURF __far *)&g_scr, x0, sy, x1 - x0, &g_cbg[y * CUR_MAX + (x0 - g_cbx)]);
         }
     g_cdrawn = FALSE;
 }
@@ -373,26 +549,49 @@ static void cur_erase(void)
 static void cur_draw(void)
 {
     static DWORD line[CUR_MAX];
+    static BYTE  line8[CUR_MAX];
     int x, y, x0, x1;
     if (g_cdrawn || g_cshow < 0 || !g_chave) return;
     g_cbx = g_cx - g_chx; g_cby = g_cy - g_chy;
-    if (cur_clip((int __far *)&x0, (int __far *)&x1))
-        for (y = 0; y < g_ch; y++) {
-            int sy = g_cby + y;
-            DWORD *bg = &g_cbg[y * CUR_MAX + (x0 - g_cbx)];
-            if (sy < 0 || sy >= SCR_H) continue;
-            row_get((SURF __far *)&g_scr, x0, sy, x1 - x0, bg);
-            for (x = x0; x < x1; x++) {
-                int bit = y * CUR_MAX + (x - g_cbx);
-                BYTE a = (BYTE)((g_cand[bit >> 3] >> (7 - (bit & 7))) & 1);
-                BYTE xo = (BYTE)((g_cxor[bit >> 3] >> (7 - (bit & 7))) & 1);
-                DWORD v = bg[x - x0];
-                if (a) { if (xo) v ^= 0xFFFFFFUL; }
-                else v = xo ? 0xFFFFFFUL : 0;
-                line[x - x0] = v;
+    if (cur_clip((int __far *)&x0, (int __far *)&x1)) {
+        if (g_scr.bpp == 8) {
+            BYTE idx_blk = dac_nearest(0), idx_wht = dac_nearest(0xFFFFFFUL);
+            for (y = 0; y < g_ch; y++) {
+                int sy = g_cby + y;
+                BYTE *bg8 = &g_cbg8[y * CUR_MAX + (x0 - g_cbx)];
+                DWORD off;
+                if (sy < 0 || sy >= SCR_H) continue;
+                off = row_off((SURF __far *)&g_scr, sy) + (DWORD)x0;
+                for (x = x0; x < x1; x++) {
+                    int bit = y * CUR_MAX + (x - g_cbx);
+                    BYTE a = (BYTE)((g_cand[bit >> 3] >> (7 - (bit & 7))) & 1);
+                    BYTE xo = (BYTE)((g_cxor[bit >> 3] >> (7 - (bit & 7))) & 1);
+                    BYTE orig = *addr((SURF __far *)&g_scr, off + (DWORD)(x - x0));
+                    bg8[x - x0] = orig;
+                    if (a) line8[x - x0] = xo ? (BYTE)(orig ^ 0xFF) : orig;
+                    else   line8[x - x0] = xo ? idx_wht : idx_blk;
+                }
+                row_put_idx((SURF __far *)&g_scr, x0, sy, x1 - x0, (const BYTE __far *)line8);
             }
-            row_put((SURF __far *)&g_scr, x0, sy, x1 - x0, line);
+        } else {
+            for (y = 0; y < g_ch; y++) {
+                int sy = g_cby + y;
+                DWORD *bg = &g_cbg[y * CUR_MAX + (x0 - g_cbx)];
+                if (sy < 0 || sy >= SCR_H) continue;
+                row_get((SURF __far *)&g_scr, x0, sy, x1 - x0, bg);
+                for (x = x0; x < x1; x++) {
+                    int bit = y * CUR_MAX + (x - g_cbx);
+                    BYTE a = (BYTE)((g_cand[bit >> 3] >> (7 - (bit & 7))) & 1);
+                    BYTE xo = (BYTE)((g_cxor[bit >> 3] >> (7 - (bit & 7))) & 1);
+                    DWORD v = bg[x - x0];
+                    if (a) { if (xo) v ^= 0xFFFFFFUL; }
+                    else v = xo ? 0xFFFFFFUL : 0;
+                    line[x - x0] = v;
+                }
+                row_put((SURF __far *)&g_scr, x0, sy, x1 - x0, line);
+            }
         }
+    }
     g_cdrawn = TRUE;
 }
 

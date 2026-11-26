@@ -92,72 +92,372 @@ done:
 }
 
 /* ============================================================
- * VESA
+ * Grafika 640x480: VBE (LFB albo okno 0xA000 z bankami) lub natywny WD/Paradise
+ *
+ * Kolejnosc wyboru (WIN.INI [display]):
+ *   bpp=8      -> 640x480x8 (paleta sprzetowa), fallback: truecolor
+ *   bpp=24     -> 640x480 truecolor (24bpp, albo 32bpp gdy karta nie ma 24bpp), fallback: 8bpp
+ *   banked=1   -> wymus okno 0xA000 nawet gdy jest LFB (test sciezki z 1992 r.)
+ *   bank=auto|vbe|wd -> sposob przelaczania bankow (auto: porty WD gdy karta Paradise/WD)
+ *
+ * Tryb ze stalym numerem (0x101/0x112) nie wystarcza: od VBE 2.0 numery trybow
+ * sa dowolne (Intel: 0x112 = 32bpp), wiec szukamy po liscie trybow i MIB.
+ * VBE 1.2 (WD90C24 z 1994): okno 64KB z granularnoscia 4KB -> pozycja okna
+ * w jednostkach granularnosci, nie w 64KB.
  * ============================================================ */
-unsigned long  g_lfb_phys   = 0;   /* eksport do pm_call.asm */
-unsigned short g_vesa_pitch = 0;
-unsigned long  g_font_phys  = 0;   /* adres fizyczny tablicy fontow 8x16 (256*16 B) */
+unsigned long  g_lfb_phys       = 0;   /* eksport do pm_call.asm (0 = brak LFB) */
+unsigned short g_vesa_pitch     = 0;
+unsigned short g_vesa_mode      = 0x0112;
+unsigned short g_vesa_bpp       = 24;  /* 8, 24 albo 32 */
+unsigned short g_vesa_banked    = 0;
+unsigned short g_vesa_bankmode  = 0;   /* VBANK_* */
+unsigned short g_vesa_granshift = 0;   /* pozycja okna = (offset >> 16) << granshift */
+unsigned short g_vesa_winmask   = 1;   /* okna przelaczane przy zmianie banku: bit0=A, bit1=B */
+unsigned short g_vesa_dacvbe    = 0;   /* 1: DAC nie-VGA, paleta tylko przez 4F09h */
+unsigned long  g_font_phys      = 0;   /* adres fizyczny tablicy fontow 8x16 (256*16 B) */
+
+static unsigned short g_vbe_ver = 0;   /* 0 = brak VBE */
+static unsigned long  g_vbe_caps = 0;
+static unsigned short g_vbe_vram_kb = 0;
+static unsigned short g_vbe_modes[96];
+static int            g_vbe_nmodes = 0;
+static int            g_is_paradise = 0;
+
+typedef struct {
+    unsigned short attr, pitch, xres, yres, bpp, model;
+    unsigned char  win_a, win_b;
+    unsigned short gran_kb, size_kb, seg_a, seg_b;
+    unsigned long  lfb;
+} VMODEINFO;
+
+static void read_display_ini(int *want_bpp, int *force_banked, int *bank_pref)
+{
+    FILE *f;
+    char line[128];
+    int in_disp = 0;
+    *want_bpp = 24;
+    *force_banked = 0;
+    *bank_pref = 0;            /* 0=auto 1=vbe 2=wd */
+    f = fopen("C:\\WINDOWS\\WIN.INI", "r");
+    if (!f) f = fopen("WIN.INI", "r");
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '[') {
+            in_disp = (strnicmp(p, "[display]", 9) == 0);
+            continue;
+        }
+        if (!in_disp) continue;
+        if (strnicmp(p, "bpp=", 4) == 0) {
+            int v = atoi(p + 4);
+            if (v == 8 || v == 24 || v == 32) *want_bpp = v == 32 ? 24 : v;
+        } else if (strnicmp(p, "banked=", 7) == 0) {
+            *force_banked = atoi(p + 7) != 0;
+        } else if (strnicmp(p, "bank=", 5) == 0) {
+            if (strnicmp(p + 5, "vbe", 3) == 0) *bank_pref = 1;
+            else if (strnicmp(p + 5, "wd", 2) == 0) *bank_pref = 2;
+        }
+    }
+    fclose(f);
+}
+
+/* Paleta startowa 8bpp: 10 kolorow systemowych, kostka 6x6x6, czern, 10 kolorow systemowych */
+static void dac_default(unsigned char *rgb /* 768 */)
+{
+    static const unsigned char sys20[20][3] = {
+        {0,0,0},{128,0,0},{0,128,0},{128,128,0},{0,0,128},{128,0,128},{0,128,128},{192,192,192},
+        {192,220,192},{166,202,240},{255,251,240},{160,160,164},{128,128,128},{255,0,0},
+        {0,255,0},{255,255,0},{0,0,255},{255,0,255},{0,255,255},{255,255,255}
+    };
+    int i, r, g, b, k = 10;
+    memset(rgb, 0, 768);
+    for (i = 0; i < 10; i++) memcpy(rgb + i * 3, sys20[i], 3);
+    for (r = 0; r < 6; r++)
+        for (g = 0; g < 6; g++)
+            for (b = 0; b < 6; b++, k++) {
+                rgb[k * 3 + 0] = (unsigned char)(r * 51);
+                rgb[k * 3 + 1] = (unsigned char)(g * 51);
+                rgb[k * 3 + 2] = (unsigned char)(b * 51);
+            }
+    for (i = 0; i < 10; i++) memcpy(rgb + (246 + i) * 3, sys20[10 + i], 3);
+}
+
+static void vga_init_dac8(void)
+{
+    static unsigned char rgb[768];
+    int i;
+    dac_default(rgb);
+    if (g_vesa_dacvbe) {
+        /* DAC nie zgodny z VGA: VBE 4F09h, wpisy B,G,R,0 (6 bit) */
+        unsigned seg;
+        if (_dos_allocmem(64, &seg) == 0) {
+            unsigned char __far *t = MK_FP(seg, 0);
+            union REGS r; struct SREGS s;
+            for (i = 0; i < 256; i++) {
+                t[i * 4 + 0] = rgb[i * 3 + 2] >> 2;
+                t[i * 4 + 1] = rgb[i * 3 + 1] >> 2;
+                t[i * 4 + 2] = rgb[i * 3 + 0] >> 2;
+                t[i * 4 + 3] = 0;
+            }
+            r.x.ax = 0x4F09; r.h.bl = 0; r.x.cx = 256; r.x.dx = 0; r.x.di = 0;
+            segread(&s); s.es = seg;
+            int86x(0x10, &r, &r, &s);
+            _dos_freemem(seg);
+            if (r.x.ax == 0x004F) return;
+            kprintf("VESA: 4F09h failed (ax=0x%04X), DAC przez porty\n", r.x.ax);
+            g_vesa_dacvbe = 0;
+        }
+    }
+    outp(0x3C8, 0);
+    for (i = 0; i < 768; i++) outp(0x3C9, rgb[i] >> 2);
+}
+
+/* Karta Paradise/Western Digital: sygnatura "VGA=" pod C000:007D */
+static int detect_paradise(void)
+{
+    unsigned char __far *p = MK_FP(0xC000, 0x007D);
+    return p[0] == 'V' && p[1] == 'G' && p[2] == 'A' && p[3] == '=';
+}
+
+/* WD90Cxx: odblokuj PR0-PR4, wylacz PR0B (jedno okno 64KB @A000 sterowane PR0A), bank 0 */
+static void wd_setup_bank(void)
+{
+    unsigned char pr1;
+    outp(0x3CE, 0x0F); outp(0x3CF, 0x05);          /* PR5: unlock PR0..PR4 */
+    outp(0x3CE, 0x0B); pr1 = (unsigned char)inp(0x3CF);
+    outp(0x3CF, pr1 & ~0x08);                     /* PR1 bit3=0: PR0B wylaczony */
+    outp(0x3CE, 0x09); outp(0x3CF, 0x00);          /* PR0A = 0 */
+    outp(0x3CE, 0x0A); outp(0x3CF, 0x00);          /* PR0B = 0 */
+}
+
+static void vbe_probe(void)
+{
+    union REGS r; struct SREGS s;
+    unsigned seg;
+    unsigned char __far *ci;
+    unsigned short __far *ml;
+    g_vbe_ver = 0; g_vbe_nmodes = 0; g_vbe_caps = 0;
+    if (_dos_allocmem(32, &seg) != 0) return;   /* 512 B */
+    ci = MK_FP(seg, 0);
+    _fmemset(ci, 0, 512);
+    _fmemcpy(ci, "VBE2", 4);                       /* prosba o blok VBE 2.0+ */
+    r.x.ax = 0x4F00; r.x.di = 0;
+    segread(&s); s.es = seg;
+    int86x(0x10, &r, &r, &s);
+    if (r.x.ax == 0x004F && _fmemcmp(ci, "VESA", 4) == 0) {
+        g_vbe_ver     = *(unsigned short __far *)(ci + 4);
+        g_vbe_caps    = *(unsigned long  __far *)(ci + 0x0A);
+        g_vbe_vram_kb = *(unsigned short __far *)(ci + 0x12) * 64u;
+        ml = *(unsigned short __far * __far *)(ci + 0x0E);
+        if (ml) {
+            while (*ml != 0xFFFF && g_vbe_nmodes < (int)(sizeof(g_vbe_modes) / 2))
+                g_vbe_modes[g_vbe_nmodes++] = *ml++;
+        }
+        kprintf("VBE %u.%u caps=%08lX VRAM=%uKB trybow=%d\n", g_vbe_ver >> 8, g_vbe_ver & 0xFF,
+                g_vbe_caps, g_vbe_vram_kb, g_vbe_nmodes);
+    } else {
+        kprintf("VBE: brak (4F00h ax=0x%04X)\n", r.x.ax);
+    }
+    _dos_freemem(seg);
+}
+
+static int vbe_mode_info(unsigned short mode, VMODEINFO *mi)
+{
+    union REGS r; struct SREGS s;
+    unsigned seg;
+    unsigned char __far *m;
+    if (_dos_allocmem(16, &seg) != 0) return 0;   /* 256 B */
+    m = MK_FP(seg, 0);
+    _fmemset(m, 0, 256);
+    r.x.ax = 0x4F01; r.x.cx = mode; r.x.di = 0;
+    segread(&s); s.es = seg;
+    int86x(0x10, &r, &r, &s);
+    if (r.x.ax != 0x004F) { _dos_freemem(seg); return 0; }
+    mi->attr    = *(unsigned short __far *)(m + 0x00);
+    mi->win_a   = m[0x02];
+    mi->win_b   = m[0x03];
+    mi->gran_kb = *(unsigned short __far *)(m + 0x04);
+    mi->size_kb = *(unsigned short __far *)(m + 0x06);
+    mi->seg_a   = *(unsigned short __far *)(m + 0x08);
+    mi->seg_b   = *(unsigned short __far *)(m + 0x0A);
+    mi->pitch   = *(unsigned short __far *)(m + 0x10);
+    mi->xres    = *(unsigned short __far *)(m + 0x12);
+    mi->yres    = *(unsigned short __far *)(m + 0x14);
+    mi->bpp     = m[0x19];
+    mi->model   = m[0x1B];
+    mi->lfb     = *(unsigned long  __far *)(m + 0x28);
+    _dos_freemem(seg);
+    if (!(mi->attr & 0x0002)) {                    /* VBE 1.0: brak pol rozszerzonych */
+        mi->xres = 640; mi->yres = 480;
+        if (mode == 0x0101) { mi->bpp = 8;  mi->model = 4; }
+        else if (mode == 0x0112) { mi->bpp = 24; mi->model = 6; }
+        else return 0;
+    }
+    if (!mi->pitch) mi->pitch = mi->xres * ((mi->bpp + 7) / 8);
+    return 1;
+}
+
+/* Okno do przelaczania bankow; 0 = tryb nie nadaje sie do pracy z oknem 0xA000 */
+static int vbe_pick_window(const VMODEINFO *mi)
+{
+    unsigned short g;
+    int sh = 0;
+    if (mi->attr & 0x0040) return 0;               /* VBE 2.0: brak trybu okienkowego */
+    if ((mi->win_a & 7) == 7 && mi->seg_a == 0xA000)      g_vesa_winmask = 1;
+    else if ((mi->win_b & 7) == 7 && mi->seg_b == 0xA000) g_vesa_winmask = 2;
+    else if ((mi->win_a & 1) && (mi->win_b & 1) && mi->seg_a == 0xA000 && mi->seg_b == 0xA000 &&
+             ((mi->win_a | mi->win_b) & 6) == 6)  g_vesa_winmask = 3; /* osobne R i W */
+    else return 0;
+    if (mi->size_kb < 64 || !mi->gran_kb || mi->gran_kb > 64) return 0;
+    for (g = mi->gran_kb; g < 64; g <<= 1) sh++;
+    if (g != 64) return 0;                          /* granularnosc nie potega 2 */
+    g_vesa_granshift = (unsigned short)sh;
+    return 1;
+}
+
+/* Znajdz tryb 640x480 o glebi bpp (8 -> model 4 packed, 24/32 -> model 6 direct) */
+static int vbe_find_mode(unsigned short bpp, unsigned short *mode, VMODEINFO *mi)
+{
+    unsigned short pref = bpp == 8 ? 0x0101 : 0x0112;
+    int i;
+    if (vbe_mode_info(pref, mi) && mi->xres == 640 && mi->yres == 480 && mi->bpp == bpp &&
+        (mi->attr & 0x11) == 0x11) { *mode = pref; return 1; }
+    for (i = 0; i < g_vbe_nmodes; i++) {
+        unsigned short m = g_vbe_modes[i];
+        if (!vbe_mode_info(m, mi)) continue;
+        if ((mi->attr & 0x11) != 0x11) continue;   /* obslugiwany + graficzny */
+        if (mi->xres != 640 || mi->yres != 480 || mi->bpp != bpp) continue;
+        if (bpp == 8 ? mi->model != 4 : mi->model != 6) continue;
+        *mode = m;
+        return 1;
+    }
+    return 0;
+}
+
+static int vbe_set_mode(unsigned short bpp, int force_banked, int bank_pref)
+{
+    union REGS r;
+    VMODEINFO mi;
+    unsigned short mode;
+    int lfb_ok, win_ok;
+    if (!g_vbe_ver || !vbe_find_mode(bpp, &mode, &mi)) return 0;
+    /* 32bpp: GDI ma 15 okien 64KB na ekran (960KB) */
+    if ((unsigned long)mi.pitch * 480UL > 15UL * 65536UL) {
+        kprintf("VESA: tryb 0x%04X %ubpp pitch=%u za duzy\n", mode, bpp, mi.pitch);
+        return 0;
+    }
+    lfb_ok = g_vbe_ver >= 0x0200 && (mi.attr & 0x0080) && mi.lfb && !force_banked;
+    win_ok = vbe_pick_window(&mi);
+    if (!lfb_ok && !win_ok) {
+        kprintf("VESA: tryb 0x%04X bez LFB i bez okna 64KB @A000 (A=%02X B=%02X gran=%u size=%u)\n",
+                mode, mi.win_a, mi.win_b, mi.gran_kb, mi.size_kb);
+        return 0;
+    }
+    r.x.ax = 0x4F02;
+    r.x.bx = mode;                                 /* najpierw okienkowo (shell w RM) */
+    int86(0x10, &r, &r);
+    if (r.x.ax != 0x004F) {
+        kprintf("VESA: 4F02h tryb 0x%04X failed (ax=0x%04X)\n", mode, r.x.ax);
+        return 0;
+    }
+    g_vesa_mode   = mode;
+    g_vesa_bpp    = bpp;
+    g_vesa_pitch  = mi.pitch;
+    g_lfb_phys    = lfb_ok ? mi.lfb : 0;
+    g_vesa_banked = lfb_ok ? 0 : 1;
+    g_vesa_dacvbe = (bpp == 8 && (g_vbe_caps & 2)) ? 1 : 0;
+    if (g_vesa_banked) {
+        g_vesa_bankmode = VBANK_VBE;
+        if (bank_pref != 1 && g_is_paradise && mi.gran_kb == 4 && g_vesa_winmask != 2) {
+            g_vesa_bankmode = VBANK_WD;            /* porty PR0A: bez wyjscia do RM */
+            g_vesa_winmask  = 1;
+            wd_setup_bank();
+        }
+    } else {
+        g_vesa_bankmode = VBANK_LFB;
+    }
+    kprintf("VESA: tryb 0x%04X 640x480x%u pitch=%u %s LFB=0x%08lX okna A=%02X B=%02X gran=%uKB%s\n",
+            mode, bpp, mi.pitch,
+            lfb_ok ? "LFB" : (g_vesa_bankmode == VBANK_WD ? "banked(WD porty)" : "banked(VBE 4F05)"),
+            g_lfb_phys, mi.win_a, mi.win_b, mi.gran_kb, g_vesa_dacvbe ? " DAC=4F09" : "");
+    if (bpp == 8) vga_init_dac8();
+    return 1;
+}
+
+/* Bez VBE w BIOS: Paradise/WD90Cxx tryb 5Fh = 640x480x256 (512KB+), banki przez PR0A */
+static int wd_set_mode(void)
+{
+    union REGS r;
+    if (!g_is_paradise) return 0;
+    r.x.ax = 0x005F;
+    int86(0x10, &r, &r);
+    r.h.ah = 0x0F;
+    int86(0x10, &r, &r);
+    if ((r.h.al & 0x7F) != 0x5F) {
+        kprintf("WD: tryb 5Fh nie ustawiony (AL=%02X)\n", r.h.al);
+        return 0;
+    }
+    wd_setup_bank();
+    g_vesa_mode      = 0x5F;
+    g_vesa_bpp       = 8;
+    g_vesa_pitch     = 640;
+    g_lfb_phys       = 0;
+    g_vesa_banked    = 1;
+    g_vesa_bankmode  = VBANK_WD;
+    g_vesa_granshift = 4;                           /* PR0A w jednostkach 4KB */
+    g_vesa_winmask   = 1;
+    g_vesa_dacvbe    = 0;
+    kprintf("WD: natywny tryb 5Fh 640x480x8 (banki PR0A)\n");
+    vga_init_dac8();
+    return 1;
+}
 
 static void vesa_init(void)
 {
-    union REGS   r;
-    struct SREGS s;
-    unsigned     mib_seg;
-    unsigned char __far *mib;
-    unsigned short mode = 0x0112;   /* 640x480x24bpp */
-
-    /* Alokuj 256B na VESA Mode Info Block */
-    if (_dos_allocmem(16, &mib_seg) != 0) {
-        kprintf("VESA: alloc MIB failed\n");
-        return;
+    int want_bpp, force_banked, bank_pref;
+    read_display_ini(&want_bpp, &force_banked, &bank_pref);
+    g_is_paradise = detect_paradise();
+    if (g_is_paradise) kprintf("Karta: Paradise/Western Digital (C000:007D 'VGA=')\n");
+    if (bank_pref == 2 && g_is_paradise) {
+        if (wd_set_mode()) return;
     }
-    mib = MK_FP(mib_seg, 0);
-
-    /* INT 10h AX=4F01h CX=tryb, ES:DI=bufor mode info */
-    r.x.ax = 0x4F01;
-    r.x.cx = mode;
-    r.x.di = 0;
-    segread(&s);
-    s.es   = mib_seg;
-    int86x(0x10, &r, &r, &s);
-
-    if (r.x.ax != 0x004F) {
-        kprintf("VESA: 4F01h failed (ax=0x%04X), tryb 0x%04X\n", r.x.ax, mode);
-        _dos_freemem(mib_seg);
-        return;
+    vbe_probe();
+    if (want_bpp == 8) {
+        if (vbe_set_mode(8, force_banked, bank_pref)) return;
+        if (wd_set_mode()) return;
+        if (vbe_set_mode(24, force_banked, bank_pref)) return;
+        if (vbe_set_mode(32, force_banked, bank_pref)) return;
+    } else {
+        if (vbe_set_mode(24, force_banked, bank_pref)) return;
+        if (vbe_set_mode(32, force_banked, bank_pref)) return;
+        /* karty SVGA z 1992 r. (512KB-1MB VRAM): tylko 256 kolorow */
+        if (vbe_set_mode(8, force_banked, bank_pref)) return;
+        if (wd_set_mode()) return;
     }
-
-    /* PhysBasePtr na offsecie 0x28 w bloku MIB */
-    g_lfb_phys   = *(unsigned long  __far *)(mib + 0x28);
-    g_vesa_pitch = *(unsigned short __far *)(mib + 0x10);
-    kprintf("VESA MIB: LFB=0x%08lX pitch=%u\n", g_lfb_phys, g_vesa_pitch);
-
-    _dos_freemem(mib_seg);
-
-    /* INT 10h AX=4F02h BX=tryb (bez bit14 = banked mode dla shell)
-     * LFB wlaczamy pozniej przez vesa_set_lfb() przed wejsciem w PM. */
-    r.x.ax = 0x4F02;
-    r.x.bx = mode;   /* banked mode — 0xA000 window dostepny */
-    int86(0x10, &r, &r);
-
-    if (r.x.ax != 0x004F) {
-        kprintf("VESA: 4F02h failed (ax=0x%04X)\n", r.x.ax);
-        g_lfb_phys = 0;
-        return;
-    }
-    kprintf("VESA: tryb 0x%04X ustawiony (banked), LFB=0x%08lX pitch=%u\n",
-            mode, g_lfb_phys, g_vesa_pitch);
+    kprintf("GRAFIKA: brak trybu 640x480 (VBE ani WD) - ekran nie bedzie dzialal\n");
+    g_lfb_phys = 0;
 }
 
 /* Przelacz VESA na LFB mode (bit14) — wywolac przed wejsciem w PM */
 void vesa_set_lfb(void)
 {
     union REGS r;
+    if (g_vesa_banked || !g_lfb_phys) {
+        kprintf("VESA: tryb 0x%04X banked (okno 0xA000, %s)\n", g_vesa_mode,
+                g_vesa_bankmode == VBANK_WD ? "porty WD" : "INT 10h 4F05h");
+        if (g_vesa_bankmode == VBANK_WD) wd_setup_bank();
+        return;
+    }
     r.x.ax = 0x4F02;
-    r.x.bx = 0x0112 | 0x4000;   /* LFB mode */
+    r.x.bx = g_vesa_mode | 0x4000;   /* LFB mode */
     int86(0x10, &r, &r);
-    if (r.x.ax == 0x004F)
-        kprintf("VESA: LFB mode enabled\n");
+    if (r.x.ax == 0x004F) {
+        kprintf("VESA: LFB mode 0x%04X (%ubpp) enabled\n", g_vesa_mode, g_vesa_bpp);
+        if (g_vesa_bpp == 8) vga_init_dac8();
+    } else {
+        kprintf("VESA: LFB 4F02h failed (ax=0x%04X)\n", r.x.ax);
+    }
 }
 
 /* ============================================================
@@ -471,6 +771,27 @@ extern const char *shell_run(void);
 /* Pola KCB >= 512 dla KERNEL (patrz module.h, KCB_*) */
 static unsigned short g_trace;
 
+/* BLASTER=A220 I5 D1 H5 T6 -> KCB (port, DMA 8-bit, IRQ) dla MMSYSTEM */
+static void blaster_to_kcb(unsigned short __far *w)
+{
+    const char *b = getenv("BLASTER");
+    unsigned short port = 0, dma = 0xFFFF, irq = 0xFFFF;
+    if (b) {
+        while (*b) {
+            char c = (char)(*b & 0xDF);
+            if (c == 'A') port = (unsigned short)strtoul(b + 1, NULL, 16);
+            else if (c == 'D') dma = (unsigned short)atoi(b + 1);
+            else if (c == 'I') irq = (unsigned short)atoi(b + 1);
+            while (*b && *b != ' ') b++;
+            while (*b == ' ') b++;
+        }
+        kprintf("BLASTER: port=%X dma=%d irq=%d\n", port, (int)(short)dma, (int)(short)irq);
+    }
+    w[KCB_SB_PORT / 2] = port;
+    w[KCB_SB_DMA / 2]  = dma;
+    w[KCB_SB_IRQ / 2]  = irq;
+}
+
 static void kcb_set_ext(unsigned kcb_rm, int argc, char *argv[])
 {
     unsigned short __far *w = (unsigned short __far *)MK_FP(kcb_rm, 0);
@@ -489,6 +810,14 @@ static void kcb_set_ext(unsigned kcb_rm, int argc, char *argv[])
     w[KCB_APP_HEAP / 2]      = g_app_heap;
     w[KCB_APP_HEAPSTART / 2] = g_app_heapstart;
     w[KCB_TRACE / 2]         = g_trace;
+    w[KCB_VESA_BPP / 2]      = g_vesa_bpp;
+    w[KCB_VESA_PITCH / 2]    = g_vesa_pitch ? g_vesa_pitch : (g_vesa_bpp == 8 ? 640 : 1920);
+    w[KCB_VESA_BANKED / 2]   = g_vesa_banked;
+    w[KCB_VESA_BANKMODE / 2] = g_vesa_bankmode;
+    w[KCB_VESA_GRANSH / 2]   = g_vesa_granshift;
+    w[KCB_VESA_WINMASK / 2]  = g_vesa_winmask;
+    w[KCB_VESA_DACVBE / 2]   = g_vesa_dacvbe;
+    blaster_to_kcb(w);
     /* Katalog Windows: C:\WINDOWS jesli istnieje, inaczej katalog loadera */
     if (_dos_findfirst("C:\\WINDOWS", _A_SUBDIR, &ft) == 0 && (ft.attrib & _A_SUBDIR))
         _fstrcpy(c + KCB_WINDIR, "C:\\WINDOWS");

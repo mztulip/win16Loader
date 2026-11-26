@@ -24,6 +24,8 @@ typedef WORD           HBRUSH;
 typedef WORD           HCURSOR;
 typedef WORD           HDC;
 typedef WORD           HFONT;
+typedef WORD           HBITMAP;
+typedef WORD           HPALETTE;
 typedef WORD           HGDIOBJ;
 typedef DWORD          COLORREF;
 typedef LONG           LRESULT;
@@ -274,6 +276,10 @@ WORD   API GlobalAlloc(WORD, DWORD);
 WORD   API GlobalFree(WORD);
 LPVOID API GlobalLock(WORD);
 BOOL   API GlobalUnlock(WORD);
+WORD   API AllocSelector(WORD);
+DWORD  API GetSelectorBase(WORD);
+WORD   API SetSelectorBase(WORD, DWORD);
+WORD   API SetSelectorLimit(WORD, DWORD);
 void   API OutputDebugString(LPCSTR);
 int    API GetProfileString(LPCSTR, LPCSTR, LPCSTR, LPSTR, int);
 int    API _lopen(LPCSTR, int);
@@ -297,6 +303,7 @@ BOOL    API DestroyWindow(HWND);
 BOOL    API ShowWindow(HWND, int);
 BOOL    API EnableWindow(HWND, BOOL);
 HWND    API SetActiveWindow(HWND);
+HWND    API GetActiveWindow(void);
 HWND    API SetFocus(HWND);
 BOOL    API IsWindow(HWND);
 BOOL    API RegisterClass(const WNDCLASS __far *);
@@ -320,12 +327,20 @@ LRESULT API SendDlgItemMessage(HWND, int, WORD, WORD, LONG);
 int     API MessageBox(HWND, LPCSTR, LPCSTR, WORD);
 HCURSOR API LoadCursor(HINSTANCE, LPCSTR);
 void    API InvalidateRect(HWND, LPRECT, BOOL);
+HDC     API GetDC(HWND);
+int     API ReleaseDC(HWND, HDC);
 
 /* ---- GDI ---- */
 HANDLE  API GetStockObject(int);
 HFONT   API CreateFontIndirect(const LOGFONT __far *);
 BOOL    API DeleteObject(HGDIOBJ);
 HGDIOBJ API SelectObject(HDC, HGDIOBJ);
+HDC     API CreateCompatibleDC(HDC);
+BOOL    API DeleteDC(HDC);
+HBITMAP API CreateBitmap(int, int, BYTE, BYTE, LPVOID);
+HBRUSH  API CreateSolidBrush(COLORREF);
+HPALETTE API CreatePalette(const void __far *);
+int     API StretchDIBits(HDC, int, int, int, int, int, int, int, int, LPVOID, const void __far *, WORD, DWORD);
 
 /* ---- USER (prywatne) ---- */
 HICON  API UserIconFromDIB(BYTE __far *bi, DWORD size);

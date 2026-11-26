@@ -10,6 +10,14 @@ static POOL g_pool[10];
 static BYTE g_used_pen[256], g_used_brush[256], g_used_font[128], g_used_pal[32],
             g_used_bmp[512], g_used_rgn[96], g_used_dc[160];
 static BOOL g_inited;
+BYTE g_disp_bpp = 24;
+BYTE g_hw_bpp = 24;
+WORD g_hw_pitch = SCR_PITCH;
+BYTE g_hw_banked = 0;
+BYTE g_hw_bankmode = VBANK_LFB;
+BYTE g_hw_gransh = 0;
+BYTE g_hw_winmask = 1;
+BYTE g_hw_dacvbe = 0;
 
 #define COM1 0x3F8
 static BYTE inb(WORD p);
@@ -153,6 +161,29 @@ void gdi_init(void)
     WORD i;
     if (g_inited) return;
     g_inited = TRUE;
+    {
+        WORD hb = *(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_BPP);
+        WORD hp = *(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_PITCH);
+        WORD bk = *(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_BANKED);
+        if (hb == 8 || hb == 24 || hb == 32) g_hw_bpp = (BYTE)hb;
+        if (hp) g_hw_pitch = hp;
+        g_hw_banked = bk ? 1 : 0;
+        g_hw_bankmode = (BYTE)*(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_BANKMODE);
+        g_hw_gransh   = (BYTE)*(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_GRANSH);
+        g_hw_winmask  = (BYTE)*(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_WINMASK);
+        g_hw_dacvbe   = (BYTE)*(WORD __far *)MK_FP(SEL_KCB, KCB_VESA_DACVBE);
+        if (!g_hw_banked) g_hw_bankmode = VBANK_LFB;
+        else if (g_hw_bankmode == VBANK_LFB) g_hw_bankmode = VBANK_VBE;
+        if (!g_hw_winmask) g_hw_winmask = 1;
+        if (g_hw_bpp == 8) {
+            g_disp_bpp = 8;
+            vga_dac_init();
+        } else {
+            int bpp = (int)GetProfileInt("display", "bpp", 24);
+            if (bpp == 8 || bpp == 16 || bpp == 24) g_disp_bpp = (BYTE)bpp;
+        }
+        gsurf_init_screen();
+    }
     pool_init(OT_PEN,    sizeof(PENOBJ),    256, g_used_pen);
     pool_init(OT_BRUSH,  sizeof(BRUSHOBJ),  256, g_used_brush);
     pool_init(OT_FONT,   sizeof(FONTOBJ),   128, g_used_font);

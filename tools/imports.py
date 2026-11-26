@@ -17,6 +17,7 @@ SPEC = {
     'KEYBOARD': 'keyboard.drv16', 'WIN87EM': 'win87em.dll16', 'SOUND': 'sound.drv16',
     'LZEXPAND': 'lzexpand.dll16', 'CTL3D': 'ctl3d.dll16', 'CTL3DV2': 'ctl3dv2.dll16',
     'SYSTEM': 'system.drv16', 'MOUSE': 'mouse.drv16', 'DISPLAY': 'display.drv16',
+    'DISPDIB': 'dispdib.dll16', 'WING': 'wing.dll16',
 }
 ARGSZ = {'word': 2, 's_word': 2, 'long': 4, 'ptr': 4, 'segptr': 4, 'str': 4,
          'segstr': 4, 'wstr': 4}

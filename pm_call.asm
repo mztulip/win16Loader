@@ -148,6 +148,7 @@ extern _g_thunk_size
 extern _g_idt_phys
 
 extern _g_lfb_phys
+extern _g_vesa_bpp
 extern _g_font_phys
 extern _g_kcb_phys
 extern _g_ext_mem_kb
@@ -328,6 +329,8 @@ pm_call_app_:
     ; Lokalne kopie 32-bit globals dla pm32_entry (DS=SEL_DATASEG=code seg w PM)
     mov  eax, [_g_lfb_phys]
     mov  [cs:local_lfb_phys], eax
+    mov  ax, [_g_vesa_bpp]
+    mov  [cs:local_vesa_bpp], ax
     mov  eax, [_g_font_phys]
     mov  [cs:local_font_phys], eax
     mov  eax, [_g_ext_mem_kb]
@@ -404,6 +407,8 @@ pm32_entry:
     mov  eax, [local_lfb_phys]
     test eax, eax
     jz   .skip_draw
+    cmp  word [local_vesa_bpp], 24     ; ekran startowy rysowany w 24bpp
+    jne  .skip_draw
 
     mov  ax, SEL_VESA
     mov  es, ax
@@ -2143,6 +2148,7 @@ call_ptr        dw 0, 0
 init_ptr        dw 0, 0
 local_ndllinit  dw 0
 local_dllinit   times MAX_DLLINIT * 8 db 0
+local_vesa_bpp  dw 24  ; kopia g_vesa_bpp (8/24/32)
 local_lfb_phys  dd 0    ; kopia g_lfb_phys (dla pm32_entry w PM gdzie DS=SEL_DATASEG=code seg)
 local_font_phys dd 0    ; kopia g_font_phys
 local_ext_mem_kb dd 0   ; kopia g_ext_mem_kb (KB pamieci rozszerzonej)

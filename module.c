@@ -70,6 +70,7 @@ typedef struct {
     unsigned short __far *ent_off;   /* [max_ord] */
     unsigned char  __far *ent_seg;   /* [max_ord]: 0=brak, 0xFE=stala */
     unsigned char  __far *ent_flg;   /* [max_ord]: flagi wejscia (bit1 = shared data) */
+    unsigned char  seg_data[MAX_SEGS / 8]; /* bitmaska segmentow DATA (ns_flags & 1) */
     struct ALLOCLOG __far *log;      /* programy: przydzialy do ponownego uruchomienia */
 } MOD;
 
@@ -480,6 +481,13 @@ static int resolve_import(unsigned tmod, unsigned ord, TARGET *t)
             t->is_const = 1; t->sel = t->off = m->ent_off[ord];
             return 0;
         }
+        /* Eksport zmiennej w segmencie DATA: bezposredni wskaznik sel:off, nie thunk kodu */
+        if (es >= 1 && es <= m->nsegs && es <= MAX_SEGS &&
+            (m->seg_data[(es - 1u) >> 3] & (1u << ((es - 1u) & 7)))) {
+            t->sel = m->first_sel + (es - 1u) * 8u;
+            t->off = m->ent_off[ord];
+            return 0;
+        }
         if (get_thunk(tmod, ord, m->first_sel + (es - 1u) * 8u, m->ent_off[ord], 0, &th))
             return -1;
     } else {
@@ -626,6 +634,15 @@ static int is_system_name(const char *n)
     return !stricmp(n, "KERNEL") || !stricmp(n, "USER") || !stricmp(n, "GDI");
 }
 
+/* Nasze DLL systemowe kompilowane bez prologow eksportow Win16 (wymagaja thunka INT 3F z DS) */
+static int is_builtin_dll(const char *n)
+{
+    return is_system_name(n) ||
+           !stricmp(n, "SHELL") || !stricmp(n, "KEYBOARD") || !stricmp(n, "TOOLHELP") ||
+           !stricmp(n, "DDEML") || !stricmp(n, "VER") || !stricmp(n, "MMSYSTEM") ||
+           !stricmp(n, "COMMDLG") || !stricmp(n, "DISPDIB") || !stricmp(n, "WING");
+}
+
 static int mod_load(const char *name, const char *path_hint, int is_app);
 static int mod_load_named(const char *name, const char *path) { return mod_load(name, path, 0); }
 
@@ -705,6 +722,7 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
         for (i = 0; i < len; i++) mname[i] = (char)rn[1 + i];
         mname[len] = 0;
         if (name) { strncpy(mname, name, 9); mname[9] = 0; }
+        if (!is_app && is_builtin_dll(mname)) system = 1;
     }
     if (!_fullpath(full, path, sizeof(full))) strcpy(full, path);
     if (g_replay) idx = g_replay_idx;
@@ -818,6 +836,10 @@ static int mod_load(const char *name, const char *path_hint, int is_app)
     segtab = (NE_SEG_ENTRY __far *)_fmalloc(sizeof(NE_SEG_ENTRY) * (m->nsegs ? m->nsegs : 1));
     if (!segtab) { mlog("ERROR: brak pamieci\n"); fclose(f); return -1; }
     _fmemcpy(segtab, tmp + ne.ne_segtab, sizeof(NE_SEG_ENTRY) * m->nsegs);
+    memset(m->seg_data, 0, sizeof(m->seg_data));
+    for (i = 0; i < m->nsegs && i < MAX_SEGS; i++)
+        if (segtab[i].ns_flags & 1)
+            m->seg_data[i >> 3] |= (unsigned char)(1u << (i & 7));
 
     /* Nazwy modulow importowanych */
     nref = ne.ne_cmod > MAX_MODREFS ? MAX_MODREFS : ne.ne_cmod;

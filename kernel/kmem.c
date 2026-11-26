@@ -285,7 +285,7 @@ HGLOBAL API GlobalAlloc(WORD flags, DWORD size)
     }
     s = sel_alloc_run(n);
     if (!s) { xms_give(base, cap); return 0; }
-    desc_run(s, n, base, cap, 0x92);
+    desc_run(s, n, base, cap, 0xF2);
     g_sel[SIDX(s)].type  = ST_HEAD;
     g_sel[SIDX(s)].base  = base;
     g_sel[SIDX(s)].size  = size;
@@ -469,7 +469,7 @@ DWORD API GlobalDOSAlloc(DWORD size)
     r->ax = 0x4800;
     r->bx = (WORD)((size + 15) >> 4);
     if (rm_int21() || (r->flags & CF_FLAG)) return 0;
-    s = alias_selector((DWORD)r->ax << 4, size, 0x92);
+    s = alias_selector((DWORD)r->ax << 4, size, 0xF2);
     if (!s) return 0;
     i = SIDX(s);
     g_sel[i].type = ST_DOS;
@@ -526,7 +526,7 @@ static WORD alias_of(WORD src, BYTE access)
 }
 
 /* ordinal 170 */
-WORD API AllocCStoDSAlias(WORD cs) { return alias_of(cs, 0x92); }
+WORD API AllocCStoDSAlias(WORD cs) { return alias_of(cs, 0xF2); }
 /* ordinal 171 */
 WORD API AllocDStoCSAlias(WORD ds) { return alias_of(ds, 0x9A); }
 
@@ -535,7 +535,7 @@ WORD API PrestoChangoSelector(WORD src, WORD dst)
 {
     BYTE __far *d = (BYTE __far *)MK_FP(SEL_GDT_ACCESS, dst & ~7);
     kmemcpy(d, MK_FP(SEL_GDT_ACCESS, src & ~7), 8);
-    d[5] = (BYTE)((d[5] & 0x08) ? 0x92 : 0x9A);
+    d[5] = (BYTE)((d[5] & 0x08) ? 0xF2 : 0x9A);
     return dst;
 }
 

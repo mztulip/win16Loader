@@ -63,6 +63,19 @@
 #define KCB_APP_HEAP      532   /* WORD rozmiar local heap apki (ne_heap) */
 #define KCB_APP_HEAPSTART 534   /* WORD offset poczatku local heap w DGROUP apki */
 #define KCB_TRACE         536   /* WORD !=0: trace wywolan API (opcja -t loadera) */
+#define KCB_VESA_BPP      556   /* WORD glebia trybu VESA: 8 albo 24 */
+#define KCB_VESA_PITCH    558   /* WORD BytesPerScanLine z VESA MIB */
+#define KCB_VESA_BANKED   560   /* WORD !=0: tryb banked 0xA000 (VBE 1.2 bez LFB) */
+#define KCB_VESA_BANKMODE 562   /* WORD VBANK_*: sposob przelaczania bankow okna 0xA000 */
+#define KCB_VESA_GRANSH   564   /* WORD pozycja okna = (offset >> 16) << GRANSH (gran. okna) */
+#define KCB_VESA_WINMASK  566   /* WORD okna VBE przelaczane razem: bit0=A, bit1=B */
+#define KCB_VESA_DACVBE   568   /* WORD !=0: paleta tylko przez VBE 4F09h (DAC nie-VGA) */
+#define KCB_SB_PORT       570   /* WORD port Sound Blaster z BLASTER (A220), 0 = domyslny */
+#define KCB_SB_DMA        572   /* WORD kanal DMA 8-bit z BLASTER (D1), 0xFFFF = domyslny */
+#define KCB_SB_IRQ        574   /* WORD IRQ z BLASTER (I5), 0xFFFF = brak */
+#define VBANK_LFB         0     /* LFB, bez bankow */
+#define VBANK_VBE         1     /* INT 10h AX=4F05h (przez odbicie do RM) */
+#define VBANK_WD          2     /* Paradise/WD90Cxx: PR0A (3CEh idx 09h), jednostki 4KB */
 #define KCB_WINDIR        600   /* char[64] katalog Windows (WIN.INI) */
 #define KCB_SYSDIR        664   /* char[64] katalog systemowy (loader) */
 #define KCB_CMDLINE       728   /* char[128] argumenty apki */
