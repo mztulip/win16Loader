@@ -1124,8 +1124,17 @@ static unsigned g_sel_limit;
 
 unsigned long mod_xms_end(void)
 {
-    unsigned long e = ((g_xms_next + 0xFFFUL) & ~0xFFFUL) + LATE_XMS;
-    if (e > g_xms_limit) e = (g_xms_next + 0xFFFUL) & ~0xFFFUL;     /* malo RAM: bez zapasu */
+    /* Zapas na moduly ladowane w trakcie pracy: 1/8 wolnej pamieci, 256KB..2MB. Stale 2MB
+     * zjadalo cala sterte na 4MB RAM (Siemens Nixdorf PCD-4ND) i program nie mial pamieci. */
+    unsigned long base = (g_xms_next + 0xFFFUL) & ~0xFFFUL;
+    unsigned long late = 0, e;
+    if (g_xms_limit > base) {
+        late = ((g_xms_limit - base) / 8UL) & ~0xFFFUL;
+        if (late > LATE_XMS) late = LATE_XMS;
+        if (late < 0x40000UL) late = 0x40000UL;
+    }
+    e = base + late;
+    if (e > g_xms_limit) e = base;                                   /* malo RAM: bez zapasu */
     g_xms_limit = e;
     return e;
 }

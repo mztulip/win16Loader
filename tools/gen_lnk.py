@@ -16,8 +16,10 @@ from imports import load_spec, WINE
 PRIVATE = {
     'GDI': {'GdiMoveCursor': 900, 'GdiShowCursor': 901, 'GdiSetCursor': 902,
             'GdiCursorDefault': 903, 'GdiResetCursor': 904, 'GdiCreateWindowDC': 910, 'GdiSetDCVis': 911,
-            'GdiIntersectVis': 912, 'GdiDCWindow': 913, 'GdiGetRgnRects': 914, 'GdiTaskExit': 915},
+            'GdiIntersectVis': 912, 'GdiDCWindow': 913, 'GdiGetRgnRects': 914, 'GdiTaskExit': 915,
+            'GdiSetDeleteHook': 916},
     'USER': {'UserIconFromDIB': 950, 'UserIconSize': 951, 'UserTaskExit': 952, 'UserResetCursor': 953},
+    'WING': {'WinGDeleteHook': 1100},
 }
 # Dodatkowe ordinale wskazujace na te sama funkcje: nazwa_eksportu -> funkcja
 ALIAS = {

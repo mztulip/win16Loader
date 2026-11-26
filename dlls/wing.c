@@ -53,6 +53,10 @@ typedef struct {
 } WINGBMP;
 
 static WINGBMP g_bmps[MAX_WING_BMPS];
+
+HANDLE  API GetModuleHandle(LPCSTR name);
+FARPROC API GetProcAddress(HANDLE h, LPCSTR name);
+void    API GdiSetDeleteHook(FARPROC f);
 static HBITMAP g_probe_bmp = 0;
 
 BOOL API WinGBitBlt(HDC hdcDest, int xDest, int yDest, int wDest, int hDest,
@@ -88,9 +92,36 @@ static WINGBMP __far *find_by_dc(HDC hdc)
 }
 
 /* ordinal 1001 */
+/* Prywatne WING.1100, wolane przez GDI z DeleteObject (GdiSetDeleteHook): zwolnij bufor
+ * pikseli bitmapy WinG od razu, a nie dopiero gdy GDI odda ten sam uchwyt kolejnej bitmapie. */
+void API WinGDeleteHook(HBITMAP h)
+{
+    int i;
+    for (i = 0; i < MAX_WING_BMPS; i++) {
+        if (g_bmps[i].hbm == h) {
+            if (g_bmps[i].hbits) GlobalFree(g_bmps[i].hbits);
+            if (g_bmps[i].hbi) GlobalFree(g_bmps[i].hbi);
+            w_memset(&g_bmps[i], 0, sizeof(g_bmps[i]));
+            break;
+        }
+    }
+}
+
+static void hook_install(void)
+{
+    static BOOL done;
+    if (!done) {
+        FARPROC f = GetProcAddress(GetModuleHandle("WING"), (LPCSTR)1100L);
+        if (f) GdiSetDeleteHook(f);
+        done = TRUE;
+    }
+}
+
 HDC API WinGCreateDC(void)
 {
-    HDC dc = CreateCompatibleDC(0);
+    HDC dc;
+    hook_install();
+    dc = CreateCompatibleDC(0);
     dbg("WING: WinGCreateDC -> "); dbg_hex(dc, 4); dbg("\n");
     return dc;
 }

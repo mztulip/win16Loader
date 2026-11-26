@@ -354,6 +354,12 @@ HGDIOBJ API SelectObject(HDC hdc, HGDIOBJ h)
 }
 
 /* ordinal 69 */
+/* Prywatne GDI.916: powiadomienie o usuwaniu bitmapy (WING.DLL zwalnia wtedy bufor pikseli
+ * WinG - bez tego kazde DeleteObject+WinGCreateBitmap gubilo ~300KB, co na 4MB RAM konczylo gre) */
+typedef void (API *DELHOOK)(WORD h);
+static DELHOOK g_del_hook;
+void API GdiSetDeleteHook(LPVOID f) { g_del_hook = (DELHOOK)f; }
+
 BOOL API DeleteObject(HGDIOBJ h)
 {
     BYTE t = obj_type(h);
@@ -363,6 +369,7 @@ BOOL API DeleteObject(HGDIOBJ h)
         BMPOBJ __far *b = (BMPOBJ __far *)obj_ptr(h, OT_BITMAP);
         if (b->selected) return FALSE;
         if (b->mem) GlobalFree(b->mem);
+        if (g_del_hook) g_del_hook(h);
     } else if (t == OT_BRUSH) {
         BRUSHOBJ __far *b = (BRUSHOBJ __far *)obj_ptr(h, OT_BRUSH);
         if (b->patmem) GlobalFree(b->patmem);
