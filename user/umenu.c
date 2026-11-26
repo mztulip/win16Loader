@@ -594,10 +594,31 @@ int menu_popup_height(HMENU hm)
 /* Otwarte poziomy menu: podmenu sprawdza, czy mysz nie przeszla na pozycje rodzica */
 #define MAX_MENU_DEPTH 8
 #define MENU_TO_PARENT (-3)                   /* podmenu zamkniete: mysz jest nad rodzicem */
+#define MENU_BAR_SWITCH (-4)                  /* przejscie mysza na inna pozycje paska menu */
 static HWND  g_lvw[MAX_MENU_DEPTH];
 static HMENU g_lvm[MAX_MENU_DEPTH];
 static int   g_lvs[MAX_MENU_DEPTH];           /* pozycja, ktora otworzyla kolejny poziom */
 static int   g_depth;
+static HWND  g_bar_hwnd;
+static HDC   g_bar_dc;
+static int   g_bar_sel = -1;
+static int   g_bar_next = -1;
+
+static int bar_hit(HWND h, HDC dc, int sx, int sy)
+{
+    WND __far *w = WP(h);
+    MENU __far *m = w ? mptr(w->id) : 0;
+    int i;
+    if (!w || !m) return -1;
+    for (i = 0; i < (int)m->n; i++) {
+        RECT r;
+        POINT p;
+        bar_item_rect(h, dc, i, (LPRECT)&r);
+        p.x = sx - w->wr.left; p.y = sy - w->wr.top;
+        if (PtInRect((LPRECT)&r, p)) return i;
+    }
+    return -1;
+}
 
 static BOOL over_parent(int depth, int x, int y)
 {
@@ -616,7 +637,7 @@ static BOOL over_parent(int depth, int x, int y)
 static BOOL sub_result(HWND pw, int result)
 {
     if (result == MENU_TO_PARENT) post_msg(pw, WM_MOUSEMOVE, 0, 0);
-    return result > 0;
+    return result > 0 || result == MENU_BAR_SWITCH;
 }
 
 int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
@@ -651,6 +672,10 @@ int menu_track_popup(HMENU hm, int x, int y, HWND owner, BOOL sys)
             if (hit >= 0 || mx - mx0 > 4 || mx0 - mx > 4 || my - my0 > 4 || my0 - my > 4)
                 moved = TRUE;
             if (hit == -2 && over_parent(depth, mx, my)) { result = MENU_TO_PARENT; break; }
+            if (hit == -2 && g_bar_hwnd == owner) {
+                int bi = bar_hit(g_bar_hwnd, g_bar_dc, mx, my);
+                if (bi >= 0 && bi != g_bar_sel) { g_bar_next = bi; result = MENU_BAR_SWITCH; break; }
+            }
             if (hit >= 0 && hit != sel) {
                 sel = hit;
                 popup_select(pw, sel);
@@ -770,8 +795,11 @@ void menu_track_bar(HWND h, int x, int y, WORD key)
         if (sel >= (int)m->n) { ReleaseDC(h, dc); return; }
     }
     send_msg(h, WM_INITMENU, w->id, 0);
+    g_bar_hwnd = h;
+    g_bar_dc = dc;
     for (;;) {
         RECT r;
+        g_bar_sel = sel;
         draw_bar_item(h, dc, sel, TRUE);
         bar_item_rect(h, dc, sel, (LPRECT)&r);
         if (m->it[sel].flags & MF_POPUP) {
@@ -782,20 +810,17 @@ void menu_track_bar(HWND h, int x, int y, WORD key)
         draw_bar_item(h, dc, sel, FALSE);
         if (cmd == -1) { sel = (sel + m->n - 1) % m->n; continue; }
         if (cmd == -2) { sel = (sel + 1) % m->n; continue; }
+        if (cmd == MENU_BAR_SWITCH) { sel = g_bar_next; continue; }
         /* klik w inna pozycje paska podczas otwartego menu */
         if (cmd == 0 && (mouse_btn() & 1)) {
-            int mx2 = mouse_x() - w->wr.left, my2 = mouse_y() - w->wr.top;
-            for (i = 0; i < (int)m->n; i++) {
-                RECT r2;
-                POINT p;
-                bar_item_rect(h, dc, i, (LPRECT)&r2);
-                p.x = mx2; p.y = my2;
-                if (PtInRect((LPRECT)&r2, p)) break;
-            }
-            if (i < (int)m->n && i != sel) { sel = i; continue; }
+            i = bar_hit(h, dc, mouse_x(), mouse_y());
+            if (i >= 0 && i != sel) { sel = i; continue; }
         }
         break;
     }
+    g_bar_hwnd = 0;
+    g_bar_dc = 0;
+    g_bar_sel = -1;
     ReleaseDC(h, dc);
     send_msg(h, WM_MENUSELECT, 0, MAKELONG(0xFFFF, 0));
     if (cmd > 0) post_msg(h, WM_COMMAND, cmd, 0);
